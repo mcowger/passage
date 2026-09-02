@@ -24,6 +24,7 @@ references, not UI assets to copy.
 | Pi-Web | `../pi-web/docs/screenshot2.png` | Readable hybrid chat, compact thinking/tool cards, persistent composer, file explorer and inspector. |
 | Pi-Web | `../pi-web/components/MessageView.tsx` | Tool call/result pairing, thinking disclosure, embedded diffs, and outcome-focused transcript rendering. |
 | Pi-Web | `../pi-web/components/AppShell.tsx` | Responsive shell, resizable inspector, and chat-first mobile substitutions. |
+| OpenChamber | Live instance study; see [OPENCHAMBER_UI_ANALYSIS.md](OPENCHAMBER_UI_ANALYSIS.md) and `screenshots/` | Uniform compact rows with in-place expansion, tone-based quiet cards, status badges paired with text, header context ring, right-rail panel surfaces. |
 
 ## Decided UI direction
 
