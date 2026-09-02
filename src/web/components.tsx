@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Project, Workspace, WorkspaceSnapshot } from "../shared/domain/workspaces.ts";
 import type { AgentCapabilities, AgentHistory, AgentSummary, TimelineItem } from "../shared/domain/agents.ts";
+import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import { MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentImage } from "../shared/protocol/agents.ts";
 import type { WorkspaceApi } from "./api.ts";
 
@@ -8,6 +9,7 @@ type SidebarProps = {
   data: WorkspaceSnapshot;
   selected?: string;
   selectedAgent?: string;
+  selectedTerminal?: string;
   open: boolean;
   onClose: () => void;
   onSelect: (id: string) => void;
@@ -16,9 +18,11 @@ type SidebarProps = {
   onNewWorktree?: () => void;
   agents: AgentSummary[];
   onSelectAgent: (id: string) => void;
+  terminals: TerminalSummary[];
+  onSelectTerminal: (id: string) => void;
 };
 
-export function Sidebar({ data, selected, selectedAgent, open, onClose, onSelect, onNewProject, onNewWorkspace, onNewWorktree, agents, onSelectAgent }: SidebarProps) {
+export function Sidebar({ data, selected, selectedAgent, selectedTerminal, open, onClose, onSelect, onNewProject, onNewWorkspace, onNewWorktree, agents, onSelectAgent, terminals, onSelectTerminal }: SidebarProps) {
   const activeProjects = data.projects.filter((project) => !project.archivedAt);
   return (
     <aside className={`sidebar ${open ? "drawer-open" : ""}`} aria-label="Projects and workspaces">
@@ -43,9 +47,12 @@ export function Sidebar({ data, selected, selectedAgent, open, onClose, onSelect
             workspaces={data.workspaces}
             selected={selected}
             selectedAgent={selectedAgent}
+            selectedTerminal={selectedTerminal}
             onSelect={onSelect}
             agents={selected ? agents : []}
             onSelectAgent={onSelectAgent}
+            terminals={selected ? terminals : []}
+            onSelectTerminal={onSelectTerminal}
           />
         ))}
       </div>
@@ -55,14 +62,17 @@ export function Sidebar({ data, selected, selectedAgent, open, onClose, onSelect
   );
 }
 
-function ProjectRow({ project, workspaces, selected, selectedAgent, onSelect, agents, onSelectAgent }: {
+function ProjectRow({ project, workspaces, selected, selectedAgent, selectedTerminal, onSelect, agents, onSelectAgent, terminals, onSelectTerminal }: {
   project: Project;
   workspaces: Workspace[];
   selected?: string;
   selectedAgent?: string;
+  selectedTerminal?: string;
   onSelect: (id: string) => void;
   agents: AgentSummary[];
   onSelectAgent: (id: string) => void;
+  terminals: TerminalSummary[];
+  onSelectTerminal: (id: string) => void;
 }) {
   const rows = workspaces.filter((workspace) => workspace.projectId === project.id);
   return (
@@ -75,7 +85,7 @@ function ProjectRow({ project, workspaces, selected, selectedAgent, onSelect, ag
       {rows.map((workspace) => (
         <div className="workspace-group" key={workspace.id}>
           <button
-            className={`workspace-row ${workspace.id === selected && !selectedAgent ? "selected" : ""}`}
+            className={`workspace-row ${workspace.id === selected && !selectedAgent && !selectedTerminal ? "selected" : ""}`}
             onClick={() => onSelect(workspace.id)}
           >
             <span className="status-dot" aria-label={workspace.archivedAt ? "Archived" : "Ready"}>●</span>
@@ -96,6 +106,17 @@ function ProjectRow({ project, workspaces, selected, selectedAgent, onSelect, ag
               <small>{agent.status}</small>
             </button>
           ))}
+          {workspace.id === selected && terminals.filter((term) => term.workspaceId === workspace.id).map((term) => (
+            <button
+              className={`agent-row ${term.id === selectedTerminal ? "selected" : ""}`}
+              key={term.id}
+              onClick={() => onSelectTerminal(term.id)}
+            >
+              <span aria-hidden="true">&gt;_</span>
+              <span>{term.title}</span>
+              <small>{term.status}</small>
+            </button>
+          ))}
         </div>
       ))}
       {rows.length === 0 && <p className="muted project-empty">No workspaces</p>}
@@ -109,10 +130,12 @@ type WorkspaceOverviewProps = {
   api: WorkspaceApi;
   refresh: () => Promise<void>;
   onCreateAgent: () => Promise<void>;
+  onCreateTerminal?: () => Promise<void>;
   onOpenExplorer?: () => void;
   onOpenChanges?: () => void;
   onOpenDiff?: () => void;
   onOpenAgent?: () => void;
+  onOpenTerminal?: () => void;
 };
 
 export function WorkspaceOverview({
@@ -121,10 +144,12 @@ export function WorkspaceOverview({
   api,
   refresh,
   onCreateAgent,
+  onCreateTerminal,
   onOpenExplorer,
   onOpenChanges,
   onOpenDiff,
   onOpenAgent,
+  onOpenTerminal,
 }: WorkspaceOverviewProps) {
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(workspace?.displayLabel ?? "");
@@ -256,6 +281,23 @@ export function WorkspaceOverview({
           <h2>Diff Viewer</h2>
           <p>Structured unified and side-by-side Git diffs.</p>
           {onOpenDiff && <button className="secondary" onClick={onOpenDiff}>Inspect Diffs ↗</button>}
+        </article>
+        <article>
+          <span className="card-icon" aria-hidden="true">&gt;_</span>
+          <h2>Interactive Terminal</h2>
+          <p>Persistent PTY shell attached directly to the daemon.</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            {onCreateTerminal && (
+              <button className="primary" onClick={() => void onCreateTerminal()} disabled={busy}>
+                New terminal
+              </button>
+            )}
+            {onOpenTerminal && (
+              <button className="secondary" onClick={onOpenTerminal}>
+                Open Terminal ↗
+              </button>
+            )}
+          </div>
         </article>
       </div>
 

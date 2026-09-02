@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { AgentCapabilities, AgentHistory, AgentSummary, TimelineItem, ToolActivity } from "../shared/domain/agents.ts";
 import type { JsonValue } from "../shared/protocol/index.ts";
 import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.ts";
+import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import { createWorkspaceApi } from "./api.ts";
 import { subscribeAgent } from "./agentSocket.ts";
 import { AgentPanel, Sidebar, WorkspaceOverview } from "./components.tsx";
@@ -10,6 +11,7 @@ import { ExplorerPanel } from "./components/ExplorerPanel.tsx";
 import { ChangesPanel } from "./components/ChangesPanel.tsx";
 import { EditorPanel } from "./components/EditorPanel.tsx";
 import { DiffPanel } from "./components/DiffPanel.tsx";
+import { TerminalPanel } from "./components/TerminalPanel.tsx";
 import { NewWorktreeModal } from "./components/NewWorktreeModal.tsx";
 import "./styles.css";
 
@@ -125,7 +127,7 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
 }
 
 type FormKind = "project" | "workspace" | "worktree";
-type TabKind = "overview" | "agent" | "explorer" | "changes" | "editor" | "diff";
+type TabKind = "overview" | "agent" | "terminal" | "explorer" | "changes" | "editor" | "diff";
 
 type FormDialogProps = {
   title: string;
@@ -161,10 +163,12 @@ function App() {
   const [formError, setFormError] = useState("");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>();
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
+  const [selectedTerminalId, setSelectedTerminalId] = useState<string>();
   const [activeTab, setActiveTab] = useState<TabKind>("overview");
   const [openEditorPath, setOpenEditorPath] = useState<string>();
   const [openDiffPath, setOpenDiffPath] = useState<string>();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [terminals, setTerminals] = useState<TerminalSummary[]>([]);
   const [history, setHistory] = useState<AgentHistory>();
   const [capabilities, setCapabilities] = useState<AgentCapabilities>();
   const [agentError, setAgentError] = useState("");
@@ -207,6 +211,17 @@ function App() {
     }
   }, [api]);
 
+  const loadTerminals = useCallback(async (workspaceId: string, selectFirst = true) => {
+    try {
+      const next = await api.listTerminals(workspaceId);
+      setTerminals(next);
+      setSelectedTerminalId((current) => {
+        if (current && next.some((t) => t.id === current)) return current;
+        return selectFirst ? next[0]?.id : undefined;
+      });
+    } catch {}
+  }, [api]);
+
   const loadAgent = useCallback(async (agentId: string, isInitial = false) => {
     const generation = ++agentLoadGeneration.current;
     if (isInitial) setAgentLoading(true);
@@ -235,14 +250,19 @@ function App() {
     agentsLoadGeneration.current += 1;
     agentLoadGeneration.current += 1;
     setAgents([]);
+    setTerminals([]);
     setSelectedAgentId(undefined);
+    setSelectedTerminalId(undefined);
     setHistory(undefined);
     setCapabilities(undefined);
     setOpenEditorPath(undefined);
     setOpenDiffPath(undefined);
     setActiveTab("overview");
-    if (selectedWorkspaceId) void loadAgents(selectedWorkspaceId);
-  }, [loadAgents, selectedWorkspaceId]);
+    if (selectedWorkspaceId) {
+      void loadAgents(selectedWorkspaceId);
+      void loadTerminals(selectedWorkspaceId);
+    }
+  }, [loadAgents, loadTerminals, selectedWorkspaceId]);
 
   useEffect(() => {
     if (!selectedAgentId) return;
@@ -293,6 +313,16 @@ function App() {
     }
   };
 
+  const createTerminal = async () => {
+    if (!workspace) return;
+    try {
+      const created = await api.createTerminal(workspace.id);
+      setTerminals((current) => [...current, created]);
+      setSelectedTerminalId(created.id);
+      setActiveTab("terminal");
+    } catch {}
+  };
+
   const archiveSelectedAgent = async () => {
     if (!selectedAgentId || !selectedWorkspaceId) return;
     try {
@@ -314,12 +344,21 @@ function App() {
     setDrawerOpen(false);
   };
 
+  const handleSelectTerminal = (id: string) => {
+    setSelectedTerminalId(id);
+    setActiveTab("terminal");
+    setDrawerOpen(false);
+  };
+
   const handleSelectWorkspace = (id: string) => {
     setSelectedWorkspaceId(id);
     setSelectedAgentId(undefined);
+    setSelectedTerminalId(undefined);
     setActiveTab("overview");
     setDrawerOpen(false);
   };
+
+  const selectedTerminal = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
 
   return (
     <div className="app">
@@ -331,6 +370,7 @@ function App() {
           data={snapshot}
           selected={selectedWorkspaceId}
           selectedAgent={selectedAgentId}
+          selectedTerminal={selectedTerminalId}
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
           onSelect={handleSelectWorkspace}
@@ -339,6 +379,8 @@ function App() {
           onNewWorktree={() => { setFormError(""); setForm("worktree"); }}
           agents={agents}
           onSelectAgent={handleSelectAgent}
+          terminals={terminals}
+          onSelectTerminal={handleSelectTerminal}
         />
       ) : (
         <aside className="sidebar loading">Loading Passage…</aside>
@@ -371,6 +413,15 @@ function App() {
                   }}
                 >
                   ◈ Agent {agents.length > 0 && <span className="tab-badge">{agents.length}</span>}
+                </button>
+                <button
+                  className={`nav-tab ${activeTab === "terminal" ? "active" : ""}`}
+                  onClick={() => {
+                    if (!selectedTerminalId && terminals[0]) setSelectedTerminalId(terminals[0].id);
+                    setActiveTab("terminal");
+                  }}
+                >
+                  &gt;_ Terminal {terminals.length > 0 && <span className="tab-badge">{terminals.length}</span>}
                 </button>
                 <button
                   className={`nav-tab ${activeTab === "explorer" ? "active" : ""}`}
@@ -433,9 +484,14 @@ function App() {
                   api={api}
                   refresh={async () => { await refreshWorkspaces(); }}
                   onCreateAgent={createAgent}
+                  onCreateTerminal={createTerminal}
                   onOpenAgent={() => {
                     if (!selectedAgentId && agents[0]) setSelectedAgentId(agents[0].id);
                     setActiveTab("agent");
+                  }}
+                  onOpenTerminal={() => {
+                    if (!selectedTerminalId && terminals[0]) setSelectedTerminalId(terminals[0].id);
+                    setActiveTab("terminal");
                   }}
                   onOpenExplorer={() => setActiveTab("explorer")}
                   onOpenChanges={() => setActiveTab("changes")}
@@ -444,6 +500,29 @@ function App() {
                     setActiveTab("diff");
                   }}
                 />
+              )}
+
+              {activeTab === "terminal" && (
+                selectedTerminal ? (
+                  <TerminalPanel
+                    key={selectedTerminal.id}
+                    terminal={selectedTerminal}
+                    api={api}
+                    onClose={() => {
+                      setActiveTab("overview");
+                    }}
+                    onTerminated={() => {
+                      void loadTerminals(workspace.id);
+                    }}
+                  />
+                ) : (
+                  <div className="empty">
+                    <span className="empty-icon" aria-hidden="true">&gt;_</span>
+                    <h1>No active terminal</h1>
+                    <p>Launch an interactive PTY shell in this workspace.</p>
+                    <button className="primary" onClick={() => void createTerminal()}>Launch terminal</button>
+                  </div>
+                )
               )}
 
               {activeTab === "agent" && (

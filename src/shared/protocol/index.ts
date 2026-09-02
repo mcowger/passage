@@ -85,3 +85,4 @@ export type PassageCommandEnvelope = CommandEnvelope;
 export type PassageEventEnvelope = EventEnvelope;
 
 export * from "./agents.ts";
+export * from "./terminals.ts";

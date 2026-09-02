@@ -7,6 +7,7 @@ import {
   type WorkspaceSnapshot,
 } from "../shared/domain/workspaces.ts";
 import { agentCapabilitiesSchema, agentHistoryResponseSchema, agentSummarySchema, type AgentCapabilities, type AgentHistoryResponse, type AgentSummary } from "../shared/domain/agents.ts";
+import { terminalSummarySchema, type CreateTerminalInput, type TerminalSummary } from "../shared/domain/terminals.ts";
 import type { AgentImage } from "../shared/protocol/agents.ts";
 import { z } from "zod";
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
@@ -115,5 +116,20 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     async setModel(id: string, provider: string, modelId: string): Promise<AgentSummary> { return agentSummarySchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/model`, { method: "POST", body: JSON.stringify({ provider, modelId }) })); },
     async setThinking(id: string, level: string): Promise<AgentSummary> { return agentSummarySchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/thinking`, { method: "POST", body: JSON.stringify({ level }) })); },
     async archiveAgent(id: string): Promise<void> { okResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/archive`, { method: "POST" })); },
+    async listTerminals(workspaceId: string): Promise<TerminalSummary[]> {
+      return terminalSummarySchema.array().parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/terminals`));
+    },
+    async createTerminal(workspaceId: string, input?: CreateTerminalInput): Promise<TerminalSummary> {
+      return terminalSummarySchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/terminals`, {
+        method: "POST",
+        body: JSON.stringify(input ?? {}),
+      }));
+    },
+    async getTerminal(terminalId: string): Promise<TerminalSummary> {
+      return terminalSummarySchema.parse(await request(`/api/terminals/${encodeURIComponent(terminalId)}`));
+    },
+    async deleteTerminal(terminalId: string): Promise<void> {
+      okResponseSchema.parse(await request(`/api/terminals/${encodeURIComponent(terminalId)}`, { method: "DELETE" }));
+    },
   };
 }

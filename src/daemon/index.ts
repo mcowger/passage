@@ -9,12 +9,14 @@ import { createWorkspaceRoutes } from "./http/workspaces.ts";
 import { createGitRoutes } from "./http/git.ts";
 import { createFileRoutes } from "./http/files.ts";
 import { createWorktreeRoutes } from "./http/worktrees.ts";
+import { createTerminalRoutes } from "./http/terminals.ts";
 import { MetadataRepositories, MetadataStore } from "./metadata/index.ts";
 import { IdempotencyCache } from "./replay/index.ts";
 import { WorkspaceService } from "./workspaces/service.ts";
 import { GitService } from "./workspaces/git.ts";
 import { FileService } from "./workspaces/files.ts";
 import { WorktreeService } from "./workspaces/worktrees.ts";
+import { TerminalManager } from "./terminals/manager.ts";
 import {
   PROTOCOL_VERSION,
   agentMessagePayloadSchema,
@@ -22,7 +24,9 @@ import {
   agentSubscriptionPayloadSchema,
   agentTargetPayloadSchema,
   agentThinkingPayloadSchema,
+  clientTerminalMessageSchema,
   commandEnvelopeSchema,
+  decodeBinaryFrame,
   opaqueIdSchema,
   type Acknowledgement,
   type CommandEnvelope,
@@ -47,6 +51,7 @@ const workspaceService = new WorkspaceService(repositories);
 const gitService = new GitService();
 const fileService = new FileService(workspaceService);
 const worktreeService = new WorktreeService(repositories, gitService);
+const terminalManager = new TerminalManager(workspaceService);
 const agentService = new AgentService(repositories, {
   sessionsRoot: process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(metadataPath), "sessions"),
 });
@@ -63,19 +68,23 @@ app.route("/", createWorkspaceRoutes(workspaceService));
 app.route("/", createGitRoutes(workspaceService, gitService));
 app.route("/", createFileRoutes(fileService));
 app.route("/", createWorktreeRoutes(worktreeService));
+app.route("/", createTerminalRoutes(terminalManager));
 app.route("/", createAgentRoutes(agentService));
 
 function protocolError(requestId: string, code: string, message: string): ProtocolError {
   return { version: PROTOCOL_VERSION, requestId, ok: false, error: { code, message } };
 }
 
-type SocketData = { subscriptions: Map<string, () => boolean> };
+type SocketData =
+  | { kind: "agent"; subscriptions: Map<string, () => boolean> }
+  | { kind: "terminal"; terminalId: string; clientId: string };
 
 function sendSocketJson(socket: Bun.ServerWebSocket<SocketData>, value: unknown): void {
   if (socket.sendText(JSON.stringify(value)) <= 0) socket.close(1013, "client cannot receive events");
 }
 
 async function handleCommand(command: CommandEnvelope, socket: Bun.ServerWebSocket<SocketData>): Promise<ProtocolResponse> {
+  if (socket.data.kind !== "agent") return protocolError(command.requestId, "invalid-channel", "Terminal sockets do not accept agent commands");
   if (command.channel === "daemon" && command.type === "ping") {
     return { version: PROTOCOL_VERSION, requestId: command.requestId, ok: true } satisfies Acknowledgement;
   }
@@ -158,15 +167,61 @@ export const server = Bun.serve<SocketData>({
     "/": homepage,
   },
   fetch(request, server) {
-    if (new URL(request.url).pathname === "/ws") {
-      return server.upgrade(request, { data: { subscriptions: new Map() } })
+    const url = new URL(request.url);
+    if (url.pathname === "/ws") {
+      return server.upgrade(request, { data: { kind: "agent", subscriptions: new Map() } })
         ? undefined
         : new Response("WebSocket upgrade failed", { status: 400 });
     }
+
+    if (url.pathname.startsWith("/api/terminals/") && url.pathname.endsWith("/ws")) {
+      const parts = url.pathname.split("/");
+      const terminalId = parts[3];
+      const clientId = url.searchParams.get("clientId") || `client_${crypto.randomUUID()}`;
+      return server.upgrade(request, { data: { kind: "terminal", terminalId, clientId } })
+        ? undefined
+        : new Response("Terminal WebSocket upgrade failed", { status: 400 });
+    }
+
     return app.fetch(request);
   },
   websocket: {
+    open(socket) {
+      if (socket.data.kind === "terminal") {
+        const { terminalId, clientId } = socket.data;
+        terminalManager.attach(terminalId, {
+          clientId,
+          isHolder: false,
+          sendBinary: (buf) => socket.sendBinary(buf),
+          sendControl: (ctrl) => socket.sendText(JSON.stringify(ctrl)),
+        });
+      }
+    },
     async message(socket, message) {
+      if (socket.data.kind === "terminal") {
+        const { terminalId, clientId } = socket.data;
+        if (typeof message === "string") {
+          try {
+            const parsed = clientTerminalMessageSchema.safeParse(JSON.parse(message));
+            if (!parsed.success) return;
+            const msg = parsed.data;
+            if (msg.type === "input") {
+              terminalManager.writeInput(terminalId, msg.data);
+            } else if (msg.type === "resize") {
+              terminalManager.resize(terminalId, msg.cols, msg.rows, clientId);
+            } else if (msg.type === "lease") {
+              if (msg.take) terminalManager.takeLease(terminalId, clientId);
+            }
+          } catch {}
+        } else if (typeof message === "object" && message !== null) {
+          try {
+            const frame = decodeBinaryFrame(message as Uint8Array | ArrayBuffer);
+            terminalManager.writeInput(terminalId, new TextDecoder().decode(frame.payload));
+          } catch {}
+        }
+        return;
+      }
+
       if (typeof message !== "string") {
         socket.sendText(JSON.stringify(protocolError(UNKNOWN_REQUEST_ID, "binary-command", "Commands must be JSON text")));
         return;
@@ -228,8 +283,12 @@ export const server = Bun.serve<SocketData>({
       }
     },
     close(socket) {
-      for (const unsubscribe of socket.data.subscriptions.values()) unsubscribe();
-      socket.data.subscriptions.clear();
+      if (socket.data.kind === "terminal") {
+        terminalManager.detach(socket.data.terminalId, socket.data.clientId);
+      } else {
+        for (const unsubscribe of socket.data.subscriptions.values()) unsubscribe();
+        socket.data.subscriptions.clear();
+      }
     },
   },
 });
