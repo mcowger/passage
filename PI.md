@@ -125,11 +125,10 @@ operations:
 | Steer now | `{"type":"steer","message":...}` | Delivered after current tool work and before the next model call. |
 | Queue follow-up | `{"type":"follow_up","message":...}` | Waits for the current run to complete. |
 | Stop agent | `{"type":"abort"}` | Distinct from stopping Bash or compaction. |
-| Clear queues | `{"type":"clear_queue"}` | Pi owns queue behavior. |
+| Configure queue mode | `{"type":"set_steering_mode",...}` / `{"type":"set_follow_up_mode",...}` | Pi 0.84.3 exposes queue modes, not per-item removal or queue clearing. |
 | Change model | `{"type":"set_model","provider":...,"modelId":...}` | Use Pi's available-model query for valid choices. |
 | Change thinking | `{"type":"set_thinking_level","level":...}` | Query Pi for levels supported by the current model. |
 | Compact | `{"type":"compact",...}` | May produce activity after a normal run boundary. |
-| Stop compaction | `{"type":"abort_compaction"}` | Only stops compaction. |
 | Run/stop Pi Bash | `{"type":"bash",...}` / `{"type":"abort_bash"}` | Separate from Passage's user-controlled PTY terminals. |
 | Inspect/reconcile | `get_state`, session/tree/entry commands supported by the pinned release | JSONL is still the durable source of truth. |
 
@@ -435,7 +434,8 @@ and target Bun runtime:
    simultaneous responses/events.
 4. Prove accepted prompt, steer, follow-up, queue state, and agent settlement
    match Pi behavior.
-5. Prove independent `abort`, `abort_bash`, and `abort_compaction` behavior.
+5. Prove independent `abort` and `abort_bash` behavior, plus Pi queue-mode and
+   compaction semantics.
 6. Start two agents concurrently and verify output, cwd, process exit, stderr,
    and request correlation cannot cross agent boundaries.
 7. Kill/crash a Pi process; emit attention, restart against its persisted

@@ -484,7 +484,8 @@ available without covering the last assistant outcome.
   `Queue follow-up`; it never silently chooses one. The active label and
   keyboard shortcut describe what will happen.
 - Steering and follow-up queues use distinct labeled/tinted chips, not
-  color-only treatment. Each queued item can be removed independently.
+  color-only treatment. Pi 0.84.3 does not expose per-item queue removal, so
+  Passage presents queue state and mode without promising a false removal action.
 - Abort is a separate destructive/stop control, never hidden inside Send.
 - Autosave drafts per agent/workspace. Retain a failed submission as a draft.
 - On mobile, preserve the message area and current send-mode label; move model,

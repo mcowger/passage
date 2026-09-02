@@ -39,7 +39,8 @@ Persistent Bun daemon
 | Canonical agent history | Pi JSONL sessions, including branches, compaction, and usage records. Passage never maintains a duplicate transcript. |
 | Other persistence | A small local SQLite registry holds only Passage metadata, indexes, preferences, and pane layouts; it is never authoritative for Pi-derived data. |
 | Runtime | Bun end to end. The pinned Pi CLI must execute under the supported Bun runtime as an intentional RPC agent process; no separate Node implementation layer or Node-based fallback sidecar is permitted. |
-| UI | React, Vite, Tailwind CSS, and shadcn/ui. The daemon serves the production static bundle. |
+| Initial host support | Linux x64. Other platforms require their own Bun native terminal and packaging gates before support is claimed. |
+| UI | React, Bun HTML imports, Tailwind CSS, and shadcn/ui. Bun handles development rendering, bundling, and production packaging. |
 | MVP | Multiple agents and live terminals per workspace; durable projects/workspaces/worktrees; Git/files/diff; a persistent split-pane canvas; responsive PWA. |
 | Worktree locations | Users choose configured named locations. Workspace labels are independent of Git branch names and on-disk directory names. |
 | Extensibility | Built-in typed renderer registry plus safe declarative theme/font/tool-renderer packs. No executable plugin framework in v1. |
@@ -329,11 +330,12 @@ src/
     styles/               Tailwind and semantic theme tokens
 ```
 
-Use Bun for package management, scripts, test runner, daemon runtime, and
-production serving. Use Vite only to develop and build the React client;
-production output is served by the Bun daemon. Development runs a Bun daemon
-and Vite client with a configured proxy. This is two development processes, not
-a multi-package build system.
+Use Bun for package management, scripts, test runner, daemon runtime, React/HTML
+bundling, production serving, and packaging. The daemon imports the React HTML
+entrypoint directly. During development, Bun provides browser HMR while serving
+the UI, API, and WebSocket from one process and origin. Production uses an
+ahead-of-time Bun full-stack build with the HTML import resolved to bundled
+assets.
 
 ### Chosen stack
 
@@ -342,12 +344,12 @@ a multi-package build system.
 | Server | Bun with Hono and Bun-native WebSockets | Hono provides mature routing/validation ergonomics without adopting a server framework or Node runtime. |
 | Protocol validation | Zod | One runtime schema defines HTTP and WebSocket payloads. |
 | Metadata | `bun:sqlite` | Built into the target runtime; no ORM is justified for this small local registry. |
-| Client | React + Vite + TypeScript | Direct browser SPA; avoids Next.js request/process ownership. |
+| Client | React + Bun HTML imports + TypeScript | Direct browser SPA bundled by Bun without a separate frontend server. |
 | UI | Tailwind CSS + shadcn/ui + Radix primitives | Accessible composable primitives and a token-based visual system. |
 | Client state | TanStack Query for snapshots; Zustand for live connection/layout state | Separates server cache from high-frequency local WebSocket state. |
 | Panes/dragging | Custom split-tree renderer + dnd-kit | The layout needs durable product semantics, not a black-box docking library. |
 | Editor | CodeMirror 6 + lazily loaded Lezer languages | Lightweight, embeddable, and extensible for a pane-based editor. |
-| Terminal | xterm.js with fit, search, links, unicode, clipboard; WebGL optional | Mature browser terminal; WebGL is an enhancement with a Canvas fallback. |
+| Terminal | Bun native terminal subprocess API plus xterm.js with fit, search, links, unicode, clipboard; WebGL optional | Keeps PTY ownership in Bun; xterm.js provides the mature browser terminal and Canvas fallback. |
 | Pi agents | Pi CLI in RPC mode, supervised by a Bun `PiRpcManager` | Pi owns agent commands/events and session state behind a simple process boundary. |
 | Markdown | `react-markdown`, GFM/math plugins, KaTeX, strict sanitization | Safe, robust rich model-output rendering. |
 | Git | Git CLI via argument arrays and a centralized service | Git worktree behavior is authoritative and feature complete in Git itself. |
@@ -361,8 +363,8 @@ disposable Bun integration spike:
 1. Launch the pinned `pi --mode rpc` CLI from Bun; create/resume a session,
    send prompt/steer/follow-up commands, parse concurrent responses/events, and
    read the resulting JSONL session directly.
-2. Spawn, write to, resize, and terminate `node-pty` under Bun on every
-   supported host platform.
+2. Spawn, write to, resize, and terminate a PTY through Bun's native terminal
+   subprocess API on Linux x64.
 3. Run isolated Pi RPC processes and a PTY concurrently while streaming through
    a Bun WebSocket; validate stderr, crash, restart, and process shutdown.
 4. Build and start the production Bun bundle with Pi and native dependencies
@@ -471,18 +473,19 @@ It contains Pi version changes without recreating Pi's agent semantics.
 ### Composer and queue behavior
 
 Each agent panel has one composer. It supports a normal prompt, `@` file
-references, attachments supported by Pi, draft recovery, model choice, thinking
-level, and a small set of Pi-native slash commands.
+references, Pi-supported image attachments, draft recovery, model choice,
+thinking level, and a small set of Pi-native slash commands.
 
 When a run is active, the UI presents two clearly labeled actions:
 
 - **Steer** — inject now into the active Pi run.
 - **Follow-up** — enqueue after the active run completes.
 
-Their queues are visibly distinct and individually removable. The default
-keyboard action is never ambiguous: the button label and shortcut describe the
-action that will occur. Passage delegates queue semantics to Pi rather than
-reimplementing a competing scheduler.
+Their queues are visibly distinct. Pi 0.84.3 exposes queue modes but not
+per-item removal or queue clearing; Passage does not falsely offer either
+control. The default keyboard action is never ambiguous: the button label and
+shortcut describe the action that will occur. Passage delegates queue semantics
+to Pi rather than reimplementing a competing scheduler.
 
 Sending a prompt is acknowledged only when Pi accepts or rejects prompt
 admission. That acknowledgement does not indicate run completion. Passage keeps
@@ -703,7 +706,7 @@ This is not a reason to omit baseline browser protections:
 - validate `Host` and WebSocket `Origin` against configured allowed origins;
 - serve the SPA and API from the same configured public origin in production;
 - require explicit configuration before accepting browser origins other than
-  the daemon's own origin (Vite development origin is an explicit exception);
+  the daemon's own origin; development also uses that origin;
 - keep realpath workspace boundaries, command allowlists, output limits, and
   safe worktree deletion regardless of network trust;
 - log local security-relevant rejections without collecting remote analytics.
@@ -722,9 +725,10 @@ only after Phase 5.
 **Objective:** remove the only existential runtime risks before committing to
 the product build.
 
-- Set up one Bun package, TypeScript, `bun test`, and a minimal Vite React page.
+- Set up one Bun package, TypeScript, `bun test`, and a minimal Bun HTML-import
+  React page.
 - Prove direct Pi runtime/session/history/steer/follow-up behavior under Bun.
-- Prove `node-pty` lifecycle and native production packaging under Bun.
+- Prove Bun's native terminal lifecycle and production packaging.
 - Prove a Bun WebSocket can stream Pi output and terminal bytes concurrently.
 - Record exact supported OS/runtime versions and any package patches in an ADR.
 
@@ -793,7 +797,7 @@ changes/diffs without exposing paths outside registered roots.
 
 **Objective:** turn the product into a multi-surface coding environment.
 
-- Implement `TerminalManager`, direct PTY adapter, binary output frames,
+- Implement `TerminalManager`, Bun native terminal adapter, binary output frames,
   bounded replay, snapshots, resize/input/exit controls, and a size lease.
 - Add xterm.js desktop and mobile integration, touch/viewport tests, font-fit
   handling, clipboard, links, search, and a non-WebGL fallback.
@@ -860,7 +864,7 @@ does not collect user telemetry to measure these externally.
 
 | Risk | Mitigation |
 | --- | --- |
-| Pi RPC CLI or `node-pty` fail under Bun | Phase 0 is a hard gate; defer the affected feature rather than silently adding a separate Node implementation layer. |
+| Pi RPC CLI or Bun native terminal API fails | Phase 0 is a hard gate; defer the affected feature rather than adding a separate Node implementation layer. |
 | LAN daemon is exposed to an untrusted device | Document prominently, retain origin/path/process safeguards, and recommend upstream TLS/auth/VPN. This is an accepted v1 deployment risk. |
 | Mobile browser suspends a live connection | Sequence/replay, authoritative snapshots, visibility reconciliation, and post-run Pi-history reload. |
 | One browser resizes another terminal | Single active size lease with explicit mobile takeover. |
