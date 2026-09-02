@@ -44,54 +44,81 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
     rewritten: false,
   };
 
-  if (type === "message_update") {
-    const event = payload.assistantMessageEvent as { type?: string; delta?: string; content?: string } | undefined;
-    const usage = payload.usage as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number; cost?: { total?: number } } | undefined;
-    const nextUsage = usage ? {
-      input: usage.input ?? base.usage.input,
-      output: usage.output ?? base.usage.output,
-      cacheRead: usage.cacheRead ?? base.usage.cacheRead,
-      cacheWrite: usage.cacheWrite ?? base.usage.cacheWrite,
-      totalTokens: usage.totalTokens ?? base.usage.totalTokens,
-      cost: usage.cost?.total ?? base.usage.cost,
-    } : base.usage;
+  const usage = payload.usage as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number; cost?: { total?: number } } | undefined;
+  const nextUsage = usage ? {
+    input: usage.input ?? base.usage.input,
+    output: usage.output ?? base.usage.output,
+    cacheRead: usage.cacheRead ?? base.usage.cacheRead,
+    cacheWrite: usage.cacheWrite ?? base.usage.cacheWrite,
+    totalTokens: usage.totalTokens ?? base.usage.totalTokens,
+    cost: usage.cost?.total ?? base.usage.cost,
+  } : base.usage;
 
-    if (event?.type === "text_delta" && typeof event.delta === "string") {
+  const event = payload.assistantMessageEvent as { type?: string; delta?: string; content?: string } | undefined;
+  const delta = (event?.type === "text_delta" && typeof event.delta === "string" ? event.delta : undefined)
+    ?? (typeof payload.delta === "string" ? payload.delta : undefined)
+    ?? (typeof payload.text === "string" ? payload.text : undefined);
+
+  if (delta) {
+    const timeline = [...base.timeline];
+    let found = false;
+    for (let index = timeline.length - 1; index >= 0; index -= 1) {
+      const item = timeline[index];
+      if (item && item.kind === "assistant") {
+        timeline[index] = { ...item, text: item.text + delta };
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      timeline.push({ kind: "assistant", id: `assistant-${Date.now()}`, text: delta });
+    }
+    return { ...base, timeline, usage: nextUsage };
+  }
+
+  const thinkingDelta = (event?.type === "thinking_delta" && typeof event.delta === "string" ? event.delta : undefined)
+    ?? (typeof payload.thinking === "string" ? payload.thinking : undefined);
+
+  if (thinkingDelta) {
+    const timeline = [...base.timeline];
+    let found = false;
+    for (let index = timeline.length - 1; index >= 0; index -= 1) {
+      const item = timeline[index];
+      if (item && item.kind === "thinking") {
+        timeline[index] = { ...item, text: item.text + thinkingDelta };
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      timeline.push({ kind: "thinking", id: `thinking-${Date.now()}`, text: thinkingDelta });
+    }
+    return { ...base, timeline, usage: nextUsage };
+  }
+
+  // Full assistant message update
+  const messageObj = payload.message as { role?: string; content?: string | Array<{ type?: string; text?: string }> } | undefined;
+  if (messageObj && (messageObj.role === "assistant" || !messageObj.role)) {
+    const fullText = typeof messageObj.content === "string"
+      ? messageObj.content
+      : Array.isArray(messageObj.content)
+        ? messageObj.content.map((c) => (c && typeof c === "object" && "text" in c ? String(c.text) : "")).join("")
+        : "";
+    if (fullText) {
       const timeline = [...base.timeline];
       let found = false;
       for (let index = timeline.length - 1; index >= 0; index -= 1) {
         const item = timeline[index];
         if (item && item.kind === "assistant") {
-          timeline[index] = { ...item, text: item.text + event.delta };
+          timeline[index] = { ...item, text: fullText };
           found = true;
           break;
         }
       }
       if (!found) {
-        timeline.push({ kind: "assistant", id: `assistant-${Date.now()}`, text: event.delta });
+        timeline.push({ kind: "assistant", id: `assistant-${Date.now()}`, text: fullText });
       }
       return { ...base, timeline, usage: nextUsage };
-    }
-
-    if (event?.type === "thinking_delta" && typeof event.delta === "string") {
-      const timeline = [...base.timeline];
-      let found = false;
-      for (let index = timeline.length - 1; index >= 0; index -= 1) {
-        const item = timeline[index];
-        if (item && item.kind === "thinking") {
-          timeline[index] = { ...item, text: item.text + event.delta };
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        timeline.push({ kind: "thinking", id: `thinking-${Date.now()}`, text: event.delta });
-      }
-      return { ...base, timeline, usage: nextUsage };
-    }
-
-    if (usage) {
-      return { ...base, usage: nextUsage };
     }
   }
 
@@ -113,7 +140,7 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
         significant: true,
       });
     }
-    return { ...base, timeline };
+    return { ...base, timeline, usage: nextUsage };
   }
 
   if (type === "tool_execution_end") {
@@ -130,7 +157,11 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
       }
       return item;
     });
-    return { ...base, timeline };
+    return { ...base, timeline, usage: nextUsage };
+  }
+
+  if (usage) {
+    return { ...base, usage: nextUsage };
   }
 
   return prev;
@@ -211,6 +242,11 @@ function App() {
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
+
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
 
   const agentLoadGeneration = useRef(0);
   const agentsLoadGeneration = useRef(0);
@@ -371,23 +407,22 @@ function App() {
         }
         const envelope = (value && typeof value === "object" && "type" in value) ? (value as { type?: string }) : undefined;
         const type = envelope?.type;
-        if (type === "settled" || type === "agent_settled" || type === "turn_end" || type === "agent_end") {
+        if (type === "settled" || type === "agent_settled" || type === "turn_end" || type === "agent_end" || type === "message_end") {
           void loadAgent(selectedAgentId, false);
-          if (settings.notificationsEnabled) {
-            const agentObj = agents.find((a) => a.id === selectedAgentId);
+          if (settingsRef.current.notificationsEnabled) {
+            const agentObj = agentsRef.current.find((a) => a.id === selectedAgentId);
             showAgentNotification(
               `Agent: ${agentObj?.title ?? "Activity finished"}`,
               "Agent completed turn and is waiting for input."
             );
           }
-        } else {
-          setHistory((prev) => applyStreamEvent(prev, value));
         }
+        setHistory((prev) => applyStreamEvent(prev, value));
       },
       () => loadAgent(selectedAgentId, false),
     );
     return () => subscription.close();
-  }, [loadAgent, selectedAgentId, settings.notificationsEnabled, agents]);
+  }, [loadAgent, selectedAgentId]);
 
   const workspace = snapshot?.workspaces.find((item) => item.id === selectedWorkspaceId);
   const project = snapshot?.projects.find((item) => item.id === workspace?.projectId);
@@ -801,6 +836,9 @@ function App() {
           <div className="workspace-container">
             {/* Top Command & Settings Bar */}
             <nav className="workspace-nav-bar" aria-label="Workspace views">
+              <div className="workspace-nav-brand">
+                <span className="workspace-crumb-title"><b>{project?.displayLabel}</b> {workspace.branchRef && <code className="branch-pill">⎇ {workspace.branchRef}</code>}</span>
+              </div>
               <div className="nav-tabs">
                 <button
                   className={`nav-tab ${activeTab === "overview" ? "active" : ""}`}
@@ -851,20 +889,18 @@ function App() {
                 </button>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginRight: 8 }}>
+              <div className="workspace-nav-actions">
                 <button
                   type="button"
-                  className="secondary"
-                  style={{ minHeight: 28, padding: "2px 8px", fontSize: 11 }}
+                  className="nav-action-btn"
                   title="Command Palette (Ctrl+K)"
                   onClick={() => setCommandPaletteOpen(true)}
                 >
-                  🔍 Commands <kbd style={{ marginLeft: 4, opacity: 0.7 }}>⌘K</kbd>
+                  🔍 Commands <kbd>⌘K</kbd>
                 </button>
                 <button
                   type="button"
-                  className="secondary"
-                  style={{ minHeight: 28, padding: "2px 8px", fontSize: 11 }}
+                  className="nav-action-btn"
                   title="Settings & Themes"
                   onClick={() => setSettingsModalOpen(true)}
                 >

@@ -77,7 +77,12 @@ export class PiRpcProcess {
   constructor(options: PiRpcOptions, generation: number) {
     if (!options.cwd || !options.sessionDir || !options.sessionId) throw new Error("Pi cwd, sessionDir, and sessionId are required");
     this.generation = generation;
-    this.limits = { maxCommandBytes: options.maxCommandBytes ?? MAX_PI_COMMAND_BYTES, maxRecordBytes: options.maxRecordBytes ?? 1024 * 1024, maxEventBytes: options.maxEventBytes ?? 4 * 1024 * 1024, maxStderrBytes: options.maxStderrBytes ?? 32 * 1024 };
+    this.limits = {
+      maxCommandBytes: options.maxCommandBytes ?? MAX_PI_COMMAND_BYTES,
+      maxRecordBytes: options.maxRecordBytes ?? MAX_PI_COMMAND_BYTES + 1024 * 1024,
+      maxEventBytes: options.maxEventBytes ?? (MAX_PI_COMMAND_BYTES * 2) + (4 * 1024 * 1024),
+      maxStderrBytes: options.maxStderrBytes ?? 64 * 1024,
+    };
     if (!Object.values(this.limits).every((value) => Number.isSafeInteger(value) && value > 0)) {
       throw new Error("Pi RPC limits must be positive safe integers");
     }
@@ -115,7 +120,11 @@ export class PiRpcProcess {
     if (part.byteLength) { this.stderr.push(this.stderrDecoder.decode(part, { stream: true })); this.stderrBytes += part.byteLength; }
     if (chunk.byteLength > keep) this.stderrTruncated = true;
   }
-  private protocolFailure(error: unknown) { this.failPending(asError(error)); if (this.child.exitCode === null) this.child.kill(); }
+  private protocolFailure(error: unknown) {
+    console.error("[Pi Protocol Failure]", error);
+    this.failPending(asError(error));
+    if (this.child.exitCode === null) this.child.kill();
+  }
   private exited(code: number) {
     const tail = this.stderrDecoder.decode();
     if (tail) this.captureStderr(encoder.encode(tail));

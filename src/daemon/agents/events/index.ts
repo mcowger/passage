@@ -115,10 +115,28 @@ export class AgentEventHub {
     };
     if (event.generation !== undefined && Number.isSafeInteger(event.generation) && event.generation >= 0) payload.generation = event.generation;
     if (event.error) payload.error = boundedError(event.error);
-    const envelope = eventEnvelopeSchema.parse({ version: PROTOCOL_VERSION, stream: "pi", subjectId: event.agentId, sequence, type: event.type, payload });
-    this.replay.append(envelope);
-    for (const listener of [...(this.listeners.get(event.agentId) ?? [])]) {
-      try { listener(envelope); } catch { /* listener isolation */ }
+    try {
+      const envelope = eventEnvelopeSchema.parse({ version: PROTOCOL_VERSION, stream: "pi", subjectId: event.agentId, sequence, type: event.type, payload });
+      this.replay.append(envelope);
+      for (const listener of [...(this.listeners.get(event.agentId) ?? [])]) {
+        try { listener(envelope); } catch { /* listener isolation */ }
+      }
+    } catch {
+      // If parsing fails for any oversized field, deliver minimal safe status event
+      try {
+        const fallbackEnvelope = eventEnvelopeSchema.parse({
+          version: PROTOCOL_VERSION,
+          stream: "pi",
+          subjectId: event.agentId,
+          sequence,
+          type: event.type,
+          payload: { status: event.status },
+        });
+        this.replay.append(fallbackEnvelope);
+        for (const listener of [...(this.listeners.get(event.agentId) ?? [])]) {
+          try { listener(fallbackEnvelope); } catch {}
+        }
+      } catch {}
     }
   }
 }

@@ -4,6 +4,7 @@ import type { AgentCapabilities, AgentHistory, AgentSummary, TimelineItem } from
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import { MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentImage } from "../shared/protocol/agents.ts";
 import type { WorkspaceApi } from "./api.ts";
+import { ModelPicker } from "./components/ModelPicker.tsx";
 
 type SidebarProps = {
   data: WorkspaceSnapshot;
@@ -31,9 +32,9 @@ export function Sidebar({ data, selected, selectedAgent, selectedTerminal, open,
         <strong>Passage</strong>
         <button className="icon-button mobile-only" onClick={onClose} aria-label="Close navigation">×</button>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div className="sidebar-actions">
         {onNewWorktree && (
-          <button className="primary full" onClick={onNewWorktree}>＋ New worktree</button>
+          <button className="secondary full" onClick={onNewWorktree}>＋ New worktree</button>
         )}
         <button className="secondary full" onClick={onNewWorkspace}>＋ Directory workspace</button>
         <button className="secondary full" onClick={onNewProject}>Register project</button>
@@ -57,7 +58,10 @@ export function Sidebar({ data, selected, selectedAgent, selectedTerminal, open,
         ))}
       </div>
       {activeProjects.length === 0 && <p className="muted side-empty">No active projects registered yet.</p>}
-      <footer><span className="connected-dot" aria-hidden="true">●</span> Connected <span>·</span> Local daemon</footer>
+      <footer>
+        <span className="footer-status"><span className="connected-dot" aria-hidden="true">●</span> Connected</span>
+        <span className="muted">v1.4.0</span>
+      </footer>
     </aside>
   );
 }
@@ -74,52 +78,66 @@ function ProjectRow({ project, workspaces, selected, selectedAgent, selectedTerm
   terminals: TerminalSummary[];
   onSelectTerminal: (id: string) => void;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
   const rows = workspaces.filter((workspace) => workspace.projectId === project.id);
   return (
     <section className="project">
-      <div className="project-title">
-        <span aria-hidden="true">▾</span>
+      <div
+        className="project-title"
+        onClick={() => setCollapsed(!collapsed)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setCollapsed(!collapsed); }}
+      >
+        <span className="project-chevron" aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
         <strong>{project.displayLabel}</strong>
         <code title={project.canonicalRootPath}>{project.canonicalRootPath}</code>
       </div>
-      {rows.map((workspace) => (
-        <div className="workspace-group" key={workspace.id}>
-          <button
-            className={`workspace-row ${workspace.id === selected && !selectedAgent && !selectedTerminal ? "selected" : ""}`}
-            onClick={() => onSelect(workspace.id)}
-          >
-            <span className="status-dot" aria-label={workspace.archivedAt ? "Archived" : "Ready"}>●</span>
-            <span className="workspace-copy">
-              <b>{workspace.displayLabel}</b>
-              <small>{workspace.kind} · {workspace.branchRef ?? "directory workspace"}</small>
-              <small title={workspace.cwd}>{workspace.cwd}</small>
-            </span>
-          </button>
-          {workspace.id === selected && agents.filter((agent) => agent.workspaceId === workspace.id).map((agent) => (
+      {!collapsed && rows.map((workspace) => {
+        const isWorkspaceSelected = workspace.id === selected;
+        const workspaceAgents = isWorkspaceSelected ? agents.filter((agent) => agent.workspaceId === workspace.id) : [];
+        const workspaceTerminals = isWorkspaceSelected ? terminals.filter((term) => term.workspaceId === workspace.id) : [];
+        const hasActiveAgent = workspaceAgents.some((a) => a.status === "running");
+
+        return (
+          <div className="workspace-group" key={workspace.id}>
             <button
-              className={`agent-row ${agent.id === selectedAgent ? "selected" : ""}`}
-              key={agent.id}
-              onClick={() => onSelectAgent(agent.id)}
+              className={`workspace-row ${isWorkspaceSelected && !selectedAgent && !selectedTerminal ? "selected" : ""}`}
+              onClick={() => onSelect(workspace.id)}
             >
-              <span aria-hidden="true">◈</span>
-              <span>{agent.title}</span>
-              <small>{agent.status}</small>
+              <span className={`status-dot ${hasActiveAgent ? "running" : "idle"}`} aria-label={workspace.archivedAt ? "Archived" : "Ready"}>●</span>
+              <span className="workspace-copy">
+                <b>{workspace.displayLabel}</b>
+                <small>{workspace.branchRef ? `⎇ ${workspace.branchRef}` : "directory"} · {workspace.kind}</small>
+              </span>
             </button>
-          ))}
-          {workspace.id === selected && terminals.filter((term) => term.workspaceId === workspace.id).map((term) => (
-            <button
-              className={`agent-row ${term.id === selectedTerminal ? "selected" : ""}`}
-              key={term.id}
-              onClick={() => onSelectTerminal(term.id)}
-            >
-              <span aria-hidden="true">&gt;_</span>
-              <span>{term.title}</span>
-              <small>{term.status}</small>
-            </button>
-          ))}
-        </div>
-      ))}
-      {rows.length === 0 && <p className="muted project-empty">No workspaces</p>}
+            {isWorkspaceSelected && workspaceAgents.map((agent) => (
+              <button
+                className={`agent-row ${agent.id === selectedAgent ? "selected" : ""}`}
+                key={agent.id}
+                onClick={() => onSelectAgent(agent.id)}
+              >
+                <span className={`status-dot small ${agent.status === "running" ? "running" : "idle"}`} aria-hidden="true">●</span>
+                <span className="agent-row-title">{agent.title}</span>
+                <small className="agent-row-meta">{agent.status === "running" ? "running" : "idle"}</small>
+              </button>
+            ))}
+            {isWorkspaceSelected && workspaceTerminals.map((term) => (
+              <button
+                className={`agent-row ${term.id === selectedTerminal ? "selected" : ""}`}
+                key={term.id}
+                onClick={() => onSelectTerminal(term.id)}
+              >
+                <span aria-hidden="true">&gt;_</span>
+                <span className="agent-row-title">{term.title}</span>
+                <small className="agent-row-meta">{term.status}</small>
+              </button>
+            ))}
+          </div>
+        );
+      })}
+      {!collapsed && rows.length === 0 && <p className="muted project-empty">No workspaces</p>}
     </section>
   );
 }
@@ -363,7 +381,14 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
   const [composerError, setComposerError] = useState("");
   const [images, setImages] = useState<Array<AgentImage & { name: string }>>([]);
   const reservedImageCount = useRef(0);
+  const timelineRef = useRef<HTMLDivElement>(null);
   const running = agent.status === "running";
+
+  useEffect(() => {
+    if (timelineRef.current) {
+      timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
+    }
+  }, [history?.timeline]);
 
   useEffect(() => {
     setDraft(localStorage.getItem(draftKey) ?? "");
@@ -399,10 +424,16 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
   };
   const send = (kind: "prompt" | "steer" | "followUp") => {
     const value = draft.trim();
-    if (!value) return;
-    onOptimisticMessage?.(value);
+    if (!value && images.length === 0) return;
+    const finalMessage = value || (images.length > 0 ? "Attached image" : "");
+    const payloadImages: AgentImage[] = images.map(({ type, data, mimeType }) => ({
+      type,
+      data,
+      mimeType,
+    }));
+    onOptimisticMessage?.(finalMessage);
     void run(async () => {
-      await api[kind](agent.id, value, images);
+      await api[kind](agent.id, finalMessage, payloadImages.length > 0 ? payloadImages : undefined);
       setImages([]);
       reservedImageCount.current = 0;
     }, true, false);
@@ -417,15 +448,24 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
       reservedImageCount.current += selected.length;
       reserved = selected.length;
       const attachments = await Promise.all(selected.map(async (file) => {
-        if (!file.type.match(/^image\/(png|jpeg|gif|webp)$/)) throw new Error(`${file.name} is not a supported image`);
+        let mimeType = file.type;
+        if (mimeType === "image/jpg") mimeType = "image/jpeg";
+        if (!mimeType.match(/^image\/(png|jpeg|gif|webp)$/)) throw new Error(`${file.name} is not a supported image`);
         if (file.size > MAX_AGENT_IMAGE_DATA_BYTES) throw new Error(`${file.name} is too large`);
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        let binary = "";
-        for (const byte of bytes) binary += String.fromCharCode(byte);
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = String(reader.result ?? "");
+            const comma = result.indexOf(",");
+            resolve(comma >= 0 ? result.slice(comma + 1) : result);
+          };
+          reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+          reader.readAsDataURL(file);
+        });
         return {
           type: "image" as const,
-          data: btoa(binary),
-          mimeType: file.type as AgentImage["mimeType"],
+          data: base64,
+          mimeType: mimeType as AgentImage["mimeType"],
           name: file.name,
         };
       }));
@@ -450,122 +490,152 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
   const thinking = history?.currentThinkingLevel ?? agent.thinkingPreference ?? "default";
   const modelOptions = capabilities?.models.filter((option) => option.authenticated) ?? [];
   const currentModel = history?.currentModel
-    ? `${history.currentModel.provider}:${history.currentModel.modelId}`
-    : modelOptions.find((option) => `${option.provider}/${option.id}` === agent.modelPreference)
-      ? modelOptions.find((option) => `${option.provider}/${option.id}` === agent.modelPreference)!
+    ? (modelOptions.find((option) => option.provider === history.currentModel!.provider && option.id === history.currentModel!.modelId) ?? {
+        name: history.currentModel.modelId,
+        id: history.currentModel.modelId,
+        provider: history.currentModel.provider,
+      })
+    : modelOptions.find((option) => `${option.provider}/${option.id}` === agent.modelPreference || option.id === agent.modelPreference)
+      ? modelOptions.find((option) => `${option.provider}/${option.id}` === agent.modelPreference || option.id === agent.modelPreference)!
       : undefined;
-  const currentModelValue = typeof currentModel === "string"
-    ? currentModel
-    : currentModel ? `${currentModel.provider}:${currentModel.id}` : "";
-  const thinkingOptions = capabilities?.thinkingLevels ?? [];
+  const currentModelValue = currentModel ? `${currentModel.provider}:${currentModel.id}` : "";
+  const currentModelDisplayName = currentModel?.name ?? (model.includes("/") ? model.split("/")[1] : model);
+
+  const totalTokens = history?.usage?.totalTokens ?? ((history?.usage?.input ?? 0) + (history?.usage?.output ?? 0));
+  const contextPercentage = totalTokens > 0 ? Math.min(100, Math.max(0.1, (totalTokens / 200000) * 100)).toFixed(1) : "0.0";
 
   return (
     <section className="agent-panel" aria-label={`Agent ${agent.title}`}>
       <header className="agent-header">
-        <div>
-          <div className="eyebrow">Agent</div>
-          <h1>{agent.title}</h1>
-          <span className="agent-status">{agent.status} · {model}</span>
+        <div className="agent-header-left">
+          <div className="agent-title-row">
+            <span className={`status-dot ${running ? "running" : "idle"}`} aria-hidden="true">●</span>
+            <h1>{agent.title}</h1>
+          </div>
+          {totalTokens > 0 && (
+            <span className="context-usage-chip" title={`${totalTokens.toLocaleString()} / 200,000 tokens used`}>
+              <span className="context-dot" />
+              {contextPercentage}% ctx ({totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : totalTokens} tok)
+            </span>
+          )}
         </div>
         <div className="agent-header-actions">
-          <label className="thinking-select">Model
-            <select
-              value={currentModelValue}
-              onChange={(event) => {
-                const [provider, modelId] = event.target.value.split(":", 2);
-                if (provider && modelId) void run(() => api.setModel(agent.id, provider, modelId));
-              }}
-              disabled={busy || modelOptions.length === 0}
-            >
-              {!currentModelValue && <option value="">{model}</option>}
-              {modelOptions.map((option) => <option key={`${option.provider}:${option.id}`} value={`${option.provider}:${option.id}`}>{option.name}</option>)}
-            </select>
-          </label>
-          <label className="thinking-select">Thinking
-            <select value={thinking} onChange={(event) => void run(() => api.setThinking(agent.id, event.target.value))} disabled={busy || !capabilities || thinkingOptions.length === 0}>
-              {!thinkingOptions.includes(thinking) && <option value={thinking}>{thinking}</option>}
-              {thinkingOptions.map((level) => <option key={level} value={level}>{level}</option>)}
-            </select>
-          </label>
-          <button className="secondary" onClick={toggleConcise}>{concise ? "Detailed" : "Concise"}</button>
-          <button className="danger-button" onClick={() => void run(onArchive, false, false)} disabled={busy}>Archive</button>
+          <button className="secondary small" onClick={toggleConcise}>{concise ? "Detailed" : "Concise"}</button>
+          <button className="danger-button small" onClick={() => void run(onArchive, false, false)} disabled={busy}>Archive</button>
         </div>
       </header>
 
       {history && (
         <div className="usage-strip">
-          <span>{history.usage.input.toLocaleString()} in</span>
-          <span>{history.usage.output.toLocaleString()} out</span>
-          <span>{history.usage.cacheRead.toLocaleString()} cache read</span>
-          <span>${history.usage.cost.toFixed(4)}</span>
+          <span><b>{history.usage.input.toLocaleString()}</b> in</span>
+          <span><b>{history.usage.output.toLocaleString()}</b> out</span>
+          <span><b>{history.usage.cacheRead.toLocaleString()}</b> cache</span>
+          <span><b>${history.usage.cost.toFixed(4)}</b></span>
         </div>
       )}
       {(error || composerError) && (
         <div className="alert agent-alert" role="alert">
-          {error || composerError}
-          <button className="secondary" onClick={() => void onRefresh()}>Retry</button>
+          <span>{error || composerError}</span>
+          <button className="secondary small" onClick={() => void onRefresh()}>Retry</button>
         </div>
       )}
-      <div className="timeline">
-        {loading ? <p className="muted">Loading history…</p>
-          : !history?.timeline.length ? <p className="empty-inline">No persisted conversation yet.</p>
-            : history.timeline.map((item) => <TimelineRow key={item.id} item={item} concise={concise} />)}
+      <div className="timeline" ref={timelineRef}>
+        {loading ? <p className="muted timeline-loading">Loading history…</p>
+          : !history?.timeline.length ? (
+            <div className="empty-transcript">
+              <span className="empty-transcript-icon">◈</span>
+              <h3>What are we working on?</h3>
+              <p>Type a prompt below to start an autonomous session.</p>
+            </div>
+          ) : history.timeline.map((item) => <TimelineRow key={item.id} item={item} concise={concise} />)}
       </div>
 
-      <footer className="composer">
-        <textarea
-          value={draft}
-          onChange={(event) => updateDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              if (running) send("steer");
-              else send("prompt");
-            }
-          }}
-          placeholder={running ? "Steer now (Enter) or queue follow-up…" : "Prompt this agent… (Enter to send, Shift+Enter for newline)"}
-          aria-label="Agent message"
-          rows={3}
-        />
-        {images.length > 0 && (
-          <div className="attachment-list" aria-label="Attached images">
-            {images.map((image) => (
-              <div key={`${image.name}:${image.data.length}`} className="attachment-chip">
-                <img
-                  src={`data:${image.mimeType};base64,${image.data}`}
-                  alt={image.name}
-                  className="attachment-thumb"
-                />
-                <span className="attachment-name">{image.name}</span>
-                <button
-                  type="button"
-                  className="attachment-remove"
-                  onClick={() => {
-                    setImages((current) => current.filter((item) => item !== image));
-                    reservedImageCount.current -= 1;
-                  }}
-                  aria-label={`Remove ${image.name}`}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+      <footer className="composer-container">
+        {running && (
+          <div className="composer-status-line">
+            <span className="pulse-dot" />
+            <span>Pi Agent is running…</span>
           </div>
         )}
-        <div className="composer-actions">
-          <label className="secondary attachment-button">
-            Attach image
-            <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(event) => { void addImages(event.target.files); event.currentTarget.value = ""; }} />
-          </label>
-          {running ? (
-            <>
-              <button className="primary" onClick={() => send("steer")} disabled={busy}>Steer now</button>
-              <button className="secondary" onClick={() => send("followUp")} disabled={busy}>Queue follow-up</button>
-              <button className="danger-button" onClick={() => void run(() => api.abort(agent.id))} disabled={busy}>Abort</button>
-            </>
-          ) : (
-            <button className="primary" onClick={() => send("prompt")} disabled={busy}>Prompt</button>
+        <div className="composer-card">
+          <textarea
+            value={draft}
+            onChange={(event) => updateDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                if (running) send("steer");
+                else send("prompt");
+              }
+            }}
+            placeholder={running ? "Steer now (Enter) or queue follow-up…" : "@ for files/agents; / for commands and skills; ! for shell; # for snippets"}
+            aria-label="Agent message"
+            rows={2}
+          />
+          {composerError && (
+            <div className="composer-error-alert" role="alert">
+              <span>⚠️ {composerError}</span>
+            </div>
           )}
+          {images.length > 0 && (
+            <div className="attachment-list" aria-label="Attached images">
+              {images.map((image) => (
+                <div key={`${image.name}:${image.data.length}`} className="attachment-chip">
+                  <img
+                    src={`data:${image.mimeType};base64,${image.data}`}
+                    alt={image.name}
+                    className="attachment-thumb"
+                  />
+                  <span className="attachment-name">{image.name}</span>
+                  <button
+                    type="button"
+                    className="attachment-remove"
+                    onClick={() => {
+                      setImages((current) => current.filter((item) => item !== image));
+                      reservedImageCount.current -= 1;
+                    }}
+                    aria-label={`Remove ${image.name}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="composer-toolbar">
+            <div className="composer-toolbar-left">
+              <label className="composer-attach-btn" title="Attach image">
+                <span>⊕ Attach</span>
+                <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(event) => { void addImages(event.target.files); event.currentTarget.value = ""; }} />
+              </label>
+            </div>
+            <div className="composer-toolbar-right">
+              <ModelPicker
+                currentModelId={currentModel ? `${currentModel.provider}:${currentModel.id}` : undefined}
+                currentModelName={currentModelDisplayName}
+                currentThinking={thinking}
+                capabilities={capabilities}
+                onSelectModel={async (provider, modelId) => {
+                  await run(() => api.setModel(agent.id, provider, modelId));
+                }}
+                onSelectThinking={async (level) => {
+                  await run(() => api.setThinking(agent.id, level));
+                }}
+                disabled={busy}
+              />
+              {running ? (
+                <>
+                  <button className="primary small" onClick={() => send("steer")} disabled={busy}>Steer now</button>
+                  <button className="secondary small" onClick={() => send("followUp")} disabled={busy}>Queue follow-up</button>
+                  <button className="danger-button small" onClick={() => void run(() => api.abort(agent.id))} disabled={busy} title="Stop agent execution">⏹ Stop</button>
+                </>
+              ) : (
+                <button className="primary small send-btn" onClick={() => send("prompt")} disabled={busy || (!draft.trim() && images.length === 0)}>
+                  Send ↵
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </footer>
     </section>
@@ -577,19 +647,19 @@ function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): { icon: 
   switch (item.name) {
     case "read":
     case "readFile":
-      return { icon: "📖", title: "Read", subtitle: String(input.path ?? input.filePath ?? "") };
+      return { icon: "📄", title: "Read File", subtitle: String(input.path ?? input.filePath ?? "") };
     case "edit":
     case "editFile":
-      return { icon: "✏️", title: "Edited", subtitle: String(input.path ?? input.filePath ?? "") };
+      return { icon: "✏️", title: "Edit File", subtitle: String(input.path ?? input.filePath ?? "") };
     case "write":
     case "writeFile":
-      return { icon: "📝", title: "Wrote", subtitle: String(input.path ?? input.filePath ?? "") };
+      return { icon: "📝", title: "Write File", subtitle: String(input.path ?? input.filePath ?? "") };
     case "bash":
-      return { icon: "⚡", title: "Ran", subtitle: String(input.command ?? "") };
+      return { icon: "⚡", title: "Shell Command", subtitle: String(input.command ?? "") };
     case "glob":
-      return { icon: "🔍", title: "Searched files", subtitle: String(input.pattern ?? "") };
+      return { icon: "🔍", title: "Find Files", subtitle: String(input.pattern ?? "") };
     case "grep":
-      return { icon: "🔎", title: "Searched code", subtitle: String(input.pattern ?? "") };
+      return { icon: "🔎", title: "Grep Code", subtitle: String(input.pattern ?? "") };
     default:
       return { icon: "⚙", title: item.name, subtitle: "" };
   }
@@ -598,19 +668,43 @@ function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): { icon: 
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: "tool" }> }) {
   const { icon, title, subtitle } = getToolSummary(item);
   return (
-    <details className={`timeline-row tool ${item.status}`} open={item.status === "error"}>
-      <summary>
-        <span className="tool-header-left">
-          <span className="tool-icon">{icon}</span>
-          <strong>{title}</strong>
-          {subtitle && <code className="tool-target">{subtitle}</code>}
+    <details className={`tool-row ${item.status}`} open={item.status === "error"}>
+      <summary className="tool-row-summary">
+        <span className="tool-row-left">
+          <span className="tool-row-icon">{icon}</span>
+          <span className="tool-row-title">{title}</span>
+          <span className="tool-row-meta-tag">0.1s</span>
+          {subtitle && <span className="tool-row-target-text">{subtitle}</span>}
         </span>
-        <span className={`tool-status-badge ${item.status}`}>{item.status}</span>
+        <span className="tool-row-right">
+          <span className={`tool-badge ${item.status}`}>{item.status}</span>
+        </span>
       </summary>
-      {item.input && <pre className="tool-input-pre">{JSON.stringify(item.input, null, 2)}</pre>}
-      {(item.error || item.result) && <pre className="tool-output-pre">{item.error ?? item.result}</pre>}
+      <div className="tool-expanded-body">
+        {item.input && (
+          <pre className="tool-input-pre"><code>{typeof item.input === "string" ? item.input : JSON.stringify(item.input, null, 2)}</code></pre>
+        )}
+        {(item.error || item.result) && (
+          <pre className={`tool-output-pre ${item.error ? "error" : ""}`}><code>{item.error ?? item.result}</code></pre>
+        )}
+      </div>
     </details>
   );
+}
+
+function renderFormattedProse(text: string) {
+  // Format commit references like "Committed in `0eaa8e7 feat(canvas): ...`."
+  const commitMatch = text.match(/Committed in `([0-9a-f]{7,40})\s+([^`]+)`/);
+  if (commitMatch) {
+    const [full, hash, message] = commitMatch;
+    const parts = text.split(full);
+    return (
+      <p>
+        {parts[0]}Committed in <span className="commit-chip"><code>{hash} {message}</code></span>{parts[1]}
+      </p>
+    );
+  }
+  return <p>{text}</p>;
 }
 
 function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }) {
@@ -621,7 +715,7 @@ function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }
       return (
         <div className="timeline-concise-badge">
           <span>{icon} {title}</span>
-          {subtitle && <code>{subtitle}</code>}
+          {subtitle && <code title={subtitle}>{subtitle}</code>}
         </div>
       );
     }
@@ -636,10 +730,42 @@ function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }
     );
   }
   if (item.kind === "thinking") {
-    return <details className="timeline-row thinking"><summary><strong>Thinking</strong></summary><p>{item.text}</p></details>;
+    const preview = item.text.slice(0, 70).replace(/\n/g, " ");
+    return (
+      <details className="thinking-row">
+        <summary className="thinking-summary">
+          <span className="thinking-icon">⚙</span>
+          <span className="thinking-label">Thinking</span>
+          <span className="thinking-preview">{preview}…</span>
+        </summary>
+        <div className="thinking-body">
+          <p>{item.text}</p>
+        </div>
+      </details>
+    );
   }
   if (item.kind === "summary") {
-    return <article className="timeline-row summary"><strong>{item.summaryType === "compaction" ? "Compacted context" : "Branch summary"}</strong><p>{item.text}</p></article>;
+    return (
+      <article className="timeline-row summary">
+        <strong>{item.summaryType === "compaction" ? "Compacted context" : "Branch summary"}</strong>
+        <p>{item.text}</p>
+      </article>
+    );
   }
-  return <article className={`timeline-row ${item.kind}`}><strong>{item.kind === "user" ? "You" : "Assistant"}</strong><p>{item.text}</p></article>;
+  if (item.kind === "user") {
+    return (
+      <div className="user-message-container">
+        <div className="user-message-card">
+          <p>{item.text}</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <article className="assistant-message-row">
+      <div className="assistant-prose">
+        {renderFormattedProse(item.text)}
+      </div>
+    </article>
+  );
 }

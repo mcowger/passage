@@ -3,7 +3,7 @@ import { z } from "zod";
 export const CURRENT_SETTINGS_SCHEMA_VERSION = 1;
 
 export const workspaceSettingsSchema = z.object({
-  themeId: z.string().min(1).max(64).default("passage-dark"),
+  themeId: z.string().min(1).max(64).default("passage-light"),
   fontId: z.string().min(1).max(64).default("system-default"),
   toolRendererPackId: z.string().min(1).max(64).default("builtin"),
   agentActivityDetail: z.enum(["concise", "detailed"]).default("concise"),
@@ -15,7 +15,7 @@ export const workspaceSettingsSchema = z.object({
 export type WorkspaceSettings = z.infer<typeof workspaceSettingsSchema>;
 
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
-  themeId: "passage-dark",
+  themeId: "passage-light",
   fontId: "system-default",
   toolRendererPackId: "builtin",
   agentActivityDetail: "concise",

@@ -340,6 +340,22 @@ export class AgentService {
     });
   }
 
+  private sanitizeEventPayload(value: unknown): unknown {
+    if (value === null || typeof value !== "object") return value;
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sanitizeEventPayload(item));
+    }
+    const record = value as Record<string, unknown>;
+    if (record.type === "image" && typeof record.data === "string" && typeof record.mimeType === "string") {
+      return { type: "image", mimeType: record.mimeType };
+    }
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(record)) {
+      out[k] = this.sanitizeEventPayload(v);
+    }
+    return out;
+  }
+
   private async onEvent(agentId: string, event: PiEvent): Promise<void> {
     if (this.subscriptions.get(agentId)?.generation !== event.generation) return;
     const agent = this.repositories.agents.get(agentId);
@@ -350,16 +366,22 @@ export class AgentService {
     }
 
     const currentStatus = (this.repositories.agents.get(agentId)?.lastKnownStatus as AgentStatus) ?? "running";
-    const payload: Record<string, unknown> = {};
-    if (event.message !== undefined) payload.message = event.message;
-    if (event.assistantMessageEvent !== undefined) payload.assistantMessageEvent = event.assistantMessageEvent;
-    if (event.toolCallId !== undefined) payload.toolCallId = event.toolCallId;
-    if (event.toolName !== undefined) payload.toolName = event.toolName;
-    if (event.args !== undefined) payload.args = event.args;
-    if (event.result !== undefined) payload.result = event.result;
-    if (event.isError !== undefined) payload.isError = event.isError;
-    if (event.usage !== undefined) payload.usage = event.usage;
-    if (event.level !== undefined) payload.level = event.level;
+    const rawPayload: Record<string, unknown> = {};
+    if (event.message !== undefined) rawPayload.message = event.message;
+    if (event.assistantMessageEvent !== undefined) rawPayload.assistantMessageEvent = event.assistantMessageEvent;
+    if (event.toolCallId !== undefined) rawPayload.toolCallId = event.toolCallId;
+    if (event.toolName !== undefined) rawPayload.toolName = event.toolName;
+    if (event.args !== undefined) rawPayload.args = event.args;
+    if (event.result !== undefined) rawPayload.result = event.result;
+    if (event.isError !== undefined) rawPayload.isError = event.isError;
+    if (event.usage !== undefined) rawPayload.usage = event.usage;
+    if (event.level !== undefined) rawPayload.level = event.level;
+    if (event.delta !== undefined) rawPayload.delta = event.delta;
+    if (event.text !== undefined) rawPayload.text = event.text;
+    if (event.content !== undefined) rawPayload.content = event.content;
+    if (event.thinking !== undefined) rawPayload.thinking = event.thinking;
+
+    const payload = this.sanitizeEventPayload(rawPayload) as Record<string, unknown>;
 
     if (event.type === "agent_settled") {
       await this.reconcile(agentId);
