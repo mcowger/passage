@@ -4,6 +4,12 @@ import type { AgentCapabilities, AgentHistory, AgentSummary, TimelineItem, ToolA
 import type { JsonValue } from "../shared/protocol/index.ts";
 import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.ts";
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
+import type { LayoutNode, PaneTab, WorkspaceLayout } from "../shared/domain/layout.ts";
+import { addTabToGroup, createDefaultLayout, getFirstTabGroup } from "../shared/domain/layout.ts";
+import type { WorkspaceSettings } from "../shared/domain/settings.ts";
+import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
+import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
+import { BUILTIN_THEMES, BUILTIN_FONTS } from "../shared/domain/customization.ts";
 import { createWorkspaceApi } from "./api.ts";
 import { subscribeAgent } from "./agentSocket.ts";
 import { AgentPanel, Sidebar, WorkspaceOverview } from "./components.tsx";
@@ -13,6 +19,10 @@ import { EditorPanel } from "./components/EditorPanel.tsx";
 import { DiffPanel } from "./components/DiffPanel.tsx";
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
 import { NewWorktreeModal } from "./components/NewWorktreeModal.tsx";
+import { SplitCanvas } from "./components/SplitCanvas.tsx";
+import { CommandPalette } from "./components/CommandPalette.tsx";
+import { SettingsModal } from "./components/SettingsModal.tsx";
+import { showAgentNotification } from "./notifications.ts";
 import "./styles.css";
 
 function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): AgentHistory | undefined {
@@ -126,6 +136,24 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
   return prev;
 }
 
+function applyThemeTokens(theme?: ThemePack) {
+  if (!theme || typeof document === "undefined") return;
+  const root = document.documentElement;
+  for (const [key, value] of Object.entries(theme.tokens)) {
+    if (value) {
+      const cssVar = `--${key.replace(/([A-Z])/g, "-$1").toLowerCase()}`;
+      root.style.setProperty(cssVar, value);
+    }
+  }
+}
+
+function applyFontTokens(font?: FontPack) {
+  if (!font || typeof document === "undefined") return;
+  const root = document.documentElement;
+  root.style.setProperty("--font-ui", font.uiFontFamily);
+  root.style.setProperty("--font-mono", font.monoFontFamily);
+}
+
 type FormKind = "project" | "workspace" | "worktree";
 type TabKind = "overview" | "agent" | "terminal" | "explorer" | "changes" | "editor" | "diff";
 
@@ -175,8 +203,52 @@ function App() {
   const [agentLoading, setAgentLoading] = useState(false);
   const [form, setForm] = useState<FormKind>();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [layout, setLayout] = useState<WorkspaceLayout>();
+  const [settings, setSettings] = useState<WorkspaceSettings>(DEFAULT_WORKSPACE_SETTINGS);
+  const [themes, setThemes] = useState<ThemePack[]>(BUILTIN_THEMES);
+  const [fonts, setFonts] = useState<FontPack[]>(BUILTIN_FONTS);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
+
   const agentLoadGeneration = useRef(0);
   const agentsLoadGeneration = useRef(0);
+
+  // Register service worker and offline listeners
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const handleOnline = () => setIsOffline(false);
+      const handleOffline = () => setIsOffline(true);
+      const handleResize = () => setIsMobile(window.innerWidth < 768);
+
+      window.addEventListener("online", handleOnline);
+      window.addEventListener("offline", handleOffline);
+      window.addEventListener("resize", handleResize);
+
+      if ("serviceWorker" in navigator && process.env.NODE_ENV === "production") {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      }
+
+      return () => {
+        window.removeEventListener("online", handleOnline);
+        window.removeEventListener("offline", handleOffline);
+        window.removeEventListener("resize", handleResize);
+      };
+    }
+  }, []);
+
+  // Global keyboard shortcuts (Command Palette, Layout reset)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const refreshWorkspaces = useCallback(async (): Promise<boolean> => {
     try {
@@ -222,6 +294,26 @@ function App() {
     } catch {}
   }, [api]);
 
+  const loadLayoutAndSettings = useCallback(async (workspaceId: string) => {
+    try {
+      const [fetchedLayout, fetchedSettings, fetchedThemes, fetchedFonts] = await Promise.all([
+        api.getLayout(workspaceId).catch(() => createDefaultLayout(workspaceId)),
+        api.getSettings(workspaceId).catch(() => DEFAULT_WORKSPACE_SETTINGS),
+        api.getThemes().catch(() => BUILTIN_THEMES),
+        api.getFonts().catch(() => BUILTIN_FONTS),
+      ]);
+      setLayout(fetchedLayout);
+      setSettings(fetchedSettings);
+      setThemes(fetchedThemes);
+      setFonts(fetchedFonts);
+
+      const activeTheme = fetchedThemes.find((t) => t.id === fetchedSettings.themeId) ?? fetchedThemes[0];
+      const activeFont = fetchedFonts.find((f) => f.id === fetchedSettings.fontId) ?? fetchedFonts[0];
+      applyThemeTokens(activeTheme);
+      applyFontTokens(activeFont);
+    } catch {}
+  }, [api]);
+
   const loadAgent = useCallback(async (agentId: string, isInitial = false) => {
     const generation = ++agentLoadGeneration.current;
     if (isInitial) setAgentLoading(true);
@@ -246,6 +338,7 @@ function App() {
   }, [api]);
 
   useEffect(() => { void refreshWorkspaces(); }, [refreshWorkspaces]);
+
   useEffect(() => {
     agentsLoadGeneration.current += 1;
     agentLoadGeneration.current += 1;
@@ -261,8 +354,9 @@ function App() {
     if (selectedWorkspaceId) {
       void loadAgents(selectedWorkspaceId);
       void loadTerminals(selectedWorkspaceId);
+      void loadLayoutAndSettings(selectedWorkspaceId);
     }
-  }, [loadAgents, loadTerminals, selectedWorkspaceId]);
+  }, [loadAgents, loadTerminals, loadLayoutAndSettings, selectedWorkspaceId]);
 
   useEffect(() => {
     if (!selectedAgentId) return;
@@ -270,11 +364,22 @@ function App() {
     const subscription = subscribeAgent(
       selectedAgentId,
       (value, state) => {
-        if (state.status) setAgents((current) => current.map((agent) => agent.id === selectedAgentId ? { ...agent, status: state.status! } : agent));
+        if (state.status) {
+          setAgents((current) =>
+            current.map((agent) => (agent.id === selectedAgentId ? { ...agent, status: state.status! } : agent))
+          );
+        }
         const envelope = (value && typeof value === "object" && "type" in value) ? (value as { type?: string }) : undefined;
         const type = envelope?.type;
         if (type === "settled" || type === "agent_settled" || type === "turn_end" || type === "agent_end") {
           void loadAgent(selectedAgentId, false);
+          if (settings.notificationsEnabled) {
+            const agentObj = agents.find((a) => a.id === selectedAgentId);
+            showAgentNotification(
+              `Agent: ${agentObj?.title ?? "Activity finished"}`,
+              "Agent completed turn and is waiting for input."
+            );
+          }
         } else {
           setHistory((prev) => applyStreamEvent(prev, value));
         }
@@ -282,12 +387,48 @@ function App() {
       () => loadAgent(selectedAgentId, false),
     );
     return () => subscription.close();
-  }, [loadAgent, selectedAgentId]);
+  }, [loadAgent, selectedAgentId, settings.notificationsEnabled, agents]);
 
   const workspace = snapshot?.workspaces.find((item) => item.id === selectedWorkspaceId);
   const project = snapshot?.projects.find((item) => item.id === workspace?.projectId);
   const activeProject = project ?? snapshot?.projects.find((item) => !item.archivedAt);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
+  const selectedTerminal = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
+
+  const handleLayoutChange = useCallback(
+    (nextLayout: WorkspaceLayout) => {
+      setLayout(nextLayout);
+      if (selectedWorkspaceId) {
+        void api.saveLayout(selectedWorkspaceId, nextLayout).catch(() => {});
+      }
+    },
+    [api, selectedWorkspaceId]
+  );
+
+  const handleSaveSettings = useCallback(
+    async (nextSettings: WorkspaceSettings) => {
+      setSettings(nextSettings);
+      if (selectedWorkspaceId) {
+        await api.saveSettings(selectedWorkspaceId, nextSettings);
+      }
+      const activeTheme = themes.find((t) => t.id === nextSettings.themeId) ?? themes[0];
+      const activeFont = fonts.find((f) => f.id === nextSettings.fontId) ?? fonts[0];
+      applyThemeTokens(activeTheme);
+      applyFontTokens(activeFont);
+    },
+    [api, selectedWorkspaceId, themes, fonts]
+  );
+
+  const openPaneTab = useCallback(
+    (tab: PaneTab) => {
+      if (!layout) return;
+      const firstGroup = getFirstTabGroup(layout.root);
+      if (!firstGroup) return;
+      const nextRoot = addTabToGroup(layout.root, firstGroup.id, tab);
+      handleLayoutChange({ ...layout, root: nextRoot });
+    },
+    [layout, handleLayoutChange]
+  );
 
   const runWorkspaceMutation = async (action: () => Promise<unknown>) => {
     try {
@@ -308,6 +449,12 @@ function App() {
       setAgents((current) => [...current, created]);
       setSelectedAgentId(created.id);
       setActiveTab("agent");
+      openPaneTab({
+        id: `agent-${created.id}`,
+        kind: "agent",
+        title: created.title,
+        targetId: created.id,
+      });
     } catch (cause) {
       setAgentError(cause instanceof Error ? cause.message : "Unable to create agent");
     }
@@ -320,6 +467,12 @@ function App() {
       setTerminals((current) => [...current, created]);
       setSelectedTerminalId(created.id);
       setActiveTab("terminal");
+      openPaneTab({
+        id: `terminal-${created.id}`,
+        kind: "terminal",
+        title: created.title,
+        targetId: created.id,
+      });
     } catch {}
   };
 
@@ -342,12 +495,30 @@ function App() {
     setSelectedAgentId(id);
     setActiveTab("agent");
     setDrawerOpen(false);
+    const agentObj = agents.find((a) => a.id === id);
+    if (agentObj) {
+      openPaneTab({
+        id: `agent-${id}`,
+        kind: "agent",
+        title: agentObj.title,
+        targetId: id,
+      });
+    }
   };
 
   const handleSelectTerminal = (id: string) => {
     setSelectedTerminalId(id);
     setActiveTab("terminal");
     setDrawerOpen(false);
+    const termObj = terminals.find((t) => t.id === id);
+    if (termObj) {
+      openPaneTab({
+        id: `terminal-${id}`,
+        kind: "terminal",
+        title: termObj.title,
+        targetId: id,
+      });
+    }
   };
 
   const handleSelectWorkspace = (id: string) => {
@@ -358,13 +529,244 @@ function App() {
     setDrawerOpen(false);
   };
 
-  const selectedTerminal = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
+  // Render tab content for SplitCanvas & single-pane mode
+  const renderTabContent = (tab: PaneTab): ReactNode => {
+    if (!workspace || !project) {
+      return (
+        <div className="empty">
+          <span className="empty-icon" aria-hidden="true">⌂</span>
+          <h1>Select a workspace</h1>
+        </div>
+      );
+    }
+
+    switch (tab.kind) {
+      case "overview":
+        return (
+          <WorkspaceOverview
+            workspace={workspace}
+            project={project}
+            api={api}
+            refresh={async () => { await refreshWorkspaces(); }}
+            onCreateAgent={createAgent}
+            onCreateTerminal={createTerminal}
+            onOpenAgent={() => {
+              if (!selectedAgentId && agents[0]) setSelectedAgentId(agents[0].id);
+              setActiveTab("agent");
+              if (agents[0]) handleSelectAgent(agents[0].id);
+            }}
+            onOpenTerminal={() => {
+              if (!selectedTerminalId && terminals[0]) setSelectedTerminalId(terminals[0].id);
+              setActiveTab("terminal");
+              if (terminals[0]) handleSelectTerminal(terminals[0].id);
+            }}
+            onOpenExplorer={() => {
+              setActiveTab("explorer");
+              openPaneTab({ id: `explorer-${workspace.id}`, kind: "explorer", title: "Files" });
+            }}
+            onOpenChanges={() => {
+              setActiveTab("changes");
+              openPaneTab({ id: `changes-${workspace.id}`, kind: "changes", title: "Changes" });
+            }}
+            onOpenDiff={() => {
+              setOpenDiffPath("");
+              setActiveTab("diff");
+              openPaneTab({ id: `diff-${workspace.id}`, kind: "diff", title: "Diff" });
+            }}
+          />
+        );
+
+      case "agent": {
+        const agentId = tab.targetId ?? selectedAgentId;
+        const currentAgent = agents.find((a) => a.id === agentId) ?? selectedAgent;
+        return currentAgent ? (
+          <AgentPanel
+            key={currentAgent.id}
+            agent={currentAgent}
+            history={history}
+            capabilities={capabilities}
+            loading={agentLoading}
+            error={agentError}
+            api={api}
+            onRefresh={() => loadAgent(currentAgent.id)}
+            onArchive={archiveSelectedAgent}
+            onOptimisticMessage={(message) => {
+              setHistory((prev) => {
+                const base: AgentHistory = prev ? { ...prev, timeline: [...prev.timeline] } : {
+                  sessionId: "",
+                  revision: { mtimeMs: Date.now(), size: 0, contentHash: "" },
+                  timeline: [],
+                  branches: [],
+                  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
+                  unknownRecordCount: 0,
+                  agentErrorCount: 0,
+                  malformedRecordCount: 0,
+                  partialTail: false,
+                  invalidUtf8Count: 0,
+                  rewritten: false,
+                };
+                return {
+                  ...base,
+                  timeline: [...base.timeline, { kind: "user", id: `user-${Date.now()}`, text: message }],
+                };
+              });
+            }}
+          />
+        ) : (
+          <div className="empty">
+            <span className="empty-icon" aria-hidden="true">◈</span>
+            <h1>No agent selected</h1>
+            <button className="primary" onClick={() => void createAgent()}>New agent</button>
+          </div>
+        );
+      }
+
+      case "terminal": {
+        const termId = tab.targetId ?? selectedTerminalId;
+        const currentTerm = terminals.find((t) => t.id === termId) ?? selectedTerminal;
+        return currentTerm ? (
+          <TerminalPanel
+            key={currentTerm.id}
+            terminal={currentTerm}
+            api={api}
+            onClose={() => {
+              setActiveTab("overview");
+            }}
+            onTerminated={() => {
+              void loadTerminals(workspace.id);
+            }}
+          />
+        ) : (
+          <div className="empty">
+            <span className="empty-icon" aria-hidden="true">&gt;_</span>
+            <h1>No active terminal</h1>
+            <button className="primary" onClick={() => void createTerminal()}>Launch terminal</button>
+          </div>
+        );
+      }
+
+      case "explorer":
+        return (
+          <ExplorerPanel
+            workspaceId={workspace.id}
+            api={api}
+            selectedFile={openEditorPath}
+            onOpenFile={(path) => {
+              setOpenEditorPath(path);
+              setActiveTab("editor");
+              openPaneTab({
+                id: `editor-${path}`,
+                kind: "editor",
+                title: path.split("/").pop() ?? path,
+                targetId: path,
+              });
+            }}
+          />
+        );
+
+      case "changes":
+        return (
+          <ChangesPanel
+            workspaceId={workspace.id}
+            api={api}
+            onOpenFile={(path) => {
+              setOpenEditorPath(path);
+              setActiveTab("editor");
+              openPaneTab({
+                id: `editor-${path}`,
+                kind: "editor",
+                title: path.split("/").pop() ?? path,
+                targetId: path,
+              });
+            }}
+            onOpenDiff={(path) => {
+              setOpenDiffPath(path);
+              setActiveTab("diff");
+              openPaneTab({
+                id: `diff-${path}`,
+                kind: "diff",
+                title: `Diff: ${path.split("/").pop() ?? path}`,
+                targetId: path,
+              });
+            }}
+          />
+        );
+
+      case "editor": {
+        const filePath = tab.targetId ?? openEditorPath;
+        return filePath ? (
+          <EditorPanel
+            workspaceId={workspace.id}
+            filePath={filePath}
+            api={api}
+            onClose={() => {
+              setOpenEditorPath(undefined);
+              setActiveTab("explorer");
+            }}
+            onOpenDiff={(path) => {
+              setOpenDiffPath(path);
+              setActiveTab("diff");
+              openPaneTab({
+                id: `diff-${path}`,
+                kind: "diff",
+                title: `Diff: ${path.split("/").pop() ?? path}`,
+                targetId: path,
+              });
+            }}
+          />
+        ) : (
+          <div className="empty">
+            <span className="empty-icon" aria-hidden="true">📄</span>
+            <h1>No file selected</h1>
+          </div>
+        );
+      }
+
+      case "diff": {
+        const diffPath = tab.targetId ?? openDiffPath;
+        return (
+          <DiffPanel
+            workspaceId={workspace.id}
+            initialPath={diffPath}
+            api={api}
+            onOpenFile={(path) => {
+              setOpenEditorPath(path);
+              setActiveTab("editor");
+              openPaneTab({
+                id: `editor-${path}`,
+                kind: "editor",
+                title: path.split("/").pop() ?? path,
+                targetId: path,
+              });
+            }}
+            onClose={() => {
+              setOpenDiffPath(undefined);
+              setActiveTab("changes");
+            }}
+          />
+        );
+      }
+
+      default:
+        return <div className="empty">Unknown view</div>;
+    }
+  };
 
   return (
     <div className="app">
+      {isOffline && (
+        <div className="offline-banner" role="status">
+          <span>⚠️ You are currently offline. Local changes cannot sync until connection is restored.</span>
+          <button type="button" onClick={() => void refreshWorkspaces()}>
+            Reconnect
+          </button>
+        </div>
+      )}
+
       <button className="mobile-nav" onClick={() => setDrawerOpen(true)} aria-label="Open navigation">
         <span aria-hidden="true">☰</span> Navigate
       </button>
+
       {snapshot ? (
         <Sidebar
           data={snapshot}
@@ -397,11 +799,15 @@ function App() {
 
         {workspace ? (
           <div className="workspace-container">
+            {/* Top Command & Settings Bar */}
             <nav className="workspace-nav-bar" aria-label="Workspace views">
               <div className="nav-tabs">
                 <button
                   className={`nav-tab ${activeTab === "overview" ? "active" : ""}`}
-                  onClick={() => setActiveTab("overview")}
+                  onClick={() => {
+                    setActiveTab("overview");
+                    openPaneTab({ id: `overview-${workspace.id}`, kind: "overview", title: "Overview" });
+                  }}
                 >
                   ℹ Overview
                 </button>
@@ -410,6 +816,7 @@ function App() {
                   onClick={() => {
                     if (!selectedAgentId && agents[0]) setSelectedAgentId(agents[0].id);
                     setActiveTab("agent");
+                    if (agents[0]) handleSelectAgent(agents[0].id);
                   }}
                 >
                   ◈ Agent {agents.length > 0 && <span className="tab-badge">{agents.length}</span>}
@@ -419,222 +826,75 @@ function App() {
                   onClick={() => {
                     if (!selectedTerminalId && terminals[0]) setSelectedTerminalId(terminals[0].id);
                     setActiveTab("terminal");
+                    if (terminals[0]) handleSelectTerminal(terminals[0].id);
                   }}
                 >
                   &gt;_ Terminal {terminals.length > 0 && <span className="tab-badge">{terminals.length}</span>}
                 </button>
                 <button
                   className={`nav-tab ${activeTab === "explorer" ? "active" : ""}`}
-                  onClick={() => setActiveTab("explorer")}
+                  onClick={() => {
+                    setActiveTab("explorer");
+                    openPaneTab({ id: `explorer-${workspace.id}`, kind: "explorer", title: "Files" });
+                  }}
                 >
                   📁 Files
                 </button>
                 <button
                   className={`nav-tab ${activeTab === "changes" ? "active" : ""}`}
-                  onClick={() => setActiveTab("changes")}
+                  onClick={() => {
+                    setActiveTab("changes");
+                    openPaneTab({ id: `changes-${workspace.id}`, kind: "changes", title: "Changes" });
+                  }}
                 >
                   ± Changes
                 </button>
-                {openEditorPath && (
-                  <button
-                    className={`nav-tab ${activeTab === "editor" ? "active" : ""}`}
-                    onClick={() => setActiveTab("editor")}
-                  >
-                    📄 {openEditorPath.split("/").pop()}
-                    <span
-                      className="tab-close"
-                      title="Close editor tab"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenEditorPath(undefined);
-                        if (activeTab === "editor") setActiveTab("explorer");
-                      }}
-                    >
-                      ×
-                    </span>
-                  </button>
-                )}
-                {openDiffPath !== undefined && (
-                  <button
-                    className={`nav-tab ${activeTab === "diff" ? "active" : ""}`}
-                    onClick={() => setActiveTab("diff")}
-                  >
-                    🔍 Diff {openDiffPath ? `(${openDiffPath.split("/").pop()})` : ""}
-                    <span
-                      className="tab-close"
-                      title="Close diff tab"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenDiffPath(undefined);
-                        if (activeTab === "diff") setActiveTab("changes");
-                      }}
-                    >
-                      ×
-                    </span>
-                  </button>
-                )}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginRight: 8 }}>
+                <button
+                  type="button"
+                  className="secondary"
+                  style={{ minHeight: 28, padding: "2px 8px", fontSize: 11 }}
+                  title="Command Palette (Ctrl+K)"
+                  onClick={() => setCommandPaletteOpen(true)}
+                >
+                  🔍 Commands <kbd style={{ marginLeft: 4, opacity: 0.7 }}>⌘K</kbd>
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  style={{ minHeight: 28, padding: "2px 8px", fontSize: 11 }}
+                  title="Settings & Themes"
+                  onClick={() => setSettingsModalOpen(true)}
+                >
+                  ⚙ Settings
+                </button>
               </div>
             </nav>
 
+            {/* Split Canvas for Desktop, Single active tab view for Mobile */}
             <div className="workspace-view">
-              {activeTab === "overview" && (
-                <WorkspaceOverview
-                  workspace={workspace}
-                  project={project}
-                  api={api}
-                  refresh={async () => { await refreshWorkspaces(); }}
-                  onCreateAgent={createAgent}
-                  onCreateTerminal={createTerminal}
-                  onOpenAgent={() => {
-                    if (!selectedAgentId && agents[0]) setSelectedAgentId(agents[0].id);
-                    setActiveTab("agent");
+              {isMobile ? (
+                renderTabContent({
+                  id: `mobile-${activeTab}`,
+                  kind: activeTab,
+                  title: activeTab,
+                  targetId: activeTab === "agent" ? selectedAgentId : activeTab === "terminal" ? selectedTerminalId : activeTab === "editor" ? openEditorPath : activeTab === "diff" ? openDiffPath : undefined,
+                })
+              ) : layout ? (
+                <SplitCanvas
+                  layout={layout}
+                  onLayoutChange={handleLayoutChange}
+                  renderTabContent={renderTabContent}
+                  onCloseTab={(tabId) => {
+                    if (tabId.startsWith("editor-")) setOpenEditorPath(undefined);
+                    if (tabId.startsWith("diff-")) setOpenDiffPath(undefined);
                   }}
-                  onOpenTerminal={() => {
-                    if (!selectedTerminalId && terminals[0]) setSelectedTerminalId(terminals[0].id);
-                    setActiveTab("terminal");
-                  }}
-                  onOpenExplorer={() => setActiveTab("explorer")}
-                  onOpenChanges={() => setActiveTab("changes")}
-                  onOpenDiff={() => {
-                    setOpenDiffPath("");
-                    setActiveTab("diff");
-                  }}
-                />
-              )}
-
-              {activeTab === "terminal" && (
-                selectedTerminal ? (
-                  <TerminalPanel
-                    key={selectedTerminal.id}
-                    terminal={selectedTerminal}
-                    api={api}
-                    onClose={() => {
-                      setActiveTab("overview");
-                    }}
-                    onTerminated={() => {
-                      void loadTerminals(workspace.id);
-                    }}
-                  />
-                ) : (
-                  <div className="empty">
-                    <span className="empty-icon" aria-hidden="true">&gt;_</span>
-                    <h1>No active terminal</h1>
-                    <p>Launch an interactive PTY shell in this workspace.</p>
-                    <button className="primary" onClick={() => void createTerminal()}>Launch terminal</button>
-                  </div>
-                )
-              )}
-
-              {activeTab === "agent" && (
-                selectedAgent ? (
-                  <AgentPanel
-                    key={selectedAgent.id}
-                    agent={selectedAgent}
-                    history={history}
-                    capabilities={capabilities}
-                    loading={agentLoading}
-                    error={agentError}
-                    api={api}
-                    onRefresh={() => loadAgent(selectedAgent.id)}
-                    onArchive={archiveSelectedAgent}
-                    onOptimisticMessage={(message) => {
-                      setHistory((prev) => {
-                        const base: AgentHistory = prev ? { ...prev, timeline: [...prev.timeline] } : {
-                          sessionId: "",
-                          revision: { mtimeMs: Date.now(), size: 0, contentHash: "" },
-                          timeline: [],
-                          branches: [],
-                          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
-                          unknownRecordCount: 0,
-                          agentErrorCount: 0,
-                          malformedRecordCount: 0,
-                          partialTail: false,
-                          invalidUtf8Count: 0,
-                          rewritten: false,
-                        };
-                        return {
-                          ...base,
-                          timeline: [...base.timeline, { kind: "user", id: `user-${Date.now()}`, text: message }],
-                        };
-                      });
-                    }}
-                  />
-                ) : (
-                  <div className="empty">
-                    <span className="empty-icon" aria-hidden="true">◈</span>
-                    <h1>No agent active</h1>
-                    <p>Create a new agent to start an autonomous coding conversation.</p>
-                    <button className="primary" onClick={() => void createAgent()}>New agent</button>
-                  </div>
-                )
-              )}
-
-              {activeTab === "explorer" && (
-                <ExplorerPanel
                   workspaceId={workspace.id}
-                  api={api}
-                  selectedFile={openEditorPath}
-                  onOpenFile={(path) => {
-                    setOpenEditorPath(path);
-                    setActiveTab("editor");
-                  }}
                 />
-              )}
-
-              {activeTab === "changes" && (
-                <ChangesPanel
-                  workspaceId={workspace.id}
-                  api={api}
-                  onOpenFile={(path) => {
-                    setOpenEditorPath(path);
-                    setActiveTab("editor");
-                  }}
-                  onOpenDiff={(path) => {
-                    setOpenDiffPath(path);
-                    setActiveTab("diff");
-                  }}
-                />
-              )}
-
-              {activeTab === "editor" && (
-                openEditorPath ? (
-                  <EditorPanel
-                    workspaceId={workspace.id}
-                    filePath={openEditorPath}
-                    api={api}
-                    onClose={() => {
-                      setOpenEditorPath(undefined);
-                      setActiveTab("explorer");
-                    }}
-                    onOpenDiff={(path) => {
-                      setOpenDiffPath(path);
-                      setActiveTab("diff");
-                    }}
-                  />
-                ) : (
-                  <div className="empty">
-                    <span className="empty-icon" aria-hidden="true">📄</span>
-                    <h1>No file opened</h1>
-                    <p>Select a file from the Explorer or Changes panel to view and edit.</p>
-                    <button className="primary" onClick={() => setActiveTab("explorer")}>Open Explorer</button>
-                  </div>
-                )
-              )}
-
-              {activeTab === "diff" && (
-                <DiffPanel
-                  workspaceId={workspace.id}
-                  initialPath={openDiffPath}
-                  api={api}
-                  onOpenFile={(path) => {
-                    setOpenEditorPath(path);
-                    setActiveTab("editor");
-                  }}
-                  onClose={() => {
-                    setOpenDiffPath(undefined);
-                    setActiveTab("changes");
-                  }}
-                />
+              ) : (
+                <div className="empty">Loading workspace layout…</div>
               )}
             </div>
           </div>
@@ -647,6 +907,40 @@ function App() {
         )}
       </main>
 
+      {/* Command Palette */}
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        snapshot={snapshot ?? { projects: [], workspaces: [], locations: [] }}
+        selectedWorkspaceId={selectedWorkspaceId}
+        agents={agents}
+        terminals={terminals}
+        onSelectWorkspace={handleSelectWorkspace}
+        onSelectAgent={handleSelectAgent}
+        onSelectTerminal={handleSelectTerminal}
+        onOpenView={(view) => {
+          setActiveTab(view);
+          if (workspace) openPaneTab({ id: `${view}-${workspace.id}`, kind: view, title: view });
+        }}
+        onCreateAgent={() => void createAgent()}
+        onCreateTerminal={() => void createTerminal()}
+        onResetLayout={() => {
+          if (workspace) handleLayoutChange(createDefaultLayout(workspace.id));
+        }}
+        onOpenSettings={() => setSettingsModalOpen(true)}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        open={settingsModalOpen}
+        onClose={() => setSettingsModalOpen(false)}
+        settings={settings}
+        onSaveSettings={handleSaveSettings}
+        themes={themes}
+        fonts={fonts}
+      />
+
+      {/* Workspace Creation Modals */}
       {form === "project" && (
         <FormDialog
           title="Register a project"

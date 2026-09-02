@@ -1,6 +1,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { opaqueDomainIdSchema, MAX_DOMAIN_LABEL_LENGTH, MAX_DOMAIN_PATH_LENGTH } from "../../shared/domain/workspaces.ts";
+import { workspaceLayoutSchema } from "../../shared/domain/layout.ts";
+import { workspaceSettingsSchema } from "../../shared/domain/settings.ts";
+import { BUILTIN_THEMES, BUILTIN_FONTS, BUILTIN_TOOL_RENDERERS } from "../../shared/domain/customization.ts";
 import { WorkspaceError, type WorkspaceService } from "../workspaces/service.ts";
 import { HttpInputError, readJsonBody } from "./body.ts";
 
@@ -42,5 +45,45 @@ export const createWorkspaceRoutes = (service: WorkspaceService): Hono => {
   app.post("/api/workspaces/:workspaceId/archive", (context) => { try { service.archiveWorkspace(id(context, "workspaceId")); return success({ ok: true }); } catch (error) { return errorResponse(error); } });
   app.post("/api/workspaces/:workspaceId/reopen", (context) => { try { return success(service.reopenWorkspace(id(context, "workspaceId"))); } catch (error) { return errorResponse(error); } });
   app.post("/api/worktree-locations", async (context) => { try { const input = locationInput.parse(await readJsonBody(context.req.raw)); return success(await service.configureLocation(input), 201); } catch (error) { return errorResponse(error); } });
+
+  // Layout routes
+  app.get("/api/workspaces/:workspaceId/layout", (context) => {
+    try {
+      return success(service.getLayout(id(context, "workspaceId")));
+    } catch (error) {
+      return errorResponse(error);
+    }
+  });
+  app.put("/api/workspaces/:workspaceId/layout", async (context) => {
+    try {
+      const input = workspaceLayoutSchema.parse(await readJsonBody(context.req.raw));
+      return success(service.saveLayout(id(context, "workspaceId"), input));
+    } catch (error) {
+      return errorResponse(error);
+    }
+  });
+
+  // Settings routes
+  app.get("/api/workspaces/:workspaceId/settings", (context) => {
+    try {
+      return success(service.getSettings(id(context, "workspaceId")));
+    } catch (error) {
+      return errorResponse(error);
+    }
+  });
+  app.put("/api/workspaces/:workspaceId/settings", async (context) => {
+    try {
+      const input = workspaceSettingsSchema.parse(await readJsonBody(context.req.raw));
+      return success(service.saveSettings(id(context, "workspaceId"), input));
+    } catch (error) {
+      return errorResponse(error);
+    }
+  });
+
+  // Customization packs
+  app.get("/api/customization/themes", () => success(BUILTIN_THEMES));
+  app.get("/api/customization/fonts", () => success(BUILTIN_FONTS));
+  app.get("/api/customization/tool-renderers", () => success(BUILTIN_TOOL_RENDERERS));
+
   return app;
 };

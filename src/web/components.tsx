@@ -516,19 +516,39 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
         <textarea
           value={draft}
           onChange={(event) => updateDraft(event.target.value)}
-          placeholder={running ? "Steer now or queue a follow-up…" : "Prompt this agent…"}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              if (running) send("steer");
+              else send("prompt");
+            }
+          }}
+          placeholder={running ? "Steer now (Enter) or queue follow-up…" : "Prompt this agent… (Enter to send, Shift+Enter for newline)"}
           aria-label="Agent message"
           rows={3}
         />
         {images.length > 0 && (
           <div className="attachment-list" aria-label="Attached images">
             {images.map((image) => (
-              <button key={`${image.name}:${image.data.length}`} type="button" className="attachment" onClick={() => {
-                setImages((current) => current.filter((item) => item !== image));
-                reservedImageCount.current -= 1;
-              }}>
-                {image.name} ×
-              </button>
+              <div key={`${image.name}:${image.data.length}`} className="attachment-chip">
+                <img
+                  src={`data:${image.mimeType};base64,${image.data}`}
+                  alt={image.name}
+                  className="attachment-thumb"
+                />
+                <span className="attachment-name">{image.name}</span>
+                <button
+                  type="button"
+                  className="attachment-remove"
+                  onClick={() => {
+                    setImages((current) => current.filter((item) => item !== image));
+                    reservedImageCount.current -= 1;
+                  }}
+                  aria-label={`Remove ${image.name}`}
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -539,7 +559,7 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
           </label>
           {running ? (
             <>
-              <button className="secondary" onClick={() => send("steer")} disabled={busy}>Steer now</button>
+              <button className="primary" onClick={() => send("steer")} disabled={busy}>Steer now</button>
               <button className="secondary" onClick={() => send("followUp")} disabled={busy}>Queue follow-up</button>
               <button className="danger-button" onClick={() => void run(() => api.abort(agent.id))} disabled={busy}>Abort</button>
             </>
@@ -552,12 +572,43 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
   );
 }
 
+function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): { icon: string; title: string; subtitle: string } {
+  const input = (item.input ?? {}) as Record<string, unknown>;
+  switch (item.name) {
+    case "read":
+    case "readFile":
+      return { icon: "📖", title: "Read", subtitle: String(input.path ?? input.filePath ?? "") };
+    case "edit":
+    case "editFile":
+      return { icon: "✏️", title: "Edited", subtitle: String(input.path ?? input.filePath ?? "") };
+    case "write":
+    case "writeFile":
+      return { icon: "📝", title: "Wrote", subtitle: String(input.path ?? input.filePath ?? "") };
+    case "bash":
+      return { icon: "⚡", title: "Ran", subtitle: String(input.command ?? "") };
+    case "glob":
+      return { icon: "🔍", title: "Searched files", subtitle: String(input.pattern ?? "") };
+    case "grep":
+      return { icon: "🔎", title: "Searched code", subtitle: String(input.pattern ?? "") };
+    default:
+      return { icon: "⚙", title: item.name, subtitle: "" };
+  }
+}
+
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: "tool" }> }) {
+  const { icon, title, subtitle } = getToolSummary(item);
   return (
     <details className={`timeline-row tool ${item.status}`} open={item.status === "error"}>
-      <summary><strong>⚙ {item.name}</strong><span>{item.status}</span></summary>
-      <pre>{JSON.stringify(item.input, null, 2)}</pre>
-      {(item.error || item.result) && <pre>{item.error ?? item.result}</pre>}
+      <summary>
+        <span className="tool-header-left">
+          <span className="tool-icon">{icon}</span>
+          <strong>{title}</strong>
+          {subtitle && <code className="tool-target">{subtitle}</code>}
+        </span>
+        <span className={`tool-status-badge ${item.status}`}>{item.status}</span>
+      </summary>
+      {item.input && <pre className="tool-input-pre">{JSON.stringify(item.input, null, 2)}</pre>}
+      {(item.error || item.result) && <pre className="tool-output-pre">{item.error ?? item.result}</pre>}
     </details>
   );
 }
@@ -565,7 +616,15 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: "tool" }> }) {
 function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }) {
   if (item.kind === "unknown") return <article className="timeline-row unknown"><strong>Unknown activity</strong><code>{item.entryType}</code></article>;
   if (item.kind === "tool") {
-    if (concise && !item.significant && item.status !== "error") return null;
+    if (concise && !item.significant && item.status !== "error") {
+      const { icon, title, subtitle } = getToolSummary(item);
+      return (
+        <div className="timeline-concise-badge">
+          <span>{icon} {title}</span>
+          {subtitle && <code>{subtitle}</code>}
+        </div>
+      );
+    }
     return <ToolRow item={item} />;
   }
   if (item.kind === "process") {

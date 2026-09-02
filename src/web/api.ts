@@ -8,6 +8,9 @@ import {
 } from "../shared/domain/workspaces.ts";
 import { agentCapabilitiesSchema, agentHistoryResponseSchema, agentSummarySchema, type AgentCapabilities, type AgentHistoryResponse, type AgentSummary } from "../shared/domain/agents.ts";
 import { terminalSummarySchema, type CreateTerminalInput, type TerminalSummary } from "../shared/domain/terminals.ts";
+import { workspaceLayoutSchema, type WorkspaceLayout } from "../shared/domain/layout.ts";
+import { workspaceSettingsSchema, type WorkspaceSettings } from "../shared/domain/settings.ts";
+import { themePackSchema, fontPackSchema, toolRendererPackSchema, type ThemePack, type FontPack, type ToolRendererPack } from "../shared/domain/customization.ts";
 import type { AgentImage } from "../shared/protocol/agents.ts";
 import { z } from "zod";
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
@@ -127,6 +130,33 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     },
     async getTerminal(terminalId: string): Promise<TerminalSummary> {
       return terminalSummarySchema.parse(await request(`/api/terminals/${encodeURIComponent(terminalId)}`));
+    },
+    async getLayout(workspaceId: string): Promise<WorkspaceLayout> {
+      return workspaceLayoutSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/layout`));
+    },
+    async saveLayout(workspaceId: string, layout: WorkspaceLayout): Promise<WorkspaceLayout> {
+      return workspaceLayoutSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/layout`, {
+        method: "PUT",
+        body: JSON.stringify(layout),
+      }));
+    },
+    async getSettings(workspaceId: string): Promise<WorkspaceSettings> {
+      return workspaceSettingsSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`));
+    },
+    async saveSettings(workspaceId: string, settings: WorkspaceSettings): Promise<WorkspaceSettings> {
+      return workspaceSettingsSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`, {
+        method: "PUT",
+        body: JSON.stringify(settings),
+      }));
+    },
+    async getThemes(): Promise<ThemePack[]> {
+      return themePackSchema.array().parse(await request("/api/customization/themes"));
+    },
+    async getFonts(): Promise<FontPack[]> {
+      return fontPackSchema.array().parse(await request("/api/customization/fonts"));
+    },
+    async getToolRenderers(): Promise<ToolRendererPack> {
+      return toolRendererPackSchema.parse(await request("/api/customization/tool-renderers"));
     },
     async deleteTerminal(terminalId: string): Promise<void> {
       okResponseSchema.parse(await request(`/api/terminals/${encodeURIComponent(terminalId)}`, { method: "DELETE" }));

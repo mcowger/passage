@@ -34,6 +34,9 @@ import {
   type Response as ProtocolResponse,
 } from "../shared/protocol/index.ts";
 import homepage from "../web/index.html";
+import manifest from "../web/manifest.webmanifest" with { type: "text" };
+import icon from "../web/icon.svg" with { type: "text" };
+import swScript from "../web/sw.js" with { type: "text" };
 
 const DEFAULT_PORT = 3000;
 const MAX_WEBSOCKET_COMMAND_BYTES = 64 * 1024;
@@ -165,6 +168,19 @@ export const server = Bun.serve<SocketData>({
   development: process.env.NODE_ENV !== "production",
   routes: {
     "/": homepage,
+    "/manifest.webmanifest": new Response(manifest, {
+      headers: { "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=86400" },
+    }),
+    "/icon.svg": new Response(icon, {
+      headers: { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400" },
+    }),
+    "/sw.js": new Response(swScript, {
+      headers: {
+        "Content-Type": "application/javascript",
+        "Service-Worker-Allowed": "/",
+        "Cache-Control": "no-cache",
+      },
+    }),
   },
   fetch(request, server) {
     const url = new URL(request.url);

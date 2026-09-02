@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="brand" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="50%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#3b82f6" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="#1e293b" stroke-width="8" />
+  <!-- Passage Gateway Symbol: Portal / Gateway with coding chevron -->
+  <path d="M128 140 C128 110, 384 110, 384 140 L384 372 C384 402, 128 402, 128 372 Z" fill="none" stroke="url(#brand)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M180 200 L256 256 L180 312" fill="none" stroke="url(#accent)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" />
+  <line x1="280" y1="312" x2="336" y2="312" stroke="#f8fafc" stroke-width="24" stroke-linecap="round" />
+</svg>

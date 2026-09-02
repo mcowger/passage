@@ -1,6 +1,8 @@
 import { realpath, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { projectSchema, locationSchema, workspaceSchema, type Project, type WorktreeLocation, type Workspace, type WorkspaceSnapshot } from "../../shared/domain/workspaces.ts";
+import { CURRENT_LAYOUT_SCHEMA_VERSION, workspaceLayoutSchema, createDefaultLayout, type WorkspaceLayout } from "../../shared/domain/layout.ts";
+import { CURRENT_SETTINGS_SCHEMA_VERSION, workspaceSettingsSchema, DEFAULT_WORKSPACE_SETTINGS, type WorkspaceSettings } from "../../shared/domain/settings.ts";
 import { MetadataRepositories } from "../metadata/repositories.ts";
 
 const MAX_LIST = 100;
@@ -50,6 +52,50 @@ export class WorkspaceService {
   reopenProject(projectId: string): Project { const project = this.requireProject(projectId); const updated = projectSchema.parse({ ...project, archivedAt: null }); this.repositories.projects.save(updated); return updated; }
   archiveWorkspace(workspaceId: string): void { this.requireWorkspace(workspaceId); this.repositories.workspaces.archive(workspaceId, now()); }
   reopenWorkspace(workspaceId: string): Workspace { const workspace = this.requireWorkspace(workspaceId); const updated = workspaceSchema.parse({ ...workspace, archivedAt: null }); this.repositories.workspaces.save(updated); return updated; }
+
+  getLayout(workspaceId: string): WorkspaceLayout {
+    this.requireWorkspace(workspaceId);
+    const existing = this.repositories.layouts.get<WorkspaceLayout["root"]>(workspaceId);
+    if (!existing) {
+      return createDefaultLayout(workspaceId);
+    }
+    const parsed = workspaceLayoutSchema.safeParse({ version: existing.layoutSchemaVersion, root: existing.splitTree });
+    return parsed.success ? parsed.data : createDefaultLayout(workspaceId);
+  }
+
+  saveLayout(workspaceId: string, layout: WorkspaceLayout): WorkspaceLayout {
+    this.requireWorkspace(workspaceId);
+    const parsed = workspaceLayoutSchema.parse(layout);
+    this.repositories.layouts.save({
+      workspaceId,
+      layoutSchemaVersion: parsed.version,
+      splitTree: parsed.root,
+      modifiedAt: now(),
+    });
+    return parsed;
+  }
+
+  getSettings(workspaceId: string): WorkspaceSettings {
+    this.requireWorkspace(workspaceId);
+    const existing = this.repositories.workspaceSettings.get<WorkspaceSettings>(workspaceId);
+    if (!existing) {
+      return DEFAULT_WORKSPACE_SETTINGS;
+    }
+    const parsed = workspaceSettingsSchema.safeParse(existing.preferences);
+    return parsed.success ? parsed.data : DEFAULT_WORKSPACE_SETTINGS;
+  }
+
+  saveSettings(workspaceId: string, settings: WorkspaceSettings): WorkspaceSettings {
+    this.requireWorkspace(workspaceId);
+    const parsed = workspaceSettingsSchema.parse(settings);
+    this.repositories.workspaceSettings.save({
+      workspaceId,
+      settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
+      preferences: parsed,
+      modifiedAt: now(),
+    });
+    return parsed;
+  }
 
   snapshot(): WorkspaceSnapshot {
     const active = this.repositories.projects.list(this.listLimit, false).map((p) => projectSchema.parse(p));
