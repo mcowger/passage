@@ -1,0 +1,37 @@
+{
+  "name": "passage",
+  "private": true,
+  "packageManager": "bun@1.4.0",
+  "engines": {
+    "bun": "1.4.0"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch run src/daemon/index.ts",
+    "build": "bun build --target=bun --production --outdir=dist --entry-naming='[name].[ext]' --asset-naming='[name]-[hash].[ext]' ./src/daemon/index.ts",
+    "start": "bun --cwd dist run ./index.js",
+    "package": "bun build --compile --target=bun --production --outfile=dist/passage ./src/daemon/index.ts",
+    "smoke:development": "bun run src/spikes/server-smoke.ts --source",
+    "smoke:production": "bun run src/spikes/server-smoke.ts",
+    "smoke:package": "bun run src/spikes/server-smoke.ts --compiled",
+    "test": "bun test",
+    "test:phase0": "bun run src/spikes/phase0.ts",
+    "test:pi-rpc": "bun test src/spikes/pi-rpc",
+    "test:phase0:pi-live": "bun run src/spikes/pi-rpc/run-live.ts",
+    "test:pty-websocket": "bun test src/spikes/pty-websocket",
+    "test:phase0:pty": "bun run src/spikes/pty-websocket/run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "4.13.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.6",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3"
+  }
+}
