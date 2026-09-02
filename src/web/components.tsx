@@ -505,34 +505,7 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
   const contextPercentage = totalTokens > 0 ? Math.min(100, Math.max(0.1, (totalTokens / 200000) * 100)).toFixed(1) : "0.0";
 
   return (
-    <section className="agent-panel" aria-label={`Agent ${agent.title}`}>
-      <header className="agent-header">
-        <div className="agent-header-left">
-          <div className="agent-title-row">
-            <span className={`status-dot ${running ? "running" : "idle"}`} aria-hidden="true">●</span>
-            <h1>{agent.title}</h1>
-          </div>
-          {totalTokens > 0 && (
-            <span className="context-usage-chip" title={`${totalTokens.toLocaleString()} / 200,000 tokens used`}>
-              <span className="context-dot" />
-              {contextPercentage}% ctx ({totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : totalTokens} tok)
-            </span>
-          )}
-        </div>
-        <div className="agent-header-actions">
-          <button className="secondary small" onClick={toggleConcise}>{concise ? "Detailed" : "Concise"}</button>
-          <button className="danger-button small" onClick={() => void run(onArchive, false, false)} disabled={busy}>Archive</button>
-        </div>
-      </header>
-
-      {history && (
-        <div className="usage-strip">
-          <span><b>{history.usage.input.toLocaleString()}</b> in</span>
-          <span><b>{history.usage.output.toLocaleString()}</b> out</span>
-          <span><b>{history.usage.cacheRead.toLocaleString()}</b> cache</span>
-          <span><b>${history.usage.cost.toFixed(4)}</b></span>
-        </div>
-      )}
+    <section className="agent-panel" aria-label={`Agent conversation ${agent.title}`}>
       {(error || composerError) && (
         <div className="alert agent-alert" role="alert">
           <span>{error || composerError}</span>
@@ -608,8 +581,30 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
                 <span>⊕ Attach</span>
                 <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(event) => { void addImages(event.target.files); event.currentTarget.value = ""; }} />
               </label>
+              {totalTokens > 0 && (
+                <span className="composer-ctx-pill" title={`${totalTokens.toLocaleString()} tokens (${history?.usage?.input.toLocaleString() ?? 0} in · ${history?.usage?.output.toLocaleString() ?? 0} out · ${history?.usage?.cacheRead.toLocaleString() ?? 0} cache) · $${history?.usage?.cost.toFixed(4) ?? "0.0000"}`}>
+                  <span className="context-dot" />
+                  <span>{contextPercentage}% ctx</span>
+                  <span className="composer-stat-sep">·</span>
+                  <span>{totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}k tok` : `${totalTokens} tok`}</span>
+                  {history?.usage?.cost !== undefined && history.usage.cost > 0 && (
+                    <>
+                      <span className="composer-stat-sep">·</span>
+                      <span>${history.usage.cost.toFixed(3)}</span>
+                    </>
+                  )}
+                </span>
+              )}
             </div>
             <div className="composer-toolbar-right">
+              <button
+                type="button"
+                className="composer-mode-toggle"
+                onClick={toggleConcise}
+                title={concise ? "Switch to Detailed mode" : "Switch to Concise mode"}
+              >
+                {concise ? "Concise" : "Detailed"}
+              </button>
               <ModelPicker
                 currentModelId={currentModel ? `${currentModel.provider}:${currentModel.id}` : undefined}
                 currentModelName={currentModelDisplayName}

@@ -25,6 +25,11 @@ export function SettingsModal({
   const [busy, setBusy] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<string>(getNotificationPermission());
 
+  React.useEffect(() => {
+    setCurrentSettings(settings);
+    setNotificationStatus(getNotificationPermission());
+  }, [settings, open]);
+
   if (!open) return null;
 
   const handleToggleNotifications = async (enabled: boolean) => {
