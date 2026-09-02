@@ -173,7 +173,7 @@ export class AgentService {
       throw new AgentError("invalid-input", "agent is running; use steer or follow-up");
     }
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
-    const process = this.requireProcess(agentId);
+    const process = await this.ensureProcess(agentId);
     this.updateStatus(agentId, "running", "status", process.generation);
     try {
       await process.request({ type: "prompt", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
@@ -186,21 +186,24 @@ export class AgentService {
   async steer(agentId: string, text: string, images?: AgentImage[]): Promise<void> {
     this.validateMessage(text);
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
-    await this.requireProcess(agentId).request({ type: "steer", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
+    const process = await this.ensureProcess(agentId);
+    await process.request({ type: "steer", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
   }
 
   async followUp(agentId: string, text: string, images?: AgentImage[]): Promise<void> {
     this.validateMessage(text);
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
-    await this.requireProcess(agentId).request({ type: "follow_up", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
+    const process = await this.ensureProcess(agentId);
+    await process.request({ type: "follow_up", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
   }
 
   async abort(agentId: string): Promise<void> {
-    await this.requireProcess(agentId).request({ type: "abort" });
+    const process = this.manager.get(agentId);
+    if (process) await process.request({ type: "abort" });
   }
 
   async capabilities(agentId: string): Promise<AgentCapabilities> {
-    const process = this.requireProcess(agentId);
+    const process = await this.ensureProcess(agentId);
     const [modelsResponse, thinkingResponse] = await Promise.all([
       process.request({ type: "get_available_models" }),
       process.request({ type: "get_available_thinking_levels" }),
@@ -236,7 +239,8 @@ export class AgentService {
     if (!capabilities.models.some((model) => model.provider === provider && model.id === modelId)) {
       throw new AgentError("invalid-input", "model is unavailable");
     }
-    await this.requireProcess(agentId).request({ type: "set_model", provider, modelId });
+    const process = await this.ensureProcess(agentId);
+    await process.request({ type: "set_model", provider, modelId });
     this.repositories.agents.updateModelPreference(agentId, `${provider}/${modelId}`);
   }
 
@@ -246,7 +250,8 @@ export class AgentService {
     if (!capabilities.thinkingLevels.includes(level)) {
       throw new AgentError("invalid-input", "thinking level is unavailable");
     }
-    await this.requireProcess(agentId).request({ type: "set_thinking_level", level });
+    const process = await this.ensureProcess(agentId);
+    await process.request({ type: "set_thinking_level", level });
     this.repositories.agents.updateThinkingPreference(agentId, level);
   }
 
@@ -483,6 +488,17 @@ export class AgentService {
     if (!agent) throw new AgentError("not-found", "agent not found");
     if (agent.archivedAt) throw new AgentError("archived", "agent archived");
     return agent;
+  }
+
+  private async ensureProcess(agentId: string): Promise<PiRpcProcess> {
+    this.requireAgent(agentId);
+    let process = this.manager.get(agentId);
+    if (!process) {
+      await this.start(agentId);
+      process = this.manager.get(agentId);
+    }
+    if (!process) throw new AgentError("not-running", "agent process could not be started");
+    return process;
   }
 
   private requireProcess(agentId: string): PiRpcProcess {

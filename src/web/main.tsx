@@ -221,15 +221,11 @@ function App() {
       setAgentError("");
       setAgents((current) => current.map((agent) => agent.id === summary.id ? summary : agent));
       setHistory("unpersisted" in result ? undefined : result.history);
-      if (summary.live) {
-        try {
-          const capabilities = await api.capabilities(agentId);
-          if (generation === agentLoadGeneration.current) setCapabilities(capabilities);
-        } catch {
-          if (generation === agentLoadGeneration.current) setCapabilities(undefined);
-        }
-      } else {
-        setCapabilities(undefined);
+      try {
+        const capabilities = await api.capabilities(agentId);
+        if (generation === agentLoadGeneration.current) setCapabilities(capabilities);
+      } catch {
+        if (generation === agentLoadGeneration.current) setCapabilities(undefined);
       }
     } catch (cause) {
       if (generation !== agentLoadGeneration.current) return;

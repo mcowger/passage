@@ -337,14 +337,14 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
                 const [provider, modelId] = event.target.value.split(":", 2);
                 if (provider && modelId) void run(() => api.setModel(agent.id, provider, modelId));
               }}
-              disabled={!agent.live || busy || modelOptions.length === 0}
+              disabled={busy || modelOptions.length === 0}
             >
               {!currentModelValue && <option value="">{model}</option>}
               {modelOptions.map((option) => <option key={`${option.provider}:${option.id}`} value={`${option.provider}:${option.id}`}>{option.name}</option>)}
             </select>
           </label>
           <label className="thinking-select">Thinking
-            <select value={thinking} onChange={(event) => void run(() => api.setThinking(agent.id, event.target.value))} disabled={!agent.live || busy || !capabilities || thinkingOptions.length === 0}>
+            <select value={thinking} onChange={(event) => void run(() => api.setThinking(agent.id, event.target.value))} disabled={busy || !capabilities || thinkingOptions.length === 0}>
               {!thinkingOptions.includes(thinking) && <option value={thinking}>{thinking}</option>}
               {thinkingOptions.map((level) => <option key={level} value={level}>{level}</option>)}
             </select>
@@ -375,9 +375,6 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
       </div>
 
       <footer className="composer">
-        {!agent.live && (
-          <button className="secondary resume-agent" onClick={() => void run(() => api.startAgent(agent.id))} disabled={busy}>Resume agent process</button>
-        )}
         <textarea
           value={draft}
           onChange={(event) => updateDraft(event.target.value)}
@@ -409,7 +406,7 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
               <button className="danger-button" onClick={() => void run(() => api.abort(agent.id))} disabled={busy}>Abort</button>
             </>
           ) : (
-            <button className="primary" onClick={() => send("prompt")} disabled={busy || !agent.live}>Prompt</button>
+            <button className="primary" onClick={() => send("prompt")} disabled={busy}>Prompt</button>
           )}
         </div>
       </footer>
