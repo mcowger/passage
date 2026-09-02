@@ -2,10 +2,15 @@ import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type For
 import { createRoot } from "react-dom/client";
 import type { AgentCapabilities, AgentHistory, AgentSummary, TimelineItem, ToolActivity } from "../shared/domain/agents.ts";
 import type { JsonValue } from "../shared/protocol/index.ts";
-import type { WorkspaceSnapshot } from "../shared/domain/workspaces.ts";
+import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.ts";
 import { createWorkspaceApi } from "./api.ts";
 import { subscribeAgent } from "./agentSocket.ts";
 import { AgentPanel, Sidebar, WorkspaceOverview } from "./components.tsx";
+import { ExplorerPanel } from "./components/ExplorerPanel.tsx";
+import { ChangesPanel } from "./components/ChangesPanel.tsx";
+import { EditorPanel } from "./components/EditorPanel.tsx";
+import { DiffPanel } from "./components/DiffPanel.tsx";
+import { NewWorktreeModal } from "./components/NewWorktreeModal.tsx";
 import "./styles.css";
 
 function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): AgentHistory | undefined {
@@ -51,7 +56,7 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
         }
       }
       if (!found) {
-        timeline.push({ kind: "assistant", id: `live-assistant-${Date.now()}`, text: event.delta });
+        timeline.push({ kind: "assistant", id: `assistant-${Date.now()}`, text: event.delta });
       }
       return { ...base, timeline, usage: nextUsage };
     }
@@ -68,7 +73,7 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
         }
       }
       if (!found) {
-        timeline.push({ kind: "thinking", id: `live-thinking-${Date.now()}`, text: event.delta });
+        timeline.push({ kind: "thinking", id: `thinking-${Date.now()}`, text: event.delta });
       }
       return { ...base, timeline, usage: nextUsage };
     }
@@ -78,20 +83,7 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
     }
   }
 
-  if (type === "message_start") {
-    const msg = payload.message as { role?: string; content?: Array<{ type?: string; text?: string }> } | undefined;
-    if (msg?.role === "assistant") {
-      const text = msg.content?.find((c) => c.type === "text")?.text ?? "";
-      const timeline = [...base.timeline];
-      const last = timeline.at(-1);
-      if (!last || last.kind !== "assistant" || !last.id.startsWith("live-assistant")) {
-        timeline.push({ kind: "assistant", id: `live-assistant-${Date.now()}`, text });
-        return { ...base, timeline };
-      }
-    }
-  }
-
-  if (type === "tool_execution_start") {
+  if (type === "tool_call" || type === "tool_start" || type === "tool_execution_start") {
     const toolCallId = String(payload.toolCallId ?? `tool-${Date.now()}`);
     const toolName = String(payload.toolName ?? "tool");
     const args = (payload.args ?? {}) as JsonValue;
@@ -122,7 +114,6 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
           ...item,
           status: (isError ? "error" : "complete") as "error" | "complete",
           ...(result !== undefined ? { result } : {}),
-          ...(isError ? { error: result ?? "Tool failed" } : {}),
         };
       }
       return item;
@@ -130,24 +121,25 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
     return { ...base, timeline };
   }
 
-  return base;
+  return prev;
 }
 
-type FormKind = "project" | "workspace";
+type FormKind = "project" | "workspace" | "worktree";
+type TabKind = "overview" | "agent" | "explorer" | "changes" | "editor" | "diff";
 
 type FormDialogProps = {
   title: string;
   submitLabel: string;
-  children: ReactNode;
   error?: string;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  children: ReactNode;
 };
 
-function FormDialog({ title, submitLabel, children, error, onSubmit, onCancel }: FormDialogProps) {
+function FormDialog({ title, submitLabel, error, onCancel, onSubmit, children }: FormDialogProps) {
   return (
-    <div className="modal-backdrop" role="presentation">
-      <form className="modal" onSubmit={onSubmit} aria-label={title} role="dialog" aria-modal="true">
+    <div className="modal-backdrop" onClick={onCancel}>
+      <form className="modal" onSubmit={onSubmit} onClick={(e) => e.stopPropagation()} aria-label={title} role="dialog" aria-modal="true">
         <button type="button" className="icon-button close" onClick={onCancel} aria-label="Close dialog">×</button>
         <p className="eyebrow">Workspace setup</p>
         <h2>{title}</h2>
@@ -169,6 +161,9 @@ function App() {
   const [formError, setFormError] = useState("");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>();
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
+  const [activeTab, setActiveTab] = useState<TabKind>("overview");
+  const [openEditorPath, setOpenEditorPath] = useState<string>();
+  const [openDiffPath, setOpenDiffPath] = useState<string>();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [history, setHistory] = useState<AgentHistory>();
   const [capabilities, setCapabilities] = useState<AgentCapabilities>();
@@ -243,8 +238,12 @@ function App() {
     setSelectedAgentId(undefined);
     setHistory(undefined);
     setCapabilities(undefined);
+    setOpenEditorPath(undefined);
+    setOpenDiffPath(undefined);
+    setActiveTab("overview");
     if (selectedWorkspaceId) void loadAgents(selectedWorkspaceId);
   }, [loadAgents, selectedWorkspaceId]);
+
   useEffect(() => {
     if (!selectedAgentId) return;
     void loadAgent(selectedAgentId, true);
@@ -288,6 +287,7 @@ function App() {
       const created = await api.createAgent(workspace.id);
       setAgents((current) => [...current, created]);
       setSelectedAgentId(created.id);
+      setActiveTab("agent");
     } catch (cause) {
       setAgentError(cause instanceof Error ? cause.message : "Unable to create agent");
     }
@@ -302,9 +302,23 @@ function App() {
       setHistory(undefined);
       setCapabilities(undefined);
       await loadAgents(selectedWorkspaceId, false);
+      setActiveTab("overview");
     } catch (cause) {
       setAgentError(cause instanceof Error ? cause.message : "Unable to archive agent");
     }
+  };
+
+  const handleSelectAgent = (id: string) => {
+    setSelectedAgentId(id);
+    setActiveTab("agent");
+    setDrawerOpen(false);
+  };
+
+  const handleSelectWorkspace = (id: string) => {
+    setSelectedWorkspaceId(id);
+    setSelectedAgentId(undefined);
+    setActiveTab("overview");
+    setDrawerOpen(false);
   };
 
   return (
@@ -319,11 +333,12 @@ function App() {
           selectedAgent={selectedAgentId}
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
-          onSelect={(id) => { setSelectedWorkspaceId(id); setSelectedAgentId(undefined); setDrawerOpen(false); }}
+          onSelect={handleSelectWorkspace}
           onNewProject={() => { setFormError(""); setForm("project"); }}
-          onNewWorkspace={() => { setFormError(""); setForm(snapshot.projects.some((item) => !item.archivedAt) ? "workspace" : "project"); }}
+          onNewWorkspace={() => { setFormError(""); setForm("workspace"); }}
+          onNewWorktree={() => { setFormError(""); setForm("worktree"); }}
           agents={agents}
-          onSelectAgent={(id) => { setSelectedAgentId(id); setDrawerOpen(false); }}
+          onSelectAgent={handleSelectAgent}
         />
       ) : (
         <aside className="sidebar loading">Loading Passage…</aside>
@@ -337,47 +352,219 @@ function App() {
             <button className="secondary" onClick={() => void refreshWorkspaces()}>Retry</button>
           </div>
         )}
-        {selectedAgent ? (
-          <AgentPanel
-            key={selectedAgent.id}
-            agent={selectedAgent}
-            history={history}
-            capabilities={capabilities}
-            loading={agentLoading}
-            error={agentError}
-            api={api}
-            onRefresh={() => loadAgent(selectedAgent.id)}
-            onArchive={archiveSelectedAgent}
-            onOptimisticMessage={(message) => {
-              setHistory((prev) => {
-                const base: AgentHistory = prev ? { ...prev, timeline: [...prev.timeline] } : {
-                  sessionId: "",
-                  revision: { mtimeMs: Date.now(), size: 0, contentHash: "" },
-                  timeline: [],
-                  branches: [],
-                  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
-                  unknownRecordCount: 0,
-                  agentErrorCount: 0,
-                  malformedRecordCount: 0,
-                  partialTail: false,
-                  invalidUtf8Count: 0,
-                  rewritten: false,
-                };
-                return {
-                  ...base,
-                  timeline: [...base.timeline, { kind: "user", id: `user-${Date.now()}`, text: message }],
-                };
-              });
-            }}
-          />
+
+        {workspace ? (
+          <div className="workspace-container">
+            <nav className="workspace-nav-bar" aria-label="Workspace views">
+              <div className="nav-tabs">
+                <button
+                  className={`nav-tab ${activeTab === "overview" ? "active" : ""}`}
+                  onClick={() => setActiveTab("overview")}
+                >
+                  ℹ Overview
+                </button>
+                <button
+                  className={`nav-tab ${activeTab === "agent" ? "active" : ""}`}
+                  onClick={() => {
+                    if (!selectedAgentId && agents[0]) setSelectedAgentId(agents[0].id);
+                    setActiveTab("agent");
+                  }}
+                >
+                  ◈ Agent {agents.length > 0 && <span className="tab-badge">{agents.length}</span>}
+                </button>
+                <button
+                  className={`nav-tab ${activeTab === "explorer" ? "active" : ""}`}
+                  onClick={() => setActiveTab("explorer")}
+                >
+                  📁 Files
+                </button>
+                <button
+                  className={`nav-tab ${activeTab === "changes" ? "active" : ""}`}
+                  onClick={() => setActiveTab("changes")}
+                >
+                  ± Changes
+                </button>
+                {openEditorPath && (
+                  <button
+                    className={`nav-tab ${activeTab === "editor" ? "active" : ""}`}
+                    onClick={() => setActiveTab("editor")}
+                  >
+                    📄 {openEditorPath.split("/").pop()}
+                    <span
+                      className="tab-close"
+                      title="Close editor tab"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenEditorPath(undefined);
+                        if (activeTab === "editor") setActiveTab("explorer");
+                      }}
+                    >
+                      ×
+                    </span>
+                  </button>
+                )}
+                {openDiffPath !== undefined && (
+                  <button
+                    className={`nav-tab ${activeTab === "diff" ? "active" : ""}`}
+                    onClick={() => setActiveTab("diff")}
+                  >
+                    🔍 Diff {openDiffPath ? `(${openDiffPath.split("/").pop()})` : ""}
+                    <span
+                      className="tab-close"
+                      title="Close diff tab"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenDiffPath(undefined);
+                        if (activeTab === "diff") setActiveTab("changes");
+                      }}
+                    >
+                      ×
+                    </span>
+                  </button>
+                )}
+              </div>
+            </nav>
+
+            <div className="workspace-view">
+              {activeTab === "overview" && (
+                <WorkspaceOverview
+                  workspace={workspace}
+                  project={project}
+                  api={api}
+                  refresh={async () => { await refreshWorkspaces(); }}
+                  onCreateAgent={createAgent}
+                  onOpenAgent={() => {
+                    if (!selectedAgentId && agents[0]) setSelectedAgentId(agents[0].id);
+                    setActiveTab("agent");
+                  }}
+                  onOpenExplorer={() => setActiveTab("explorer")}
+                  onOpenChanges={() => setActiveTab("changes")}
+                  onOpenDiff={() => {
+                    setOpenDiffPath("");
+                    setActiveTab("diff");
+                  }}
+                />
+              )}
+
+              {activeTab === "agent" && (
+                selectedAgent ? (
+                  <AgentPanel
+                    key={selectedAgent.id}
+                    agent={selectedAgent}
+                    history={history}
+                    capabilities={capabilities}
+                    loading={agentLoading}
+                    error={agentError}
+                    api={api}
+                    onRefresh={() => loadAgent(selectedAgent.id)}
+                    onArchive={archiveSelectedAgent}
+                    onOptimisticMessage={(message) => {
+                      setHistory((prev) => {
+                        const base: AgentHistory = prev ? { ...prev, timeline: [...prev.timeline] } : {
+                          sessionId: "",
+                          revision: { mtimeMs: Date.now(), size: 0, contentHash: "" },
+                          timeline: [],
+                          branches: [],
+                          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
+                          unknownRecordCount: 0,
+                          agentErrorCount: 0,
+                          malformedRecordCount: 0,
+                          partialTail: false,
+                          invalidUtf8Count: 0,
+                          rewritten: false,
+                        };
+                        return {
+                          ...base,
+                          timeline: [...base.timeline, { kind: "user", id: `user-${Date.now()}`, text: message }],
+                        };
+                      });
+                    }}
+                  />
+                ) : (
+                  <div className="empty">
+                    <span className="empty-icon" aria-hidden="true">◈</span>
+                    <h1>No agent active</h1>
+                    <p>Create a new agent to start an autonomous coding conversation.</p>
+                    <button className="primary" onClick={() => void createAgent()}>New agent</button>
+                  </div>
+                )
+              )}
+
+              {activeTab === "explorer" && (
+                <ExplorerPanel
+                  workspaceId={workspace.id}
+                  api={api}
+                  selectedFile={openEditorPath}
+                  onOpenFile={(path) => {
+                    setOpenEditorPath(path);
+                    setActiveTab("editor");
+                  }}
+                />
+              )}
+
+              {activeTab === "changes" && (
+                <ChangesPanel
+                  workspaceId={workspace.id}
+                  api={api}
+                  onOpenFile={(path) => {
+                    setOpenEditorPath(path);
+                    setActiveTab("editor");
+                  }}
+                  onOpenDiff={(path) => {
+                    setOpenDiffPath(path);
+                    setActiveTab("diff");
+                  }}
+                />
+              )}
+
+              {activeTab === "editor" && (
+                openEditorPath ? (
+                  <EditorPanel
+                    workspaceId={workspace.id}
+                    filePath={openEditorPath}
+                    api={api}
+                    onClose={() => {
+                      setOpenEditorPath(undefined);
+                      setActiveTab("explorer");
+                    }}
+                    onOpenDiff={(path) => {
+                      setOpenDiffPath(path);
+                      setActiveTab("diff");
+                    }}
+                  />
+                ) : (
+                  <div className="empty">
+                    <span className="empty-icon" aria-hidden="true">📄</span>
+                    <h1>No file opened</h1>
+                    <p>Select a file from the Explorer or Changes panel to view and edit.</p>
+                    <button className="primary" onClick={() => setActiveTab("explorer")}>Open Explorer</button>
+                  </div>
+                )
+              )}
+
+              {activeTab === "diff" && (
+                <DiffPanel
+                  workspaceId={workspace.id}
+                  initialPath={openDiffPath}
+                  api={api}
+                  onOpenFile={(path) => {
+                    setOpenEditorPath(path);
+                    setActiveTab("editor");
+                  }}
+                  onClose={() => {
+                    setOpenDiffPath(undefined);
+                    setActiveTab("changes");
+                  }}
+                />
+              )}
+            </div>
+          </div>
         ) : (
-          <WorkspaceOverview
-            workspace={workspace}
-            project={project}
-            api={api}
-            refresh={async () => { await refreshWorkspaces(); }}
-            onCreateAgent={createAgent}
-          />
+          <div className="empty">
+            <span className="empty-icon" aria-hidden="true">⌂</span>
+            <h1>Select a workspace</h1>
+            <p>Choose a workspace from navigation or register a project to begin.</p>
+          </div>
         )}
       </main>
 
@@ -404,7 +591,7 @@ function App() {
 
       {form === "workspace" && activeProject && (
         <FormDialog
-          title={`New workspace in ${activeProject.displayLabel}`}
+          title={`New directory workspace in ${activeProject.displayLabel}`}
           submitLabel="Create workspace"
           error={formError}
           onCancel={() => { setFormError(""); setForm(undefined); }}
@@ -422,6 +609,22 @@ function App() {
           <label>Subdirectory (optional)<input name="cwd" placeholder="services/importer" /></label>
           <p className="form-help">Paths are resolved by the daemon inside the registered project root.</p>
         </FormDialog>
+      )}
+
+      {form === "worktree" && snapshot && (
+        <NewWorktreeModal
+          projects={snapshot.projects}
+          locations={snapshot.locations}
+          defaultProjectId={activeProject?.id}
+          api={api}
+          onClose={() => setForm(undefined)}
+          onCreated={(created) => {
+            void refreshWorkspaces().then(() => {
+              setSelectedWorkspaceId(created.id);
+              setActiveTab("overview");
+            });
+          }}
+        />
       )}
     </div>
   );

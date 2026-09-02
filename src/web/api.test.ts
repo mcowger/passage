@@ -54,3 +54,43 @@ test("client rejects malformed successful command responses", async () => {
   const api = createWorkspaceApi(async () => Response.json({ accepted: false }));
   await expect(api.prompt("agent-1", "Hello")).rejects.toThrow();
 });
+
+test("client requests worktree operations and suggestions", async () => {
+  const calls: Request[] = [];
+  const api = createWorkspaceApi(async (input, init) => {
+    calls.push(new Request(new URL(input.toString(), "http://localhost"), init));
+    if (String(input).includes("/worktrees/suggest")) {
+      return Response.json({ label: "Test Label", branch: "feature/test", folder: "test-folder" });
+    }
+    if (String(input).includes("/worktree/remove")) {
+      return Response.json({ ok: true });
+    }
+    return Response.json({
+      id: "wsp_123",
+      projectId: "prj_123",
+      kind: "worktree",
+      cwd: "/worktrees/test",
+      checkoutRoot: "/worktrees/test",
+      mainRepositoryRoot: "/repo",
+      branchRef: "feature/test",
+      displayLabel: "Test Worktree",
+      locationId: "loc_123",
+      ownershipState: "owned",
+      markerId: "m_1",
+      markerPath: "/worktrees/test/.passage-worktree.json",
+      repairDetail: null,
+      archivedAt: null,
+    });
+  });
+
+  const suggestion = await api.suggestWorktree("prj_123", "Test purpose");
+  expect(suggestion.label).toBe("Test Label");
+  expect(suggestion.branch).toBe("feature/test");
+
+  const created = await api.createWorktree("prj_123", { locationId: "loc_123", ref: "feature/test", label: "Test Worktree" });
+  expect(created.id).toBe("wsp_123");
+  expect(created.kind).toBe("worktree");
+
+  await api.removeWorktree("wsp_123", true);
+  expect(calls.at(-1)?.url).toContain("/api/workspaces/wsp_123/worktree/remove");
+});

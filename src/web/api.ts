@@ -74,6 +74,21 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     async reopenWorkspace(id: string): Promise<Workspace> {
       return workspaceSchema.parse(await request(`/api/workspaces/${encodeURIComponent(id)}/reopen`, { method: "POST" }));
     },
+    async configureLocation(input: { projectId?: string; displayLabel: string; configuredRootPath: string; enabled?: boolean }) {
+      return await request("/api/worktree-locations", { method: "POST", body: JSON.stringify(input) });
+    },
+    async suggestWorktree(projectId: string, purpose: string): Promise<{ label: string; branch: string; folder: string }> {
+      return await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees/suggest`, { method: "POST", body: JSON.stringify({ purpose }) }) as { label: string; branch: string; folder: string };
+    },
+    async createWorktree(projectId: string, input: { locationId: string; ref: string; label: string; folder?: string }): Promise<Workspace> {
+      return workspaceSchema.parse(await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees`, { method: "POST", body: JSON.stringify(input) }));
+    },
+    async repairWorktree(workspaceId: string): Promise<Workspace> {
+      return workspaceSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/worktree/repair`, { method: "POST" }));
+    },
+    async removeWorktree(workspaceId: string, force = false): Promise<void> {
+      okResponseSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/worktree/remove`, { method: "POST", body: JSON.stringify(force ? { force: true } : {}) }));
+    },
     async gitStatus(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/status`) as GitStatus; },
     async gitDiff(id: string, target: "staged" | "working-tree" = "working-tree"): Promise<GitDiff[]> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/diff?target=${target}`) as GitDiff[]; },
     async listFiles(id: string, path = ".", cursor?: string): Promise<FileListing> { const q = new URLSearchParams({ path }); if (cursor) q.set("cursor", cursor); return await request(`/api/workspaces/${encodeURIComponent(id)}/files?${q}`) as FileListing; },

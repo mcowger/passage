@@ -13,11 +13,12 @@ type SidebarProps = {
   onSelect: (id: string) => void;
   onNewProject: () => void;
   onNewWorkspace: () => void;
+  onNewWorktree?: () => void;
   agents: AgentSummary[];
   onSelectAgent: (id: string) => void;
 };
 
-export function Sidebar({ data, selected, selectedAgent, open, onClose, onSelect, onNewProject, onNewWorkspace, agents, onSelectAgent }: SidebarProps) {
+export function Sidebar({ data, selected, selectedAgent, open, onClose, onSelect, onNewProject, onNewWorkspace, onNewWorktree, agents, onSelectAgent }: SidebarProps) {
   const activeProjects = data.projects.filter((project) => !project.archivedAt);
   return (
     <aside className={`sidebar ${open ? "drawer-open" : ""}`} aria-label="Projects and workspaces">
@@ -26,8 +27,13 @@ export function Sidebar({ data, selected, selectedAgent, open, onClose, onSelect
         <strong>Passage</strong>
         <button className="icon-button mobile-only" onClick={onClose} aria-label="Close navigation">×</button>
       </div>
-      <button className="primary full" onClick={onNewWorkspace}>＋ New workspace</button>
-      <button className="secondary full" onClick={onNewProject}>Register project</button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {onNewWorktree && (
+          <button className="primary full" onClick={onNewWorktree}>＋ New worktree</button>
+        )}
+        <button className="secondary full" onClick={onNewWorkspace}>＋ Directory workspace</button>
+        <button className="secondary full" onClick={onNewProject}>Register project</button>
+      </div>
       <div className="side-label">Projects</div>
       <div className="project-list">
         {activeProjects.map((project) => (
@@ -103,18 +109,36 @@ type WorkspaceOverviewProps = {
   api: WorkspaceApi;
   refresh: () => Promise<void>;
   onCreateAgent: () => Promise<void>;
+  onOpenExplorer?: () => void;
+  onOpenChanges?: () => void;
+  onOpenDiff?: () => void;
+  onOpenAgent?: () => void;
 };
 
-export function WorkspaceOverview({ workspace, project, api, refresh, onCreateAgent }: WorkspaceOverviewProps) {
+export function WorkspaceOverview({
+  workspace,
+  project,
+  api,
+  refresh,
+  onCreateAgent,
+  onOpenExplorer,
+  onOpenChanges,
+  onOpenDiff,
+  onOpenAgent,
+}: WorkspaceOverviewProps) {
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(workspace?.displayLabel ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [forceRemove, setForceRemove] = useState(false);
 
   useEffect(() => {
     setLabel(workspace?.displayLabel ?? "");
     setEditing(false);
     setError("");
+    setConfirmRemove(false);
+    setForceRemove(false);
   }, [workspace?.id, workspace?.displayLabel]);
 
   if (!workspace || !project) {
@@ -140,6 +164,15 @@ export function WorkspaceOverview({ workspace, project, api, refresh, onCreateAg
     }
   };
 
+  const handleRepair = async () => {
+    await mutate(() => api.repairWorktree(workspace.id));
+  };
+
+  const handleRemove = async () => {
+    await mutate(() => api.removeWorktree(workspace.id, forceRemove));
+    setConfirmRemove(false);
+  };
+
   return (
     <div className="overview">
       <div className="crumb">{project.displayLabel} <span>/</span> Workspace</div>
@@ -150,17 +183,37 @@ export function WorkspaceOverview({ workspace, project, api, refresh, onCreateAg
             <code>{workspace.kind}</code>
             <code>{workspace.branchRef ?? "directory"}</code>
             <span>{workspace.archivedAt ? "Archived" : "Ready"}</span>
+            {workspace.ownershipState === "repair" && (
+              <span className="conflict-badge">Repair Required</span>
+            )}
           </div>
         </div>
         <div className="actions">
           <button className="secondary" onClick={() => setEditing((value) => !value)}>Rename</button>
+          {workspace.kind === "worktree" && (
+            <button className="danger-button" onClick={() => setConfirmRemove(true)} disabled={busy}>
+              Remove Worktree
+            </button>
+          )}
           {workspace.archivedAt ? (
             <button className="primary" onClick={() => void mutate(() => api.reopenWorkspace(workspace.id))} disabled={busy}>Reopen</button>
           ) : (
-            <button className="danger-button" onClick={() => void mutate(() => api.archiveWorkspace(workspace.id))} disabled={busy}>Archive</button>
+            <button className="secondary" onClick={() => void mutate(() => api.archiveWorkspace(workspace.id))} disabled={busy}>Archive</button>
           )}
         </div>
       </header>
+
+      {workspace.ownershipState === "repair" && (
+        <div className="alert repair-banner">
+          <div>
+            <strong>⚠️ Worktree ownership marker mismatch:</strong> Registration requires repair.
+            {workspace.repairDetail && <p style={{ margin: "4px 0 0", fontSize: 12 }}>{workspace.repairDetail}</p>}
+          </div>
+          <button className="primary small" onClick={handleRepair} disabled={busy}>
+            🔧 Repair Registration
+          </button>
+        </div>
+      )}
 
       {editing && (
         <form className="inline-form" onSubmit={(event) => {
@@ -178,16 +231,31 @@ export function WorkspaceOverview({ workspace, project, api, refresh, onCreateAg
 
       <div className="overview-grid">
         <article>
-          <span className="card-icon" aria-hidden="true">✦</span>
-          <h2>Start with an agent</h2>
-           <p>Start a Pi agent in this workspace.</p>
-          <button className="primary" onClick={() => void onCreateAgent()} disabled={busy}>New agent</button>
+          <span className="card-icon" aria-hidden="true">◈</span>
+          <h2>Pi Agent</h2>
+          <p>Run autonomous coding sessions and conversations.</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="primary" onClick={() => void onCreateAgent()} disabled={busy}>New agent</button>
+            {onOpenAgent && <button className="secondary" onClick={onOpenAgent}>Open Agent ↗</button>}
+          </div>
         </article>
         <article>
-          <span className="card-icon" aria-hidden="true">⌘</span>
-          <h2>Directory workspace</h2>
-          <p className="muted">Authoritative working directory</p>
-          <code className="path">{workspace.cwd}</code>
+          <span className="card-icon" aria-hidden="true">📁</span>
+          <h2>File Explorer</h2>
+          <p>Browse workspace directory tree and open files for editing.</p>
+          {onOpenExplorer && <button className="secondary" onClick={onOpenExplorer}>Browse Files ↗</button>}
+        </article>
+        <article>
+          <span className="card-icon" aria-hidden="true">±</span>
+          <h2>Git Changes</h2>
+          <p>Review working tree status, staged index, and ahead/behind counts.</p>
+          {onOpenChanges && <button className="secondary" onClick={onOpenChanges}>View Changes ↗</button>}
+        </article>
+        <article>
+          <span className="card-icon" aria-hidden="true">🔍</span>
+          <h2>Diff Viewer</h2>
+          <p>Structured unified and side-by-side Git diffs.</p>
+          {onOpenDiff && <button className="secondary" onClick={onOpenDiff}>Inspect Diffs ↗</button>}
         </article>
       </div>
 
@@ -195,11 +263,39 @@ export function WorkspaceOverview({ workspace, project, api, refresh, onCreateAg
         <h2>Workspace details</h2>
         <dl>
           <div><dt>Project root</dt><dd>{project.canonicalRootPath}</dd></div>
+          <div><dt>Working directory</dt><dd>{workspace.cwd}</dd></div>
           <div><dt>Checkout root</dt><dd>{workspace.checkoutRoot ?? "Not applicable"}</dd></div>
           <div><dt>Main repository</dt><dd>{workspace.mainRepositoryRoot ?? "Not applicable"}</dd></div>
+          <div><dt>Branch ref</dt><dd>{workspace.branchRef ?? "None (directory)"}</dd></div>
           <div><dt>Ownership</dt><dd>{workspace.ownershipState}</dd></div>
+          {workspace.markerPath && <div><dt>Marker path</dt><dd>{workspace.markerPath}</dd></div>}
         </dl>
       </section>
+
+      {confirmRemove && (
+        <div className="modal-backdrop" onClick={() => setConfirmRemove(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button className="icon-button close" onClick={() => setConfirmRemove(false)} aria-label="Close dialog">×</button>
+            <h2>Remove Worktree</h2>
+            <p>Are you sure you want to remove the worktree at <code>{workspace.cwd}</code>?</p>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 0" }}>
+              <input
+                type="checkbox"
+                checked={forceRemove}
+                onChange={(e) => setForceRemove(e.target.checked)}
+                style={{ width: "auto", minHeight: "auto" }}
+              />
+              Force remove (discard any uncommitted or dirty changes)
+            </label>
+            <div className="form-actions">
+              <button className="secondary" onClick={() => setConfirmRemove(false)}>Cancel</button>
+              <button className="danger-button" onClick={handleRemove} disabled={busy}>
+                {busy ? "Removing..." : "Confirm Removal"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

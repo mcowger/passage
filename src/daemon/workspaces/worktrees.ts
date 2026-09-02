@@ -3,6 +3,7 @@ import { join, relative, resolve } from "node:path";
 import { workspaceSchema, type Workspace } from "../../shared/domain/workspaces.ts";
 import { GitService } from "./git.ts";
 import type { MetadataRepositories } from "../metadata/repositories.ts";
+import { MetadataGenerator, type WorktreeSuggestion } from "./metadata-generator.ts";
 
 export class WorktreeError extends Error { constructor(public readonly code: string, message: string) { super(message); } }
 export type WorktreeMarker = { formatVersion: 1; workspaceId: string; markerId: string; expectedCheckout: string; ref: string };
@@ -11,7 +12,17 @@ const id = () => crypto.randomUUID();
 const inside = (root: string, path: string) => { const r = relative(root, path); return r === "" || (!r.split(/[\\/]/).includes("..") && !resolve(path).startsWith("..")); };
 
 export class WorktreeService {
-  constructor(private readonly repositories: MetadataRepositories, private readonly git = new GitService()) {}
+  constructor(
+    private readonly repositories: MetadataRepositories,
+    private readonly git = new GitService(),
+    private readonly metadataGenerator = new MetadataGenerator(),
+  ) {}
+
+  async suggest(projectId: string, purpose: string): Promise<WorktreeSuggestion> {
+    const project = this.repositories.projects.get(projectId);
+    if (!project || project.archivedAt) throw new WorktreeError("invalid-project", "Active project required");
+    return this.metadataGenerator.suggest(purpose, project.canonicalRootPath);
+  }
   async create(projectId: string, locationId: string, ref: string, label: string, folder?: string): Promise<Workspace> {
     const project = this.repositories.projects.get(projectId); if (!project || project.archivedAt) throw new WorktreeError("invalid-project", "Active project required");
     const location = this.repositories.worktreeLocations.get(locationId); if (!location || !location.enabled || (location.projectId && location.projectId !== projectId)) throw new WorktreeError("invalid-location", "Enabled location required");

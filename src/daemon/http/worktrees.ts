@@ -4,11 +4,13 @@ import { opaqueDomainIdSchema, MAX_DOMAIN_LABEL_LENGTH, MAX_DOMAIN_PATH_LENGTH }
 import { WorktreeError, WorktreeService } from "../workspaces/worktrees.ts";
 import { readJsonBody } from "./body.ts";
 const create = z.object({ locationId: opaqueDomainIdSchema, ref: z.string().min(1).max(MAX_DOMAIN_PATH_LENGTH), label: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH), folder: z.string().max(MAX_DOMAIN_LABEL_LENGTH).optional() }).strict();
+const suggest = z.object({ purpose: z.string().max(2000) }).strict();
 const remove = z.object({ force: z.literal(true).optional() }).strict();
 const id = (v: string) => opaqueDomainIdSchema.parse(v);
 const error = (e: unknown) => Response.json({ error: e instanceof WorktreeError ? e.code : "invalid-request" }, { status: e instanceof WorktreeError ? (e.code === "not-found" ? 404 : e.code === "force-required" ? 428 : 409) : 400, headers: { "Cache-Control": "no-store" } });
 const ok = (v: unknown, status = 200) => Response.json(v, { status, headers: { "Cache-Control": "no-store" } });
 export const createWorktreeRoutes = (service: WorktreeService): Hono => { const app = new Hono(); app.use("*", async (c, next) => { c.header("Cache-Control", "no-store"); return next(); });
+  app.post("/api/projects/:projectId/worktrees/suggest", async (c) => { try { const x = suggest.parse(await readJsonBody(c.req.raw)); return ok(await service.suggest(id(c.req.param("projectId")), x.purpose)); } catch (e) { return error(e); } });
   app.post("/api/projects/:projectId/worktrees", async (c) => { try { const x = create.parse(await readJsonBody(c.req.raw)); return ok(await service.create(id(c.req.param("projectId")), x.locationId, x.ref, x.label, x.folder), 201); } catch (e) { return error(e); } });
   app.post("/api/workspaces/:workspaceId/worktree/repair", async (c) => { try { return ok(await service.reconcile(id(c.req.param("workspaceId")))); } catch (e) { return error(e); } });
   app.post("/api/workspaces/:workspaceId/worktree/remove", async (c) => { try { const x = remove.parse(await readJsonBody(c.req.raw)); await service.remove(id(c.req.param("workspaceId")), x.force === true); return ok({ ok: true }); } catch (e) { return error(e); } }); return app; };
