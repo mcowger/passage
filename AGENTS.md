@@ -37,6 +37,9 @@ Passage is a single-user, trusted-LAN coding environment. A persistent Bun daemo
 ## UI implementation and verification
 
 - Preserve the workspace-first model: agents, terminals, editors, diffs, explorer, changes, and overview are peer workspace surfaces. Closing a pane closes only the view, never the underlying resource.
+- Use Tailwind CSS v4 via Bun's native bundler and `bun-plugin-tailwind` (configured in `bunfig.toml`). Do not add Vite, PostCSS configs, or external Tailwind watch processes.
+- Use shadcn/ui primitives (`src/web/components/ui/*`) configured via `components.json` and class merging via `cn()` in `src/web/lib/utils.ts`. Add new primitives with `bunx --bun shadcn@latest add <component>`.
+- Theme tokens and color variables are defined in `src/web/styles.css` under `@theme inline`. Prefer shadcn components and Tailwind utility classes for interactive controls and modals (buttons, inputs, dialogs, badges, menus), while retaining custom container styling for CodeMirror, Xterm, and split pane layouts.
 - Keep tool grouping presentation-only: it cannot alter Pi history, cross user messages, hide errors, or remove tool boundaries. Unknown tools retain a safe generic renderer.
 - Mobile is a focused single-panel experience, not a compressed desktop split layout. Preserve desktop layouts while presenting drawers and full-screen artifact destinations on narrow screens.
 - Meet the UI specification's accessibility requirements: WCAG AA contrast, text/icon alternatives to color-only state, visible focus, deliberate focus order, and keyboard/context-menu alternatives for every drag-based pane action.
