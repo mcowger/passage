@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentCapabilities } from "../../shared/domain/agents.ts";
+import { Input } from "./ui/input.tsx";
+import { Badge } from "./ui/badge.tsx";
 
 export interface ModelPickerProps {
   currentModelId?: string;
@@ -233,7 +235,7 @@ export function ModelPicker({
             {/* Search header */}
             <div className="model-search-box">
               <span className="search-icon">🔍</span>
-              <input
+              <Input
                 ref={searchInputRef}
                 type="text"
                 placeholder="Search models"
@@ -276,12 +278,14 @@ export function ModelPicker({
                         <span className="drag-handle">⠿</span>
                         <span className="model-sparkle">❖</span>
                         <span className="model-name-text">{m.name}</span>
-                        <span className="context-size-tag">{ctxLabel}</span>
+                        <Badge variant="outline" className="context-size-tag font-mono text-[11px] px-1 py-0">
+                          {ctxLabel}
+                        </Badge>
 
                         {isSelected && (
-                          <span className="model-thinking-tag">
+                          <Badge variant="secondary" className="model-thinking-tag text-[11px] px-1.5 py-0">
                             Thinking: {currentThinking.charAt(0).toUpperCase() + currentThinking.slice(1)}
-                          </span>
+                          </Badge>
                         )}
 
                         {isSelected && <span className="check-icon">✓</span>}

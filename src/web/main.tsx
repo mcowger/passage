@@ -23,6 +23,13 @@ import { SplitCanvas } from "./components/SplitCanvas.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { showAgentNotification } from "./notifications.ts";
+import { Button } from "./components/ui/button.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "./components/ui/dialog.tsx";
 import "./styles.css";
 
 function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): AgentHistory | undefined {
@@ -199,19 +206,22 @@ type FormDialogProps = {
 
 function FormDialog({ title, submitLabel, error, onCancel, onSubmit, children }: FormDialogProps) {
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <form className="modal" onSubmit={onSubmit} onClick={(e) => e.stopPropagation()} aria-label={title} role="dialog" aria-modal="true">
-        <button type="button" className="icon-button close" onClick={onCancel} aria-label="Close dialog">×</button>
-        <p className="eyebrow">Workspace setup</p>
-        <h2>{title}</h2>
-        {error && <div className="alert form-alert" role="alert">{error}</div>}
-        {children}
-        <div className="form-actions">
-          <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
-          <button className="primary">{submitLabel}</button>
-        </div>
-      </form>
-    </div>
+    <Dialog open onOpenChange={(isOpen) => { if (!isOpen) onCancel(); }}>
+      <DialogContent className="max-w-[480px]">
+        <form onSubmit={onSubmit} aria-label={title} className="flex flex-col gap-4">
+          <DialogHeader>
+            <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Workspace setup</p>
+            <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>
+          </DialogHeader>
+          {error && <div className="text-sm text-destructive font-medium" role="alert">{error}</div>}
+          {children}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
+            <Button type="submit">{submitLabel}</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

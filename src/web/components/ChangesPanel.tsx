@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { GitChangeKind, GitFileStatus, GitStatus } from "../../shared/domain/git.ts";
 import type { WorkspaceApi } from "../api.ts";
+import { Button } from "./ui/button.tsx";
+import { Badge } from "./ui/badge.tsx";
 
 type ChangesProps = {
   workspaceId: string;
@@ -49,23 +51,25 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
           <span className="panel-icon" aria-hidden="true">±</span>
           <h2>Git Changes</h2>
         </div>
-        <div className="panel-actions">
-          <button
-            className="secondary small"
+        <div className="panel-actions flex items-center gap-1.5">
+          <Button
+            variant="secondary"
+            size="xs"
             onClick={() => onOpenDiff("")}
             title="Open unified workspace diff"
           >
             Review All Diffs ↗
-          </button>
-          <button
-            className="icon-button"
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
             onClick={refreshStatus}
             title="Refresh Git status"
             disabled={loading}
             aria-label="Refresh"
           >
             ↻
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -146,9 +150,9 @@ function ChangeRow({
 
   return (
     <div className={`change-row kind-${file.kind}`}>
-      <span className={`change-kind-badge ${badge.className}`} title={badge.title}>
+      <Badge variant={badge.variant} className="font-mono text-xs px-1.5 py-0 rounded" title={badge.title}>
         {badge.label}
-      </span>
+      </Badge>
       <div className="change-info">
         <span className="change-path" title={file.path}>
           {file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
@@ -159,43 +163,45 @@ function ChangeRow({
           {file.submodule && <small className="muted">· Submodule</small>}
         </div>
       </div>
-      <div className="change-actions">
-        <button
-          className="secondary small"
+      <div className="change-actions flex items-center gap-1">
+        <Button
+          variant="secondary"
+          size="xs"
           onClick={() => onOpenDiff(file.path, file.staged)}
           title="Inspect diff"
         >
           Diff ↗
-        </button>
+        </Button>
         {file.kind !== "deleted" && (
-          <button
-            className="secondary small"
+          <Button
+            variant="secondary"
+            size="xs"
             onClick={() => onOpenFile(file.path)}
             title="Open file in editor"
           >
             Edit
-          </button>
+          </Button>
         )}
       </div>
     </div>
   );
 }
 
-function changeBadge(kind: GitChangeKind): { label: string; className: string; title: string } {
+function changeBadge(kind: GitChangeKind): { label: string; variant: "default" | "secondary" | "destructive" | "outline"; title: string } {
   switch (kind) {
     case "modified":
-      return { label: "M", className: "badge-modified", title: "Modified" };
+      return { label: "M", variant: "secondary", title: "Modified" };
     case "added":
-      return { label: "A", className: "badge-added", title: "Added" };
+      return { label: "A", variant: "default", title: "Added" };
     case "deleted":
-      return { label: "D", className: "badge-deleted", title: "Deleted" };
+      return { label: "D", variant: "destructive", title: "Deleted" };
     case "renamed":
-      return { label: "R", className: "badge-renamed", title: "Renamed" };
+      return { label: "R", variant: "secondary", title: "Renamed" };
     case "conflict":
-      return { label: "C", className: "badge-conflict", title: "Merge conflict" };
+      return { label: "C", variant: "destructive", title: "Merge conflict" };
     case "untracked":
-      return { label: "?", className: "badge-untracked", title: "Untracked" };
+      return { label: "?", variant: "outline", title: "Untracked" };
     default:
-      return { label: "•", className: "badge-default", title: kind };
+      return { label: "•", variant: "outline", title: kind };
   }
 }

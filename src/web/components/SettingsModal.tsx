@@ -3,6 +3,14 @@ import type { ThemePack, FontPack } from "../../shared/domain/customization.ts";
 import { BUILTIN_THEMES, BUILTIN_FONTS } from "../../shared/domain/customization.ts";
 import type { WorkspaceSettings } from "../../shared/domain/settings.ts";
 import { requestNotificationPermission, getNotificationPermission } from "../notifications.ts";
+import { Button } from "./ui/button.tsx";
+import { Input } from "./ui/input.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog.tsx";
 
 export interface SettingsModalProps {
   open: boolean;
@@ -30,8 +38,6 @@ export function SettingsModal({
     setNotificationStatus(getNotificationPermission());
   }, [settings, open]);
 
-  if (!open) return null;
-
   const handleToggleNotifications = async (enabled: boolean) => {
     if (enabled) {
       const granted = await requestNotificationPermission();
@@ -53,17 +59,17 @@ export function SettingsModal({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal settings-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Settings">
-        <button className="icon-button close" onClick={onClose} aria-label="Close dialog">
-          ×
-        </button>
-        <h2>Workspace Settings</h2>
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
+      <DialogContent className="max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle className="text-lg font-semibold">Workspace Settings</DialogTitle>
+        </DialogHeader>
 
-        <div className="settings-section">
-          <label>
+        <div className="flex flex-col gap-4 py-2">
+          <label className="flex flex-col gap-1 text-sm font-medium">
             <span>Color Theme</span>
             <select
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               value={currentSettings.themeId}
               onChange={(e) => setCurrentSettings({ ...currentSettings, themeId: e.target.value })}
             >
@@ -74,12 +80,11 @@ export function SettingsModal({
               ))}
             </select>
           </label>
-        </div>
 
-        <div className="settings-section">
-          <label>
+          <label className="flex flex-col gap-1 text-sm font-medium">
             <span>Font Family</span>
             <select
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               value={currentSettings.fontId}
               onChange={(e) => setCurrentSettings({ ...currentSettings, fontId: e.target.value })}
             >
@@ -90,12 +95,11 @@ export function SettingsModal({
               ))}
             </select>
           </label>
-        </div>
 
-        <div className="settings-section">
-          <label>
+          <label className="flex flex-col gap-1 text-sm font-medium">
             <span>Agent Activity Detail</span>
             <select
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               value={currentSettings.agentActivityDetail}
               onChange={(e) =>
                 setCurrentSettings({
@@ -108,26 +112,25 @@ export function SettingsModal({
               <option value="detailed">Detailed (Full tool inputs and outputs)</option>
             </select>
           </label>
-        </div>
 
-        <div className="settings-section">
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={currentSettings.notificationsEnabled}
-              onChange={(e) => void handleToggleNotifications(e.target.checked)}
-            />
-            <span>Browser Notifications on Agent Completion</span>
-          </label>
-          <small className="form-help">
-            Permission state: <code>{notificationStatus}</code>. Notifications only fire when tab is inactive.
-          </small>
-        </div>
+          <div className="flex flex-col gap-1">
+            <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+              <input
+                type="checkbox"
+                className="rounded border-input text-primary focus:ring-ring"
+                checked={currentSettings.notificationsEnabled}
+                onChange={(e) => void handleToggleNotifications(e.target.checked)}
+              />
+              <span>Browser Notifications on Agent Completion</span>
+            </label>
+            <small className="text-xs text-muted-foreground">
+              Permission state: <code className="font-mono">{notificationStatus}</code>. Notifications only fire when tab is inactive.
+            </small>
+          </div>
 
-        <div className="settings-section">
-          <label>
+          <label className="flex flex-col gap-1 text-sm font-medium">
             <span>Terminal Font Size</span>
-            <input
+            <Input
               type="number"
               min={9}
               max={32}
@@ -142,15 +145,15 @@ export function SettingsModal({
           </label>
         </div>
 
-        <div className="form-actions">
-          <button className="secondary" onClick={onClose} disabled={busy}>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
             Cancel
-          </button>
-          <button className="primary" onClick={() => void handleSave()} disabled={busy}>
+          </Button>
+          <Button onClick={() => void handleSave()} disabled={busy}>
             {busy ? "Saving..." : "Save Settings"}
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FileEntry, FileListing } from "../../shared/domain/files.ts";
 import type { WorkspaceApi } from "../api.ts";
+import { Button } from "./ui/button.tsx";
+import { Input } from "./ui/input.tsx";
 
 type ExplorerProps = {
   workspaceId: string;
@@ -137,13 +139,15 @@ export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: Ex
         })}
 
         {dirState.nextCursor && (
-          <button
-            className="explorer-load-more secondary"
+          <Button
+            variant="secondary"
+            size="sm"
+            className="w-full mt-2"
             onClick={() => void loadDirectory(dirPath, dirState.nextCursor ?? undefined)}
             disabled={dirState.loading}
           >
             {dirState.loading ? "Loading..." : "Load more entries..."}
-          </button>
+          </Button>
         )}
       </div>
     );
@@ -157,14 +161,20 @@ export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: Ex
           <h2>Files</h2>
         </div>
         <div className="panel-actions">
-          <button className="icon-button" onClick={handleRefresh} title="Refresh file tree" aria-label="Refresh">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={handleRefresh}
+            title="Refresh file tree"
+            aria-label="Refresh"
+          >
             ↻
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="explorer-filter">
-        <input
+      <div className="explorer-filter relative">
+        <Input
           type="text"
           placeholder="Filter files..."
           value={filter}
@@ -172,9 +182,15 @@ export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: Ex
           aria-label="Filter files"
         />
         {filter && (
-          <button className="icon-button filter-clear" onClick={() => setFilter("")} aria-label="Clear filter">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6"
+            onClick={() => setFilter("")}
+            aria-label="Clear filter"
+          >
             ×
-          </button>
+          </Button>
         )}
       </div>
 

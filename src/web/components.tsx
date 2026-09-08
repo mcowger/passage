@@ -5,6 +5,13 @@ import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import { MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentImage } from "../shared/protocol/agents.ts";
 import type { WorkspaceApi } from "./api.ts";
 import { ModelPicker } from "./components/ModelPicker.tsx";
+import { Button } from "./components/ui/button.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "./components/ui/dialog.tsx";
 
 type SidebarProps = {
   data: WorkspaceSnapshot;
@@ -32,12 +39,18 @@ export function Sidebar({ data, selected, selectedAgent, selectedTerminal, open,
         <strong>Passage</strong>
         <button className="icon-button mobile-only" onClick={onClose} aria-label="Close navigation">×</button>
       </div>
-      <div className="sidebar-actions">
+      <div className="sidebar-actions flex flex-col gap-1.5">
         {onNewWorktree && (
-          <button className="secondary full" onClick={onNewWorktree}>＋ New worktree</button>
+          <Button variant="secondary" size="sm" className="w-full justify-start text-xs font-normal" onClick={onNewWorktree}>
+            ＋ New worktree
+          </Button>
         )}
-        <button className="secondary full" onClick={onNewWorkspace}>＋ Directory workspace</button>
-        <button className="secondary full" onClick={onNewProject}>Register project</button>
+        <Button variant="secondary" size="sm" className="w-full justify-start text-xs font-normal" onClick={onNewWorkspace}>
+          ＋ Directory workspace
+        </Button>
+        <Button variant="secondary" size="sm" className="w-full justify-start text-xs font-normal" onClick={onNewProject}>
+          Register project
+        </Button>
       </div>
       <div className="side-label">Projects</div>
       <div className="project-list">
@@ -333,28 +346,31 @@ export function WorkspaceOverview({
       </section>
 
       {confirmRemove && (
-        <div className="modal-backdrop" onClick={() => setConfirmRemove(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <button className="icon-button close" onClick={() => setConfirmRemove(false)} aria-label="Close dialog">×</button>
-            <h2>Remove Worktree</h2>
-            <p>Are you sure you want to remove the worktree at <code>{workspace.cwd}</code>?</p>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 0" }}>
+        <Dialog open onOpenChange={(open) => { if (!open) setConfirmRemove(false); }}>
+          <DialogContent className="max-w-[440px]">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-semibold">Remove Git Worktree</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground my-2">
+              Are you sure you want to remove the worktree at <code className="font-mono text-xs">{workspace.cwd}</code>?
+            </p>
+            <label className="flex items-center gap-2 text-sm text-destructive font-medium my-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={forceRemove}
                 onChange={(e) => setForceRemove(e.target.checked)}
-                style={{ width: "auto", minHeight: "auto" }}
+                className="rounded border-input text-destructive focus:ring-destructive"
               />
               Force remove (discard any uncommitted or dirty changes)
             </label>
-            <div className="form-actions">
-              <button className="secondary" onClick={() => setConfirmRemove(false)}>Cancel</button>
-              <button className="danger-button" onClick={handleRemove} disabled={busy}>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="secondary" onClick={() => setConfirmRemove(false)}>Cancel</Button>
+              <Button variant="destructive" onClick={handleRemove} disabled={busy}>
                 {busy ? "Removing..." : "Confirm Removal"}
-              </button>
+              </Button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
@@ -620,14 +636,14 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
               />
               {running ? (
                 <>
-                  <button className="primary small" onClick={() => send("steer")} disabled={busy}>Steer now</button>
-                  <button className="secondary small" onClick={() => send("followUp")} disabled={busy}>Queue follow-up</button>
-                  <button className="danger-button small" onClick={() => void run(() => api.abort(agent.id))} disabled={busy} title="Stop agent execution">⏹ Stop</button>
+                  <Button size="sm" onClick={() => send("steer")} disabled={busy}>Steer now</Button>
+                  <Button variant="secondary" size="sm" onClick={() => send("followUp")} disabled={busy}>Queue follow-up</Button>
+                  <Button variant="destructive" size="sm" onClick={() => void run(() => api.abort(agent.id))} disabled={busy} title="Stop agent execution">⏹ Stop</Button>
                 </>
               ) : (
-                <button className="primary small send-btn" onClick={() => send("prompt")} disabled={busy || (!draft.trim() && images.length === 0)}>
+                <Button size="sm" className="send-btn" onClick={() => send("prompt")} disabled={busy || (!draft.trim() && images.length === 0)}>
                   Send ↵
-                </button>
+                </Button>
               )}
             </div>
           </div>

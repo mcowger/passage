@@ -1,6 +1,14 @@
 import { useState } from "react";
 import type { Project, WorktreeLocation, Workspace } from "../../shared/domain/workspaces.ts";
 import type { WorkspaceApi } from "../api.ts";
+import { Button } from "./ui/button.tsx";
+import { Input } from "./ui/input.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog.tsx";
 
 type Props = {
   projects: Project[];
@@ -77,17 +85,19 @@ export function NewWorktreeModal({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
-        <button className="icon-button close" onClick={onClose} aria-label="Close dialog">×</button>
-        <h2>New Git Worktree</h2>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-[540px]">
+        <DialogHeader>
+          <DialogTitle className="text-lg font-semibold">New Git Worktree</DialogTitle>
+        </DialogHeader>
 
-        {error && <div className="alert form-alert">{error}</div>}
+        {error && <div className="alert form-alert text-sm text-destructive">{error}</div>}
 
-        <form onSubmit={handleCreate}>
-          <label>
+        <form onSubmit={handleCreate} className="flex flex-col gap-4">
+          <label className="flex flex-col gap-1 text-sm font-medium">
             Project
             <select
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               value={projectId}
               onChange={(e) => {
                 setProjectId(e.target.value);
@@ -104,10 +114,11 @@ export function NewWorktreeModal({
             </select>
           </label>
 
-          <label>
+          <label className="flex flex-col gap-1 text-sm font-medium">
             Worktree Location
             {availableLocations.length > 0 ? (
               <select
+                className="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 value={locationId}
                 onChange={(e) => setLocationId(e.target.value)}
                 required
@@ -119,40 +130,40 @@ export function NewWorktreeModal({
                 ))}
               </select>
             ) : (
-              <p className="muted" style={{ margin: "4px 0", fontSize: 12 }}>
+              <p className="text-xs text-muted-foreground mt-1">
                 No configured locations found. A global or project location must be configured.
               </p>
             )}
           </label>
 
-          <div style={{ margin: "14px 0" }}>
-            <label>
+          <div className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1 text-sm font-medium">
               Task Purpose / Goal (Optional)
-              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                <input
+              <div className="flex gap-2 mt-1">
+                <Input
                   type="text"
                   placeholder="e.g. Implement customer webhook retry backoff"
                   value={purpose}
                   onChange={(e) => setPurpose(e.target.value)}
                 />
-                <button
+                <Button
                   type="button"
-                  className="secondary"
+                  variant="secondary"
                   onClick={handleSuggest}
                   disabled={!purpose.trim() || suggesting || !projectId}
                   title="Generate label, branch and folder suggestions using AI"
-                  style={{ whiteSpace: "nowrap", flex: "none" }}
+                  className="shrink-0"
                 >
                   {suggesting ? "Thinking..." : "⚡ Suggest"}
-                </button>
+                </Button>
               </div>
             </label>
-            <p className="form-help">Type your goal and click Suggest to auto-fill metadata.</p>
+            <p className="text-xs text-muted-foreground">Type your goal and click Suggest to auto-fill metadata.</p>
           </div>
 
-          <label>
+          <label className="flex flex-col gap-1 text-sm font-medium">
             Workspace Label
-            <input
+            <Input
               type="text"
               placeholder="e.g. Webhook retry logic"
               value={label}
@@ -161,9 +172,9 @@ export function NewWorktreeModal({
             />
           </label>
 
-          <label>
+          <label className="flex flex-col gap-1 text-sm font-medium">
             Git Branch / Ref
-            <input
+            <Input
               type="text"
               placeholder="e.g. feature/webhook-retries or main"
               value={branch}
@@ -172,9 +183,9 @@ export function NewWorktreeModal({
             />
           </label>
 
-          <label>
+          <label className="flex flex-col gap-1 text-sm font-medium">
             Destination Folder Name (Optional)
-            <input
+            <Input
               type="text"
               placeholder="e.g. webhook-retries--wk_7d2a"
               value={folder}
@@ -182,20 +193,19 @@ export function NewWorktreeModal({
             />
           </label>
 
-          <div className="form-actions">
-            <button type="button" className="secondary" onClick={onClose}>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
-              className="primary"
               disabled={creating || !locationId || !label.trim() || !branch.trim()}
             >
               {creating ? "Creating Worktree..." : "Create Worktree"}
-            </button>
+            </Button>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
