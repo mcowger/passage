@@ -4,21 +4,21 @@ This plan turns [the design](docs/DESIGN.md) into dependency-ordered delivery
 steps. Each step ends with a gate that must pass before dependent work begins.
 Tests are added with each capability rather than deferred to the final phase.
 
-## Current implementation status — 2026-09-02
+## Current implementation status — 2026-09-08
 
-Work is paused after the Step 5 backend/API foundation. All existing unit tests (79 pass) and typechecks pass.
+Work is currently paused at Step 8 (Security & hardening). Steps 1 through 7 are complete, including git worktrees, file explorer, CodeMirror editor, diffs, daemon-owned terminals with xterm.js, split-tree canvas, PWA, and OpenChamber UI alignment. All unit tests (108 pass across 26 files), typechecks, and Phase 0 integration gates pass.
 
 | Step | Status | Completed scope / remaining gate |
 | --- | --- | --- |
-| 1. Runtime feasibility | Complete | Bun 1.4.0, Pi CLI 0.84.3, Bun HTML imports/build/package, Pi RPC, and Bun native PTY pass on the initial Linux x64 support target. See `docs/adr/0001-bun-runtime-feasibility.md`. |
+| 1. Runtime feasibility | Complete | Bun 1.4.0, Pi CLI 0.85 (with 0.84.3+ compatibility), Bun HTML imports/build/package, Pi RPC with stdout log noise tolerance, and Bun native PTY pass on the initial Linux x64 support target. See `docs/adr/0001-bun-runtime-feasibility.md`. |
 | 2. Daemon/protocol/persistence | Complete | Hono/Bun daemon, bounded Zod protocol/replay, origin safeguards, SQLite migrations/repositories, and production smoke checks are implemented. |
 | 3. Projects/workspaces | Complete | Canonical-root registration, directory-workspace lifecycle, path containment, workspace APIs, and the responsive project/workspace shell are implemented. |
-| 4. Pi agents | Complete | Supervised Pi RPC agents, direct bounded JSONL reconciliation, normalized history/timeline, replay/reconnect, agent API, composer, and agent UI are implemented. Pi-provider/model outcomes remain external runtime state rather than a Passage gate. |
-| 5. Git/files/worktrees | In progress | Backend complete: centralized Git status/diff, safe worktree metadata/marker lifecycle, bounded file reads/writes, and Hono APIs are implemented. Frontend remaining: Explorer, changes, editor (CodeMirror), diff UI, watcher invalidation, centralized worktree Git command routing, and the complete Step 5 integration gate. |
-| 6. Daemon-owned terminals | Not started | Feasibility spike passed; `TerminalManager`, terminal WebSocket binary protocol, size leases, and xterm.js UI remain. |
-| 7. Workspace canvas & PWA | Not started | Initial responsive shell exists; split-tree layout engine, panel restoration, PWA manifest/service worker, theme packs, and mobile artifact destinations remain. |
+| 4. Pi agents | Complete | Supervised Pi RPC agents, direct bounded JSONL reconciliation, normalized history/timeline, replay/reconnect, agent API, composer, in-composer model picker, and agent UI are implemented. Tolerates non-JSON stdout log output and captures to bounded stderr without process crashes. |
+| 5. Git/files/worktrees | Complete | Centralized Git status/diff, safe worktree metadata/marker lifecycle, bounded file reads/writes, Hono APIs, lazy explorer, Changes panel, CodeMirror editor with dirty buffers, and virtualized diffs are implemented. |
+| 6. Daemon-owned terminals | Complete | Daemon-owned `TerminalManager`, native Bun PTY adapter, binary WebSocket protocol with sequenced control/data frames, single-client size lease with explicit take-control, xterm.js UI with Canvas/WebGL fallbacks, and mobile viewport controls are implemented. |
+| 7. Workspace canvas & PWA | Complete | Versioned split-tree layout engine, panel restoration, split/tab/move/resize canvas, OpenChamber aesthetic alignment, PWA manifest and service worker, theme packs, command palette, and mobile single-panel drawer are implemented. |
 | 8. Security & hardening | Partially implemented | Host/Origin safeguards and path containment exist; centralized limits registry, cross-resource recovery, and structured diagnostic logging remain. |
-| 9. Verification & Playwright | Not started | Unit/integration/smoke tests pass; Playwright browser automation and full platform validation matrix remain. |
+| 9. Verification & Playwright | Not started | Unit/integration/smoke tests pass (108 pass across 26 files); Playwright browser automation and full platform validation matrix remain. |
 | 10. Beta packaging | Not started | Build/compile scripts exist; deployment documentation, reverse-proxy/VPN guidance, and MVP beta checklist remain. |
 
 ### Verified at pause
@@ -29,17 +29,15 @@ bun test
 bun run test:phase0
 ```
 
-The required compatibility and test suites pass, including typecheck, unit tests, live
-Pi process/session checks, Bun native PTY checks, development/production smoke
-tests, and compiled-package smoke tests.
+The required compatibility and test suites pass, including typecheck, unit tests (108 pass across 26 files), live Pi process/session checks (with non-JSON stdout log tolerance), Bun native PTY checks, development/production smoke tests, and compiled-package smoke tests.
 
 ### Resume point
 
-Complete Step 5 by:
-1. Wiring the existing Git/file/worktree APIs into bounded explorer, changes, CodeMirror editor, and virtualized diff panels.
-2. Routing worktree Git operations through the centralized `GitService`.
-3. Adding advisory filesystem watcher invalidation followed by authoritative refetches.
-4. Running the Step 5 worktree/file/Git edge-case test gate before starting terminals.
+Proceed with Step 8 (Security & hardening):
+1. Centralize resource limits across files, diffs, JSONL history, terminals, and replay buffers into a single limits registry.
+2. Add structured diagnostic logging for security rejections, Pi process lifecycle/stderr, and recoverable worktree states without adding remote telemetry.
+3. Verify cross-resource recovery flows for daemon restarts, browser disconnects, dirty worktree protection, and stale editor saves.
+4. Pass the Step 8 security and hardening edge-case test gate before configuring Playwright (Step 9).
 
 ## Implementation rules
 

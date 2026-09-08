@@ -89,7 +89,7 @@ export class PiRpcProcess {
     const pi = options.executable ?? process.env.PASSAGE_PI_PATH ?? Bun.which("pi");
     if (!pi) throw new Error("Pi CLI was not found; set PASSAGE_PI_PATH");
     const command = options.executable ? [options.executable, ...(options.executableArgs ?? [])] : [bunRuntime(), pi];
-    command.push("--mode", "rpc", "--session-dir", options.sessionDir, "--session-id", options.sessionId, "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve");
+    command.push("--mode", "rpc", "--session-dir", options.sessionDir, "--session-id", options.sessionId, "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve");
     this.child = Bun.spawn(command, {
       cwd: options.cwd,
       env: { ...process.env, PI_CODING_AGENT_DIR: piAgentDirectory() },
@@ -97,7 +97,11 @@ export class PiRpcProcess {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const parser = new LfJsonlParser<PiRecord>(record => this.receive(record), this.limits.maxRecordBytes);
+    const parser = new LfJsonlParser<PiRecord>(
+      record => this.receive(record),
+      this.limits.maxRecordBytes,
+      line => this.captureStderr(encoder.encode(line + "\n")),
+    );
     void drain(this.child.stdout, chunk => parser.push(chunk)).then(() => parser.finish()).catch(error => this.protocolFailure(error));
     void drain(this.child.stderr, chunk => this.captureStderr(chunk));
     void this.child.exited.then(code => this.exited(code));

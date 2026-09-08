@@ -25,6 +25,24 @@ test("handles split UTF-8, CRLF, and incomplete records", () => {
   expect(() => { const bounded = new LfJsonlParser(() => {}, 8); bounded.push('{"text":"too large"}\n'); }).toThrow("byte limit");
 });
 
+test("tolerates non-JSON stdout lines and routes to malformed callback", () => {
+  const records: unknown[] = [];
+  const malformed: string[] = [];
+  const parser = new LfJsonlParser((r) => records.push(r), 1024 * 1024, (line) => malformed.push(line));
+  parser.push("[MCP-UI] non-JSON line\n{\"text\":\"valid\"}\nAnother non-json\n");
+  expect(records).toEqual([{ text: "valid" }]);
+  expect(malformed).toEqual(["[MCP-UI] non-JSON line", "Another non-json"]);
+});
+
+test("PiRpcClient captures non-JSON stdout noise into bounded stderr without failing stream", async () => {
+  const script = `process.stdin.on('data',d=>{const r=JSON.parse(d); process.stdout.write('[MCP-UI] non-json log\\n'); process.stdout.write(JSON.stringify({type:'response',id:r.id,command:r.type,success:true,data:{ok:true}})+'\\n')})`;
+  const client = new PiRpcClient({ cwd: "/tmp", sessionDir: "/tmp", sessionId: "offline", executable: process.execPath, executableArgs: ["-e", script] });
+  const response = await client.request({ type: "get_state" });
+  expect(response.data).toEqual({ ok: true });
+  expect(client.stderr.some((s) => s.includes("[MCP-UI]"))).toBe(true);
+  await client.shutdown();
+});
+
 test("correlates responses while events arrive", async () => {
   const script = `process.stdin.on('data',d=>{const r=JSON.parse(d); process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n'); process.stdout.write(JSON.stringify({type:'response',id:r.id,command:r.type,success:true,data:{ok:true}})+'\\n')})`;
   const client = new PiRpcClient({ cwd: "/tmp", sessionDir: "/tmp", sessionId: "offline", executable: process.execPath, executableArgs: ["-e", script] });

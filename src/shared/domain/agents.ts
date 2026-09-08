@@ -26,6 +26,8 @@ export const agentCapabilitiesSchema = z.object({
     input: z.array(z.string().min(1).max(64)).max(8),
     authenticated: z.boolean(),
     supportedThinkingLevels: z.array(z.string().min(1).max(64)).max(16),
+    contextWindow: z.number().int().positive().optional(),
+    maxTokens: z.number().int().positive().optional(),
   }).strict()).max(100),
   thinkingLevels: z.array(z.string().min(1).max(64)).max(16),
 }).strict();

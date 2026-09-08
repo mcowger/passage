@@ -11,8 +11,18 @@ export interface ModelPickerProps {
   disabled?: boolean;
 }
 
-function getContextWindowLabel(modelId: string, modelName: string): string {
-  const lower = `${modelId} ${modelName}`.toLowerCase();
+function getContextWindowLabel(m: AgentCapabilities["models"][number]): string {
+  if (m.contextWindow && m.contextWindow > 0) {
+    if (m.contextWindow >= 1_000_000) {
+      const val = (m.contextWindow / 1_000_000).toFixed(1).replace(/\.0$/, "");
+      return `${val}M`;
+    }
+    if (m.contextWindow >= 1_000) {
+      return `${Math.round(m.contextWindow / 1_000)}K`;
+    }
+    return String(m.contextWindow);
+  }
+  const lower = `${m.id} ${m.name}`.toLowerCase();
   if (lower.includes("gemini-3") || lower.includes("gemini-2.5") || lower.includes("gemini 3") || lower.includes("gemini 2.5") || lower.includes("gemini 3.7") || lower.includes("gemini 3.5")) return "1M";
   if (lower.includes("glm-5") || lower.includes("glm 5")) return "1.3M";
   if (lower.includes("deepseek")) return "1M";
@@ -47,9 +57,9 @@ export function ModelPicker({
   const [favorites, setFavorites] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem("passage:favorite_models");
-      return saved ? JSON.parse(saved) : ["google:gemini-3.7-flash", "anthropic:claude-3-7-sonnet"];
+      return saved ? JSON.parse(saved) : ["plexus:gemini-3.7-flash", "plexus:claude-sonnet-5"];
     } catch {
-      return ["google:gemini-3.7-flash"];
+      return ["plexus:gemini-3.7-flash"];
     }
   });
 
@@ -71,9 +81,16 @@ export function ModelPicker({
     return capabilities.models.filter((m) => m.authenticated);
   }, [capabilities]);
 
+  const currentModelObj = useMemo(() => {
+    return availableModels.find((m) => m.id === currentModelId || `${m.provider}:${m.id}` === currentModelId);
+  }, [availableModels, currentModelId]);
+
   const thinkingOptions = useMemo(() => {
+    if (currentModelObj?.supportedThinkingLevels && currentModelObj.supportedThinkingLevels.length > 0) {
+      return currentModelObj.supportedThinkingLevels;
+    }
     return capabilities?.thinkingLevels ?? ["minimal", "low", "medium", "high", "xhigh"];
-  }, [capabilities]);
+  }, [capabilities, currentModelObj]);
 
   const toggleFavorite = (key: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -136,8 +153,8 @@ export function ModelPicker({
       return [{ title: "MATCHING MODELS", items: filteredModels }];
     }
 
-    const favItems = availableModels.filter((m) => favorites.includes(`${m.provider}:${m.id}`));
-    const recentItems = availableModels.filter((m) => recents.includes(`${m.provider}:${m.id}`) && !favorites.includes(`${m.provider}:${m.id}`));
+    const favItems = availableModels.filter((m) => favorites.includes(`${m.provider}:${m.id}`) || favorites.includes(m.id));
+    const recentItems = availableModels.filter((m) => (recents.includes(`${m.provider}:${m.id}`) || recents.includes(m.id)) && !favorites.includes(`${m.provider}:${m.id}`) && !favorites.includes(m.id));
     
     // Group remaining by provider
     const providers = new Set(availableModels.map((m) => m.provider));
@@ -147,7 +164,9 @@ export function ModelPicker({
         (m) =>
           m.provider === provider &&
           !favorites.includes(`${m.provider}:${m.id}`) &&
-          !recents.includes(`${m.provider}:${m.id}`)
+          !favorites.includes(m.id) &&
+          !recents.includes(`${m.provider}:${m.id}`) &&
+          !recents.includes(m.id)
       ),
     })).filter((s) => s.items.length > 0);
 
@@ -241,8 +260,8 @@ export function ModelPicker({
                     const modelKey = `${m.provider}:${m.id}`;
                     const isSelected = currentModelId === m.id || currentModelId === modelKey;
                     const isHighlighted = flatItems[highlightIndex]?.id === m.id && flatItems[highlightIndex]?.provider === m.provider;
-                    const isFav = favorites.includes(modelKey);
-                    const ctxLabel = getContextWindowLabel(m.id, m.name);
+                    const isFav = favorites.includes(modelKey) || favorites.includes(m.id);
+                    const ctxLabel = getContextWindowLabel(m);
 
                     return (
                       <div

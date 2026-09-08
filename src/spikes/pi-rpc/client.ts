@@ -37,13 +37,19 @@ export class PiRpcClient {
   private pending = new Map<string, { resolve: (r: PiRecord) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private exit: Promise<void>;
 
+  private stderrBytes = 0;
+
   constructor(options: { cwd: string; sessionDir: string; sessionId: string; executable?: string; executableArgs?: string[] }) {
     const command = options.executable
       ? [options.executable, ...(options.executableArgs ?? [])]
       : defaultPiCommand();
-    const process = Bun.spawn([...command, "--mode", "rpc", "--session-dir", options.sessionDir, "--session-id", options.sessionId, "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve"], { cwd: options.cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+    const process = Bun.spawn([...command, "--mode", "rpc", "--session-dir", options.sessionDir, "--session-id", options.sessionId, "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve"], { cwd: options.cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     this.process = process;
-    const parser = new LfJsonlParser<PiRecord>((record) => this.receive(record));
+    const parser = new LfJsonlParser<PiRecord>(
+      (record) => this.receive(record),
+      undefined,
+      (line) => this.captureStderrChunk(new TextEncoder().encode(line + "\n")),
+    );
     this.exit = (async () => {
       await consumeStream(process.stdout, (chunk) => parser.push(chunk));
       parser.finish();
@@ -105,14 +111,17 @@ export class PiRpcClient {
     return forced ? "forced" : "clean";
   }
 
+  private captureStderrChunk(chunk: Uint8Array): void {
+    if (this.stderrBytes < DEFAULT_STDERR_BYTES) {
+      const kept = chunk.slice(0, DEFAULT_STDERR_BYTES - this.stderrBytes);
+      this.stderr.push(new TextDecoder().decode(kept));
+      this.stderrBytes += kept.byteLength;
+    }
+  }
+
   private async captureStderr(): Promise<void> {
-    let bytes = 0;
     await consumeStream(this.process.stderr, (data) => {
-      if (bytes < DEFAULT_STDERR_BYTES) {
-        const kept = data.slice(0, DEFAULT_STDERR_BYTES - bytes);
-        this.stderr.push(new TextDecoder().decode(kept));
-        bytes += kept.byteLength;
-      }
+      this.captureStderrChunk(data);
     });
   }
 

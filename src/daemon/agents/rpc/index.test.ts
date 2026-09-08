@@ -27,3 +27,13 @@ test("prompt acknowledgement is distinct from settlement and replay is ordered",
 
 test("isolates agents and enforces capacity", async () => { const manager = new PiRpcManager(2); await Promise.all([manager.start("a", options("a")), manager.start("b", options("b"))]); await expect(manager.start("c", options("c"))).rejects.toThrow("maximum"); await manager.shutdown(); });
 test("rejects oversized commands before writing", async () => { const manager = new PiRpcManager(1); const p = await manager.start("a", { ...options("a"), maxCommandBytes: 100 }); await expect(p.request({ type: "prompt", message: "x".repeat(200) })).rejects.toThrow("byte limit"); await manager.shutdown(); });
+test("captures non-JSON stdout lines into stderr without breaking protocol", async () => {
+  const noisyScript = `process.stdin.on('data',d=>{const r=JSON.parse(d); process.stdout.write('[MCP-UI] non-json log\\n'); process.stdout.write(JSON.stringify({type:'response',id:r.id,command:r.type,success:true,data:{ok:true}})+'\\n')})`;
+  const noisyOptions = (id: string) => ({ cwd: "/tmp", sessionDir: "/tmp", sessionId: id, executable: process.execPath, executableArgs: ["-e", noisyScript] });
+  const manager = new PiRpcManager(1);
+  const p = await manager.start("noise", noisyOptions("noise"));
+  const res = await p.request({ type: "get_state" });
+  expect(responseData<{ ok: boolean }>(res)?.ok).toBe(true);
+  expect(p.stderr.some((s) => s.includes("[MCP-UI]"))).toBe(true);
+  await manager.shutdown();
+});

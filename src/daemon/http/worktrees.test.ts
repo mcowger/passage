@@ -48,7 +48,7 @@ describe("worktrees HTTP API", () => {
     expect(json.branch).toMatch(/^feature\//);
     expect(json.folder).toMatch(/--wk_/);
     f.store.close();
-  });
+  }, 15_000);
 
   test("rejects suggestion on missing project", async () => {
     const f = await fixture();

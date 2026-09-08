@@ -214,6 +214,15 @@ export class AgentService {
       if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
       const record = value as Record<string, unknown>;
       if (typeof record.provider !== "string" || typeof record.id !== "string") return [];
+
+      let supportedThinkingLevels: string[] = [];
+      if (Array.isArray(record.supportedThinkingLevels)) {
+        supportedThinkingLevels = record.supportedThinkingLevels.filter((item): item is string => typeof item === "string").slice(0, 16);
+      } else if (record.thinkingLevelMap && typeof record.thinkingLevelMap === "object" && !Array.isArray(record.thinkingLevelMap)) {
+        const map = record.thinkingLevelMap as Record<string, unknown>;
+        supportedThinkingLevels = Object.keys(map).filter((k) => map[k] !== null).slice(0, 16);
+      }
+
       return [{
         provider: record.provider,
         id: record.id,
@@ -221,9 +230,13 @@ export class AgentService {
         api: typeof record.api === "string" ? record.api : "unknown",
         input: Array.isArray(record.input) ? record.input.filter((item): item is string => typeof item === "string").slice(0, 8) : [],
         authenticated: record.authenticated !== false,
-        supportedThinkingLevels: Array.isArray(record.supportedThinkingLevels)
-          ? record.supportedThinkingLevels.filter((item): item is string => typeof item === "string").slice(0, 16)
-          : [],
+        supportedThinkingLevels,
+        ...(typeof record.contextWindow === "number" && Number.isSafeInteger(record.contextWindow) && record.contextWindow > 0
+          ? { contextWindow: record.contextWindow }
+          : {}),
+        ...(typeof record.maxTokens === "number" && Number.isSafeInteger(record.maxTokens) && record.maxTokens > 0
+          ? { maxTokens: record.maxTokens }
+          : {}),
       }];
     }).slice(0, 100);
     const thinkingLevels = (thinkingData?.levels ?? [])
@@ -389,11 +402,17 @@ export class AgentService {
       this.emit({ agentId, type: "settled", status, generation: event.generation, payload });
     } else if (event.type === "agent_start" || event.type === "turn_start") {
       this.updateStatus(agentId, "running", "status", event.generation, undefined, payload);
-    } else if (["permission_request", "user_input_request", "extension_ui_request"].includes(String(event.type))) {
+    } else if (
+      ["permission_request", "user_input_request"].includes(String(event.type)) ||
+      (event.type === "extension_ui_request" && !["setStatus", "setWidget", "notify"].includes(String(event.method)))
+    ) {
       this.updateStatus(agentId, "needs-attention", "attention", event.generation, undefined, payload);
     } else if (["error", "prompt_error", "extension_error"].includes(String(event.type))) {
       this.updateStatus(agentId, "error", "attention", event.generation, undefined, payload);
     } else {
+      if (event.type === "thinking_level_changed" && typeof event.level === "string") {
+        this.repositories.agents.updateThinkingPreference(agentId, event.level);
+      }
       this.emit({ agentId, type: String(event.type ?? "event"), status: currentStatus, generation: event.generation, payload });
     }
   }
@@ -454,6 +473,15 @@ export class AgentService {
       }
     }
     const agent = this.requireAgent(agentId);
+    const stateModel = data.model && typeof data.model === "object" ? data.model as Record<string, unknown> : undefined;
+    if (stateModel && typeof stateModel.provider === "string" && typeof stateModel.id === "string") {
+      if (!agent.modelPreference) {
+        this.repositories.agents.updateModelPreference(agentId, `${stateModel.provider}/${stateModel.id}`);
+      }
+    }
+    if (typeof data.thinkingLevel === "string" && !agent.thinkingPreference) {
+      this.repositories.agents.updateThinkingPreference(agentId, data.thinkingLevel);
+    }
     if (!agent.piSessionPath && !sessionPath) {
       this.updateStatus(agentId, "initializing", "status", process.generation);
       return;

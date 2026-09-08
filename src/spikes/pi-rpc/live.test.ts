@@ -7,4 +7,4 @@ if (process.env.PASSAGE_PI_LIVE !== "1") console.info("SKIP: PASSAGE_PI_LIVE is 
 
 live("LIVE Pi RPC acceptance gate (opt-in)", async () => {
   await runLiveAcceptance();
-});
+}, 90_000);

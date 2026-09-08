@@ -38,7 +38,7 @@ import manifest from "../web/manifest.webmanifest" with { type: "text" };
 import icon from "../web/icon.svg" with { type: "text" };
 import swScript from "../web/sw.js" with { type: "text" };
 
-const DEFAULT_PORT = 3000;
+const DEFAULT_PORT = 3333;
 const MAX_WEBSOCKET_COMMAND_BYTES = 64 * 1024;
 const MAX_AGENT_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_INFLIGHT_COMMANDS = 256;

@@ -7,6 +7,7 @@ export class LfJsonlParser<T = unknown> {
   constructor(
     private readonly onRecord: (record: T) => void,
     private readonly maxRecordBytes = DEFAULT_JSONL_MAX_RECORD_BYTES,
+    private readonly onMalformed?: (line: string, error: unknown) => void,
   ) {
     if (!Number.isSafeInteger(maxRecordBytes) || maxRecordBytes < 1) {
       throw new Error("JSONL record limit must be a positive safe integer");
@@ -22,7 +23,17 @@ export class LfJsonlParser<T = unknown> {
       if (new TextEncoder().encode(line).byteLength > this.maxRecordBytes) {
         throw new Error("JSONL record exceeds byte limit");
       }
-      if (line.trim()) this.onRecord(JSON.parse(line) as T);
+      if (line.trim()) {
+        try {
+          this.onRecord(JSON.parse(line) as T);
+        } catch (error) {
+          if (this.onMalformed) {
+            this.onMalformed(line, error);
+          } else {
+            throw error;
+          }
+        }
+      }
     }
     if (new TextEncoder().encode(this.buffer).byteLength > this.maxRecordBytes) {
       throw new Error("JSONL record exceeds byte limit");
@@ -31,6 +42,14 @@ export class LfJsonlParser<T = unknown> {
 
   finish(): void {
     this.buffer += this.decoder.decode();
-    if (this.buffer.trim()) throw new Error("incomplete JSONL record");
+    const remaining = this.buffer.replace(/\r$/, "");
+    if (remaining.trim()) {
+      if (this.onMalformed) {
+        this.onMalformed(remaining, new Error("incomplete JSONL record"));
+        this.buffer = "";
+      } else {
+        throw new Error("incomplete JSONL record");
+      }
+    }
   }
 }
