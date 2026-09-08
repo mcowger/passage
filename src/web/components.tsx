@@ -12,6 +12,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./components/ui/dialog.tsx";
+import { Folder, GitBranch, ChevronDown, ChevronRight, MoreHorizontal, Bot, Terminal as TerminalIcon } from "lucide-react";
+import { cn } from "./lib/utils.ts";
 
 type SidebarProps = {
   data: WorkspaceSnapshot;
@@ -28,9 +30,26 @@ type SidebarProps = {
   onSelectAgent: (id: string) => void;
   terminals: TerminalSummary[];
   onSelectTerminal: (id: string) => void;
+  onManageWorkspace?: (workspace: Workspace) => void;
 };
 
-export function Sidebar({ data, selected, selectedAgent, selectedTerminal, open, onClose, onSelect, onNewProject, onNewWorkspace, onNewWorktree, agents, onSelectAgent, terminals, onSelectTerminal }: SidebarProps) {
+export function Sidebar({
+  data,
+  selected,
+  selectedAgent,
+  selectedTerminal,
+  open,
+  onClose,
+  onSelect,
+  onNewProject,
+  onNewWorkspace,
+  onNewWorktree,
+  agents,
+  onSelectAgent,
+  terminals,
+  onSelectTerminal,
+  onManageWorkspace,
+}: SidebarProps) {
   const activeProjects = data.projects.filter((project) => !project.archivedAt);
   return (
     <aside className={`sidebar ${open ? "drawer-open" : ""}`} aria-label="Projects and workspaces">
@@ -52,7 +71,7 @@ export function Sidebar({ data, selected, selectedAgent, selectedTerminal, open,
           Register project
         </Button>
       </div>
-      <div className="side-label">Projects</div>
+      <div className="side-label">Projects &amp; Worktrees</div>
       <div className="project-list">
         {activeProjects.map((project) => (
           <ProjectRow
@@ -67,19 +86,32 @@ export function Sidebar({ data, selected, selectedAgent, selectedTerminal, open,
             onSelectAgent={onSelectAgent}
             terminals={selected ? terminals : []}
             onSelectTerminal={onSelectTerminal}
+            onManageWorkspace={onManageWorkspace}
           />
         ))}
       </div>
       {activeProjects.length === 0 && <p className="muted side-empty">No active projects registered yet.</p>}
       <footer>
-        <span className="footer-status"><span className="connected-dot" aria-hidden="true">●</span> Connected</span>
+        <span className="footer-status"><span className="connected-dot" aria-hidden="true" /> Connected</span>
         <span className="muted">v1.4.0</span>
       </footer>
     </aside>
   );
 }
 
-function ProjectRow({ project, workspaces, selected, selectedAgent, selectedTerminal, onSelect, agents, onSelectAgent, terminals, onSelectTerminal }: {
+function ProjectRow({
+  project,
+  workspaces,
+  selected,
+  selectedAgent,
+  selectedTerminal,
+  onSelect,
+  agents,
+  onSelectAgent,
+  terminals,
+  onSelectTerminal,
+  onManageWorkspace,
+}: {
   project: Project;
   workspaces: Workspace[];
   selected?: string;
@@ -90,6 +122,7 @@ function ProjectRow({ project, workspaces, selected, selectedAgent, selectedTerm
   onSelectAgent: (id: string) => void;
   terminals: TerminalSummary[];
   onSelectTerminal: (id: string) => void;
+  onManageWorkspace?: (workspace: Workspace) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const rows = workspaces.filter((workspace) => workspace.projectId === project.id);
@@ -103,278 +136,127 @@ function ProjectRow({ project, workspaces, selected, selectedAgent, selectedTerm
         aria-expanded={!collapsed}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setCollapsed(!collapsed); }}
       >
-        <span className="project-chevron" aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
+        <span className="project-chevron" aria-hidden="true">
+          {collapsed ? <ChevronRight className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}
+        </span>
+        <Folder className="w-3.5 h-3.5 text-muted-foreground/80 shrink-0" />
         <strong>{project.displayLabel}</strong>
         <code title={project.canonicalRootPath}>{project.canonicalRootPath}</code>
       </div>
-      {!collapsed && rows.map((workspace) => {
-        const isWorkspaceSelected = workspace.id === selected;
-        const workspaceAgents = isWorkspaceSelected ? agents.filter((agent) => agent.workspaceId === workspace.id) : [];
-        const workspaceTerminals = isWorkspaceSelected ? terminals.filter((term) => term.workspaceId === workspace.id) : [];
-        const hasActiveAgent = workspaceAgents.some((a) => a.status === "running");
+      {!collapsed && (
+        <div className="workspace-list">
+          {rows.map((workspace) => {
+            const isWorkspaceSelected = workspace.id === selected;
+            const workspaceAgents = isWorkspaceSelected ? agents.filter((agent) => agent.workspaceId === workspace.id) : [];
+            const workspaceTerminals = isWorkspaceSelected ? terminals.filter((term) => term.workspaceId === workspace.id) : [];
+            const hasActiveAgent = workspaceAgents.some((a) => a.status === "running");
 
-        return (
-          <div className="workspace-group" key={workspace.id}>
-            <button
-              className={`workspace-row ${isWorkspaceSelected && !selectedAgent && !selectedTerminal ? "selected" : ""}`}
-              onClick={() => onSelect(workspace.id)}
-            >
-              <span className={`status-dot ${hasActiveAgent ? "running" : "idle"}`} aria-label={workspace.archivedAt ? "Archived" : "Ready"}>●</span>
-              <span className="workspace-copy">
-                <b>{workspace.displayLabel}</b>
-                <small>{workspace.branchRef ? `⎇ ${workspace.branchRef}` : "directory"} · {workspace.kind}</small>
-              </span>
-            </button>
-            {isWorkspaceSelected && workspaceAgents.map((agent) => (
-              <button
-                className={`agent-row ${agent.id === selectedAgent ? "selected" : ""}`}
-                key={agent.id}
-                onClick={() => onSelectAgent(agent.id)}
-              >
-                <span className={`status-dot small ${agent.status === "running" ? "running" : "idle"}`} aria-hidden="true">●</span>
-                <span className="agent-row-title">{agent.title}</span>
-                <small className="agent-row-meta">{agent.status === "running" ? "running" : "idle"}</small>
-              </button>
-            ))}
-            {isWorkspaceSelected && workspaceTerminals.map((term) => (
-              <button
-                className={`agent-row ${term.id === selectedTerminal ? "selected" : ""}`}
-                key={term.id}
-                onClick={() => onSelectTerminal(term.id)}
-              >
-                <span aria-hidden="true">&gt;_</span>
-                <span className="agent-row-title">{term.title}</span>
-                <small className="agent-row-meta">{term.status}</small>
-              </button>
-            ))}
-          </div>
-        );
-      })}
-      {!collapsed && rows.length === 0 && <p className="muted project-empty">No workspaces</p>}
+            return (
+              <div className="workspace-group group/ws" key={workspace.id}>
+                <div
+                  className={cn(
+                    "workspace-row group flex items-center justify-between",
+                    isWorkspaceSelected && !selectedAgent && !selectedTerminal && "selected"
+                  )}
+                  onClick={() => onSelect(workspace.id)}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                    <span
+                      className={cn("status-dot shrink-0", hasActiveAgent ? "running" : "idle")}
+                      aria-label={workspace.archivedAt ? "Archived" : "Ready"}
+                    />
+                    {workspace.kind === "worktree" ? (
+                      <GitBranch className="w-3 h-3 text-primary/90 shrink-0" />
+                    ) : (
+                      <Folder className="w-3 h-3 text-muted-foreground/70 shrink-0" />
+                    )}
+                    <div className="workspace-copy min-w-0 flex-1">
+                      <div className="flex items-center gap-1 leading-tight">
+                        <b className="truncate text-xs font-medium">{workspace.displayLabel}</b>
+                        {workspace.kind === "worktree" ? (
+                          <span className="text-[9px] px-1 py-0.2 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                            worktree
+                          </span>
+                        ) : (
+                          <span className="text-[9px] px-1 py-0.2 rounded bg-muted/50 text-muted-foreground shrink-0">
+                            dir
+                          </span>
+                        )}
+                        {workspace.archivedAt && (
+                          <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500/15 text-amber-600 font-medium shrink-0">
+                            archived
+                          </span>
+                        )}
+                      </div>
+                      {workspace.branchRef && (
+                        <small className="text-[10px] text-muted-foreground font-mono truncate block mt-0.5">
+                          ⎇ {workspace.branchRef}
+                        </small>
+                      )}
+                    </div>
+                  </div>
+
+                  {onManageWorkspace && (
+                    <button
+                      type="button"
+                      className="opacity-0 group-hover/ws:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground transition-opacity"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onManageWorkspace(workspace);
+                      }}
+                      title="Workspace details and actions"
+                      aria-label="Workspace details and actions"
+                    >
+                      <MoreHorizontal className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {isWorkspaceSelected && (workspaceAgents.length > 0 || workspaceTerminals.length > 0) && (
+                  <div className="agent-tree-list">
+                    {workspaceAgents.map((agent) => (
+                      <button
+                        className={cn("agent-row", agent.id === selectedAgent && "selected")}
+                        key={agent.id}
+                        onClick={() => onSelectAgent(agent.id)}
+                      >
+                        <span
+                          className={cn("status-dot dot-sm shrink-0", agent.status === "running" ? "running" : "idle")}
+                          aria-hidden="true"
+                        />
+                        <Bot className="w-3 h-3 text-muted-foreground shrink-0" />
+                        <span className="agent-row-title text-xs">{agent.title}</span>
+                        <small className={cn("agent-row-meta", agent.status === "running" && "running")}>
+                          {agent.status === "running" ? "running" : "idle"}
+                        </small>
+                      </button>
+                    ))}
+                    {workspaceTerminals.map((term) => (
+                      <button
+                        className={cn("agent-row", term.id === selectedTerminal && "selected")}
+                        key={term.id}
+                        onClick={() => onSelectTerminal(term.id)}
+                      >
+                        <TerminalIcon className="w-3 h-3 text-muted-foreground shrink-0" />
+                        <span className="agent-row-title text-xs">{term.title}</span>
+                        <small className="agent-row-meta">{term.status}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {rows.length === 0 && <p className="muted project-empty">No workspaces</p>}
+        </div>
+      )}
     </section>
   );
 }
 
-type WorkspaceOverviewProps = {
-  workspace?: Workspace;
-  project?: Project;
-  api: WorkspaceApi;
-  refresh: () => Promise<void>;
-  onCreateAgent: () => Promise<void>;
-  onCreateTerminal?: () => Promise<void>;
-  onOpenExplorer?: () => void;
-  onOpenChanges?: () => void;
-  onOpenDiff?: () => void;
-  onOpenAgent?: () => void;
-  onOpenTerminal?: () => void;
-};
-
-export function WorkspaceOverview({
-  workspace,
-  project,
-  api,
-  refresh,
-  onCreateAgent,
-  onCreateTerminal,
-  onOpenExplorer,
-  onOpenChanges,
-  onOpenDiff,
-  onOpenAgent,
-  onOpenTerminal,
-}: WorkspaceOverviewProps) {
-  const [editing, setEditing] = useState(false);
-  const [label, setLabel] = useState(workspace?.displayLabel ?? "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const [forceRemove, setForceRemove] = useState(false);
-
-  useEffect(() => {
-    setLabel(workspace?.displayLabel ?? "");
-    setEditing(false);
-    setError("");
-    setConfirmRemove(false);
-    setForceRemove(false);
-  }, [workspace?.id, workspace?.displayLabel]);
-
-  if (!workspace || !project) {
-    return (
-      <div className="empty">
-        <span className="empty-icon" aria-hidden="true">⌂</span>
-        <h1>Select a workspace</h1>
-        <p>Choose a workspace from navigation or register a project to begin.</p>
-      </div>
-    );
-  }
-
-  const mutate = async (action: () => Promise<unknown>) => {
-    setBusy(true);
-    setError("");
-    try {
-      await action();
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Action failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRepair = async () => {
-    await mutate(() => api.repairWorktree(workspace.id));
-  };
-
-  const handleRemove = async () => {
-    await mutate(() => api.removeWorktree(workspace.id, forceRemove));
-    setConfirmRemove(false);
-  };
-
-  return (
-    <div className="overview">
-      <div className="crumb">{project.displayLabel} <span>/</span> Workspace</div>
-      <header className="workspace-header">
-        <div>
-          <div className="title-line"><span className="status-dot" aria-hidden="true">●</span><h1>{workspace.displayLabel}</h1></div>
-          <div className="meta">
-            <code>{workspace.kind}</code>
-            <code>{workspace.branchRef ?? "directory"}</code>
-            <span>{workspace.archivedAt ? "Archived" : "Ready"}</span>
-            {workspace.ownershipState === "repair" && (
-              <span className="conflict-badge">Repair Required</span>
-            )}
-          </div>
-        </div>
-        <div className="actions">
-          <button className="secondary" onClick={() => setEditing((value) => !value)}>Rename</button>
-          {workspace.kind === "worktree" && (
-            <button className="danger-button" onClick={() => setConfirmRemove(true)} disabled={busy}>
-              Remove Worktree
-            </button>
-          )}
-          {workspace.archivedAt ? (
-            <button className="primary" onClick={() => void mutate(() => api.reopenWorkspace(workspace.id))} disabled={busy}>Reopen</button>
-          ) : (
-            <button className="secondary" onClick={() => void mutate(() => api.archiveWorkspace(workspace.id))} disabled={busy}>Archive</button>
-          )}
-        </div>
-      </header>
-
-      {workspace.ownershipState === "repair" && (
-        <div className="alert repair-banner">
-          <div>
-            <strong>⚠️ Worktree ownership marker mismatch:</strong> Registration requires repair.
-            {workspace.repairDetail && <p style={{ margin: "4px 0 0", fontSize: 12 }}>{workspace.repairDetail}</p>}
-          </div>
-          <button className="primary small" onClick={handleRepair} disabled={busy}>
-            🔧 Repair Registration
-          </button>
-        </div>
-      )}
-
-      {editing && (
-        <form className="inline-form" onSubmit={(event) => {
-          event.preventDefault();
-          void mutate(async () => {
-            await api.labelWorkspace(workspace.id, label);
-            setEditing(false);
-          });
-        }}>
-          <input value={label} onChange={(event) => setLabel(event.target.value)} aria-label="Workspace label" autoFocus required />
-          <button className="primary" disabled={busy}>Save label</button>
-        </form>
-      )}
-      {error && <div className="alert" role="alert">Could not update workspace: {error}</div>}
-
-      <div className="overview-grid">
-        <article>
-          <span className="card-icon" aria-hidden="true">◈</span>
-          <h2>Pi Agent</h2>
-          <p>Run autonomous coding sessions and conversations.</p>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="primary" onClick={() => void onCreateAgent()} disabled={busy}>New agent</button>
-            {onOpenAgent && <button className="secondary" onClick={onOpenAgent}>Open Agent ↗</button>}
-          </div>
-        </article>
-        <article>
-          <span className="card-icon" aria-hidden="true">📁</span>
-          <h2>File Explorer</h2>
-          <p>Browse workspace directory tree and open files for editing.</p>
-          {onOpenExplorer && <button className="secondary" onClick={onOpenExplorer}>Browse Files ↗</button>}
-        </article>
-        <article>
-          <span className="card-icon" aria-hidden="true">±</span>
-          <h2>Git Changes</h2>
-          <p>Review working tree status, staged index, and ahead/behind counts.</p>
-          {onOpenChanges && <button className="secondary" onClick={onOpenChanges}>View Changes ↗</button>}
-        </article>
-        <article>
-          <span className="card-icon" aria-hidden="true">🔍</span>
-          <h2>Diff Viewer</h2>
-          <p>Structured unified and side-by-side Git diffs.</p>
-          {onOpenDiff && <button className="secondary" onClick={onOpenDiff}>Inspect Diffs ↗</button>}
-        </article>
-        <article>
-          <span className="card-icon" aria-hidden="true">&gt;_</span>
-          <h2>Interactive Terminal</h2>
-          <p>Persistent PTY shell attached directly to the daemon.</p>
-          <div style={{ display: "flex", gap: 8 }}>
-            {onCreateTerminal && (
-              <button className="primary" onClick={() => void onCreateTerminal()} disabled={busy}>
-                New terminal
-              </button>
-            )}
-            {onOpenTerminal && (
-              <button className="secondary" onClick={onOpenTerminal}>
-                Open Terminal ↗
-              </button>
-            )}
-          </div>
-        </article>
-      </div>
-
-      <section className="details">
-        <h2>Workspace details</h2>
-        <dl>
-          <div><dt>Project root</dt><dd>{project.canonicalRootPath}</dd></div>
-          <div><dt>Working directory</dt><dd>{workspace.cwd}</dd></div>
-          <div><dt>Checkout root</dt><dd>{workspace.checkoutRoot ?? "Not applicable"}</dd></div>
-          <div><dt>Main repository</dt><dd>{workspace.mainRepositoryRoot ?? "Not applicable"}</dd></div>
-          <div><dt>Branch ref</dt><dd>{workspace.branchRef ?? "None (directory)"}</dd></div>
-          <div><dt>Ownership</dt><dd>{workspace.ownershipState}</dd></div>
-          {workspace.markerPath && <div><dt>Marker path</dt><dd>{workspace.markerPath}</dd></div>}
-        </dl>
-      </section>
-
-      {confirmRemove && (
-        <Dialog open onOpenChange={(open) => { if (!open) setConfirmRemove(false); }}>
-          <DialogContent className="max-w-[440px]">
-            <DialogHeader>
-              <DialogTitle className="text-lg font-semibold">Remove Git Worktree</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground my-2">
-              Are you sure you want to remove the worktree at <code className="font-mono text-xs">{workspace.cwd}</code>?
-            </p>
-            <label className="flex items-center gap-2 text-sm text-destructive font-medium my-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={forceRemove}
-                onChange={(e) => setForceRemove(e.target.checked)}
-                className="rounded border-input text-destructive focus:ring-destructive"
-              />
-              Force remove (discard any uncommitted or dirty changes)
-            </label>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="secondary" onClick={() => setConfirmRemove(false)}>Cancel</Button>
-              <Button variant="destructive" onClick={handleRemove} disabled={busy}>
-                {busy ? "Removing..." : "Confirm Removal"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-    </div>
-  );
-}
+export { WorkspaceDetailsModal } from "./components/WorkspaceDetailsModal.tsx";
 
 type AgentPanelProps = {
   agent: AgentSummary;

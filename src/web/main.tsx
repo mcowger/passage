@@ -5,14 +5,14 @@ import type { JsonValue } from "../shared/protocol/index.ts";
 import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.ts";
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import type { LayoutNode, PaneTab, WorkspaceLayout } from "../shared/domain/layout.ts";
-import { addTabToGroup, createDefaultLayout, getFirstTabGroup } from "../shared/domain/layout.ts";
+import { addTabToGroup, createDefaultLayout, getFirstTabGroup, replaceOverviewTabs } from "../shared/domain/layout.ts";
 import type { WorkspaceSettings } from "../shared/domain/settings.ts";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
 import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
 import { BUILTIN_THEMES, BUILTIN_FONTS } from "../shared/domain/customization.ts";
 import { createWorkspaceApi } from "./api.ts";
 import { subscribeAgent } from "./agentSocket.ts";
-import { AgentPanel, Sidebar, WorkspaceOverview } from "./components.tsx";
+import { AgentPanel, Sidebar, WorkspaceDetailsModal } from "./components.tsx";
 import { ExplorerPanel } from "./components/ExplorerPanel.tsx";
 import { ChangesPanel } from "./components/ChangesPanel.tsx";
 import { EditorPanel } from "./components/EditorPanel.tsx";
@@ -24,6 +24,7 @@ import { CommandPalette } from "./components/CommandPalette.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { showAgentNotification } from "./notifications.ts";
 import { Button } from "./components/ui/button.tsx";
+import { MoreHorizontal } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -233,7 +234,7 @@ function App() {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>();
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>();
-  const [activeTab, setActiveTab] = useState<TabKind>("overview");
+  const [activeTab, setActiveTab] = useState<TabKind>("agent");
   const [openEditorPath, setOpenEditorPath] = useState<string>();
   const [openDiffPath, setOpenDiffPath] = useState<string>();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -250,6 +251,7 @@ function App() {
   const [fonts, setFonts] = useState<FontPack[]>(BUILTIN_FONTS);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [workspaceDetailsOpen, setWorkspaceDetailsOpen] = useState(false);
   const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
 
@@ -343,7 +345,9 @@ function App() {
   const loadLayoutAndSettings = useCallback(async (workspaceId: string) => {
     try {
       const [fetchedLayout, fetchedSettings, fetchedThemes, fetchedFonts] = await Promise.all([
-        api.getLayout(workspaceId).catch(() => createDefaultLayout(workspaceId)),
+        api.getLayout(workspaceId)
+          .then((l) => ({ ...l, root: replaceOverviewTabs(l.root) }))
+          .catch(() => createDefaultLayout(workspaceId)),
         api.getSettings(workspaceId).catch(() => DEFAULT_WORKSPACE_SETTINGS),
         api.getThemes().catch(() => BUILTIN_THEMES),
         api.getFonts().catch(() => BUILTIN_FONTS),
@@ -396,7 +400,7 @@ function App() {
     setCapabilities(undefined);
     setOpenEditorPath(undefined);
     setOpenDiffPath(undefined);
-    setActiveTab("overview");
+    setActiveTab("agent");
     if (selectedWorkspaceId) {
       void loadAgents(selectedWorkspaceId);
       void loadTerminals(selectedWorkspaceId);
@@ -488,6 +492,10 @@ function App() {
 
   const createAgent = async () => {
     if (!workspace) return;
+    if (workspace.archivedAt) {
+      setAgentError("Cannot create agent: Workspace is archived. Reopen it to start an agent.");
+      return;
+    }
     try {
       setAgentError("");
       const created = await api.createAgent(workspace.id);
@@ -530,7 +538,7 @@ function App() {
       setHistory(undefined);
       setCapabilities(undefined);
       await loadAgents(selectedWorkspaceId, false);
-      setActiveTab("overview");
+      setActiveTab("agent");
     } catch (cause) {
       setAgentError(cause instanceof Error ? cause.message : "Unable to archive agent");
     }
@@ -570,7 +578,7 @@ function App() {
     setSelectedWorkspaceId(id);
     setSelectedAgentId(undefined);
     setSelectedTerminalId(undefined);
-    setActiveTab("overview");
+    setActiveTab("agent");
     setDrawerOpen(false);
   };
 
@@ -587,43 +595,9 @@ function App() {
 
     switch (tab.kind) {
       case "overview":
-        return (
-          <WorkspaceOverview
-            workspace={workspace}
-            project={project}
-            api={api}
-            refresh={async () => { await refreshWorkspaces(); }}
-            onCreateAgent={createAgent}
-            onCreateTerminal={createTerminal}
-            onOpenAgent={() => {
-              if (!selectedAgentId && agents[0]) setSelectedAgentId(agents[0].id);
-              setActiveTab("agent");
-              if (agents[0]) handleSelectAgent(agents[0].id);
-            }}
-            onOpenTerminal={() => {
-              if (!selectedTerminalId && terminals[0]) setSelectedTerminalId(terminals[0].id);
-              setActiveTab("terminal");
-              if (terminals[0]) handleSelectTerminal(terminals[0].id);
-            }}
-            onOpenExplorer={() => {
-              setActiveTab("explorer");
-              openPaneTab({ id: `explorer-${workspace.id}`, kind: "explorer", title: "Files" });
-            }}
-            onOpenChanges={() => {
-              setActiveTab("changes");
-              openPaneTab({ id: `changes-${workspace.id}`, kind: "changes", title: "Changes" });
-            }}
-            onOpenDiff={() => {
-              setOpenDiffPath("");
-              setActiveTab("diff");
-              openPaneTab({ id: `diff-${workspace.id}`, kind: "diff", title: "Diff" });
-            }}
-          />
-        );
-
       case "agent": {
         const agentId = tab.targetId ?? selectedAgentId;
-        const currentAgent = agents.find((a) => a.id === agentId) ?? selectedAgent;
+        const currentAgent = agents.find((a) => a.id === agentId) ?? selectedAgent ?? agents[0];
         return currentAgent ? (
           <AgentPanel
             key={currentAgent.id}
@@ -658,10 +632,38 @@ function App() {
             }}
           />
         ) : (
-          <div className="empty">
-            <span className="empty-icon" aria-hidden="true">◈</span>
-            <h1>No agent selected</h1>
-            <button className="primary" onClick={() => void createAgent()}>New agent</button>
+          <div className="empty flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto">
+            <span className="empty-icon text-3xl mb-2 text-primary" aria-hidden="true">◈</span>
+            <h1 className="text-lg font-semibold text-foreground mb-1">Pi Agent</h1>
+            <p className="text-xs text-muted-foreground mb-4">
+              Autonomous coding agent attached to this workspace.
+            </p>
+            {agentError && (
+              <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded p-2.5 mb-4 text-left w-full">
+                {agentError}
+              </div>
+            )}
+            {workspace.archivedAt ? (
+              <div className="flex flex-col items-center gap-2">
+                <span className="text-xs text-amber-600 bg-amber-500/10 px-2 py-1 rounded">
+                  This workspace is archived.
+                </span>
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    setAgentError("");
+                    await api.reopenWorkspace(workspace.id);
+                    await refreshWorkspaces();
+                  }}
+                >
+                  Reopen Workspace
+                </Button>
+              </div>
+            ) : (
+              <Button size="sm" onClick={() => void createAgent()}>
+                + Start Agent Session
+              </Button>
+            )}
           </div>
         );
       }
@@ -828,6 +830,10 @@ function App() {
           onSelectAgent={handleSelectAgent}
           terminals={terminals}
           onSelectTerminal={handleSelectTerminal}
+          onManageWorkspace={(ws) => {
+            setSelectedWorkspaceId(ws.id);
+            setWorkspaceDetailsOpen(true);
+          }}
         />
       ) : (
         <aside className="sidebar loading">Loading Passage…</aside>
@@ -846,19 +852,28 @@ function App() {
           <div className="workspace-container">
             {/* Top Command & Settings Bar */}
             <nav className="workspace-nav-bar" aria-label="Workspace views">
-              <div className="workspace-nav-brand">
-                <span className="workspace-crumb-title"><b>{project?.displayLabel}</b> {workspace.branchRef && <code className="branch-pill">⎇ {workspace.branchRef}</code>}</span>
+              <div className="workspace-nav-brand flex items-center gap-1.5">
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-surface-hover text-left transition-colors cursor-pointer border border-transparent hover:border-border"
+                  onClick={() => setWorkspaceDetailsOpen(true)}
+                  title="View workspace details & management options"
+                >
+                  <span className="workspace-crumb-title">
+                    <b className="font-semibold text-xs text-foreground">{project?.displayLabel}</b>
+                    <span className="text-muted-foreground mx-1">/</span>
+                    <span className="text-xs text-foreground font-medium">{workspace.displayLabel}</span>
+                  </span>
+                  {workspace.branchRef && <code className="branch-pill">⎇ {workspace.branchRef}</code>}
+                  {workspace.archivedAt && (
+                    <span className="text-[10px] px-1 py-0.2 rounded bg-amber-500/15 text-amber-600 font-medium">
+                      archived
+                    </span>
+                  )}
+                  <MoreHorizontal className="w-3.5 h-3.5 text-muted-foreground ml-0.5" />
+                </button>
               </div>
               <div className="nav-tabs">
-                <button
-                  className={`nav-tab ${activeTab === "overview" ? "active" : ""}`}
-                  onClick={() => {
-                    setActiveTab("overview");
-                    openPaneTab({ id: `overview-${workspace.id}`, kind: "overview", title: "Overview" });
-                  }}
-                >
-                  ℹ Overview
-                </button>
                 <button
                   className={`nav-tab ${activeTab === "agent" ? "active" : ""}`}
                   onClick={() => {
@@ -986,6 +1001,18 @@ function App() {
         fonts={fonts}
       />
 
+      {/* Workspace Details & Management Modal */}
+      {workspace && project && (
+        <WorkspaceDetailsModal
+          open={workspaceDetailsOpen}
+          onClose={() => setWorkspaceDetailsOpen(false)}
+          workspace={workspace}
+          project={project}
+          api={api}
+          onRefresh={async () => { await refreshWorkspaces(); }}
+        />
+      )}
+
       {/* Workspace Creation Modals */}
       {form === "project" && (
         <FormDialog
@@ -1040,7 +1067,7 @@ function App() {
           onCreated={(created) => {
             void refreshWorkspaces().then(() => {
               setSelectedWorkspaceId(created.id);
-              setActiveTab("overview");
+              setActiveTab("agent");
             });
           }}
         />

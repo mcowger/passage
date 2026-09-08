@@ -3,7 +3,7 @@ import { LfJsonlParser } from "../../shared/jsonl/parser.ts";
 export type PiRecord = { type?: string; id?: string; [key: string]: unknown };
 export type PiCommand = { type: string; id?: string; [key: string]: unknown };
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 25_000;
 const DEFAULT_STDERR_BYTES = 32 * 1024;
 const DEFAULT_EVENT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_COMMAND_BYTES = 64 * 1024;

@@ -23,7 +23,7 @@ export interface CommandPaletteProps {
   onSelectWorkspace: (id: string) => void;
   onSelectAgent: (id: string) => void;
   onSelectTerminal: (id: string) => void;
-  onOpenView: (view: "overview" | "explorer" | "changes" | "diff") => void;
+  onOpenView: (view: "agent" | "terminal" | "explorer" | "changes" | "diff") => void;
   onCreateAgent: () => void;
   onCreateTerminal: () => void;
   onResetLayout: () => void;
@@ -61,12 +61,12 @@ export function CommandPalette({
   const items = useMemo<CommandItem[]>(() => {
     const list: CommandItem[] = [
       {
-        id: "view-overview",
+        id: "view-agent",
         category: "Views",
-        title: "Workspace Overview",
-        icon: "ℹ",
+        title: "Agent Session",
+        icon: "◈",
         shortcut: "Alt+1",
-        run: () => onOpenView("overview"),
+        run: () => onOpenView("agent"),
       },
       {
         id: "view-explorer",

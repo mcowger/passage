@@ -66,9 +66,9 @@ export type WorkspaceLayout = z.infer<typeof workspaceLayoutSchema>;
 
 export function createDefaultLayout(workspaceId: string, initialTab?: PaneTab): WorkspaceLayout {
   const defaultTab: PaneTab = initialTab ?? {
-    id: `overview-${workspaceId}`,
-    kind: "overview",
-    title: "Overview",
+    id: `agent-${workspaceId}`,
+    kind: "agent",
+    title: "Agent",
   };
   return {
     version: CURRENT_LAYOUT_SCHEMA_VERSION,
@@ -364,10 +364,30 @@ export function resizeSplitNode(
   return update(root);
 }
 
+export function replaceOverviewTabs(node: LayoutNode): LayoutNode {
+  if (node.type === "tabs") {
+    const nextTabs = node.tabs.map((tab) =>
+      tab.kind === "overview"
+        ? { ...tab, kind: "agent" as const, title: "Agent" }
+        : tab
+    );
+    return { ...node, tabs: nextTabs };
+  }
+  return {
+    ...node,
+    children: node.children.map(replaceOverviewTabs),
+  };
+}
+
 export function migrateLayout(raw: unknown, version: number): WorkspaceLayout {
   if (version === 1 && typeof raw === "object" && raw !== null && "root" in raw) {
     const parsed = workspaceLayoutSchema.safeParse(raw);
-    if (parsed.success) return parsed.data;
+    if (parsed.success) {
+      return {
+        ...parsed.data,
+        root: replaceOverviewTabs(parsed.data.root),
+      };
+    }
   }
   // Fallback for empty or unknown layout
   return createDefaultLayout("default");
