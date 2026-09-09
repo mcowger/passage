@@ -25,6 +25,7 @@ import { SplitCanvas } from "./components/SplitCanvas.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { showAgentNotification } from "./notifications.ts";
+import { applyStreamEvent } from "./lib/streaming-events.ts";
 import { Button } from "./components/ui/button.tsx";
 import { MoreHorizontal } from "lucide-react";
 import {
@@ -34,192 +35,6 @@ import {
   DialogTitle,
 } from "./components/ui/dialog.tsx";
 import "./styles.css";
-
-function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): AgentHistory | undefined {
-  if (!envelope || typeof envelope !== "object") return prev;
-  const { type, payload } = envelope as { type?: string; payload?: Record<string, unknown> };
-  if (!type || !payload) return prev;
-
-  const base: AgentHistory = prev ? { ...prev, timeline: [...prev.timeline] } : {
-    sessionId: "",
-    revision: { mtimeMs: Date.now(), size: 0, contentHash: "" },
-    timeline: [],
-    branches: [],
-    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
-    unknownRecordCount: 0,
-    agentErrorCount: 0,
-    malformedRecordCount: 0,
-    partialTail: false,
-    invalidUtf8Count: 0,
-    rewritten: false,
-  };
-
-  const usage = payload.usage as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number; cost?: { total?: number } } | undefined;
-  const nextUsage = usage ? {
-    input: usage.input ?? base.usage.input,
-    output: usage.output ?? base.usage.output,
-    cacheRead: usage.cacheRead ?? base.usage.cacheRead,
-    cacheWrite: usage.cacheWrite ?? base.usage.cacheWrite,
-    totalTokens: usage.totalTokens ?? base.usage.totalTokens,
-    cost: usage.cost?.total ?? base.usage.cost,
-  } : base.usage;
-
-  const event = payload.assistantMessageEvent as {
-    type?: string;
-    delta?: string;
-    content?: string;
-    id?: string;
-    toolName?: string;
-    toolCall?: { id?: string; name?: string; arguments?: JsonValue };
-  } | undefined;
-  const delta = (event?.type === "text_delta" && typeof event.delta === "string" ? event.delta : undefined)
-    ?? (typeof payload.delta === "string" ? payload.delta : undefined)
-    ?? (typeof payload.text === "string" ? payload.text : undefined);
-
-  if (delta) {
-    const timeline = [...base.timeline];
-    let found = false;
-    for (let index = timeline.length - 1; index >= 0; index -= 1) {
-      const item = timeline[index];
-      if (item && item.kind === "assistant") {
-        timeline[index] = { ...item, text: item.text + delta };
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      timeline.push({ kind: "assistant", id: `assistant-${Date.now()}`, text: delta });
-    }
-    return { ...base, timeline, usage: nextUsage };
-  }
-
-  const thinkingDelta = (event?.type === "thinking_delta" && typeof event.delta === "string" ? event.delta : undefined)
-    ?? (typeof payload.thinking === "string" ? payload.thinking : undefined);
-
-  if (thinkingDelta) {
-    const timeline = [...base.timeline];
-    let found = false;
-    for (let index = timeline.length - 1; index >= 0; index -= 1) {
-      const item = timeline[index];
-      if (item && item.kind === "thinking") {
-        timeline[index] = { ...item, text: item.text + thinkingDelta };
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      timeline.push({ kind: "thinking", id: `thinking-${Date.now()}`, text: thinkingDelta });
-    }
-    return { ...base, timeline, usage: nextUsage };
-  }
-
-  if (event?.type === "toolcall_start" || event?.type === "toolcall_delta" || event?.type === "toolcall_end") {
-    const toolCall = event.toolCall && typeof event.toolCall === "object" ? event.toolCall : undefined;
-    const toolCallId = String(event.id ?? toolCall?.id ?? `tool-${Date.now()}`);
-    const toolName = String(event.toolName ?? toolCall?.name ?? "tool");
-    const timeline = [...base.timeline];
-    const existingIndex = timeline.findIndex((item) => item.kind === "tool" && item.id === toolCallId);
-
-    if (event.type === "toolcall_end") {
-      const input = (toolCall?.arguments ?? {}) as JsonValue;
-      if (existingIndex >= 0) {
-        const current = timeline[existingIndex];
-        if (current?.kind === "tool") timeline[existingIndex] = { ...current, name: toolName, input, status: "running" };
-      } else {
-        timeline.push({ kind: "tool", id: toolCallId, name: toolName, input, status: "running", significant: true });
-      }
-    } else if (event.type === "toolcall_delta" && typeof event.delta === "string") {
-      const current = existingIndex >= 0 ? timeline[existingIndex] : undefined;
-      const rawInput = current?.kind === "tool" && current.input && typeof current.input === "object" && !Array.isArray(current.input)
-        && typeof current.input.rawInput === "string"
-        ? current.input.rawInput
-        : "";
-      const nextTool = {
-        kind: "tool" as const,
-        id: toolCallId,
-        name: toolName,
-        input: { rawInput: rawInput + event.delta },
-        status: "running" as const,
-        significant: true,
-      };
-      if (existingIndex >= 0) timeline[existingIndex] = nextTool;
-      else timeline.push(nextTool);
-    } else if (existingIndex < 0) {
-      timeline.push({ kind: "tool", id: toolCallId, name: toolName, input: { rawInput: "" }, status: "running", significant: true });
-    }
-    return { ...base, timeline, usage: nextUsage };
-  }
-
-  // Full assistant message update
-  const messageObj = payload.message as { role?: string; content?: string | Array<{ type?: string; text?: string }> } | undefined;
-  if (messageObj && (messageObj.role === "assistant" || !messageObj.role)) {
-    const fullText = typeof messageObj.content === "string"
-      ? messageObj.content
-      : Array.isArray(messageObj.content)
-        ? messageObj.content.map((c) => (c && typeof c === "object" && "text" in c ? String(c.text) : "")).join("")
-        : "";
-    if (fullText) {
-      const timeline = [...base.timeline];
-      let found = false;
-      for (let index = timeline.length - 1; index >= 0; index -= 1) {
-        const item = timeline[index];
-        if (item && item.kind === "assistant") {
-          timeline[index] = { ...item, text: fullText };
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        timeline.push({ kind: "assistant", id: `assistant-${Date.now()}`, text: fullText });
-      }
-      return { ...base, timeline, usage: nextUsage };
-    }
-  }
-
-  if (type === "tool_call" || type === "tool_start" || type === "tool_execution_start") {
-    const toolCallId = String(payload.toolCallId ?? `tool-${Date.now()}`);
-    const toolName = String(payload.toolName ?? "tool");
-    const args = (payload.args ?? {}) as JsonValue;
-    const timeline = [...base.timeline];
-    const existingIndex = timeline.findIndex((item) => item.kind === "tool" && item.id === toolCallId);
-    if (existingIndex >= 0) {
-      timeline[existingIndex] = { ...timeline[existingIndex] as ToolActivity, status: "running" };
-    } else {
-      timeline.push({
-        kind: "tool",
-        id: toolCallId,
-        name: toolName,
-        input: args,
-        status: "running",
-        significant: true,
-      });
-    }
-    return { ...base, timeline, usage: nextUsage };
-  }
-
-  if (type === "tool_execution_end") {
-    const toolCallId = String(payload.toolCallId ?? "");
-    const result = payload.result !== undefined ? String(payload.result) : undefined;
-    const isError = Boolean(payload.isError);
-    const timeline = base.timeline.map((item) => {
-      if (item.kind === "tool" && (item.id === toolCallId || (!toolCallId && item.status === "running"))) {
-        return {
-          ...item,
-          status: (isError ? "error" : "complete") as "error" | "complete",
-          ...(result !== undefined ? { result } : {}),
-        };
-      }
-      return item;
-    });
-    return { ...base, timeline, usage: nextUsage };
-  }
-
-  if (usage) {
-    return { ...base, usage: nextUsage };
-  }
-
-  return prev;
-}
 
 function applyThemeTokens(theme?: ThemePack) {
   if (!theme || typeof document === "undefined") return;
@@ -439,7 +254,30 @@ function App() {
       if (generation !== agentLoadGeneration.current) return;
       setAgentError("");
       setAgents((current) => current.map((agent) => agent.id === summary.id ? summary : agent));
-      setHistory("unpersisted" in result ? undefined : result.history);
+      setHistory((currentHistory) => {
+        if ("unpersisted" in result) return undefined;
+        const diskHistory = result.history;
+        if (!diskHistory) return currentHistory;
+
+        // Never clobber an in-progress live streaming turn with an older disk snapshot
+        if (summary.status === "running" && currentHistory?.timeline?.length) {
+          const hasStreamingItems = currentHistory.timeline.some(
+            (item) => item.kind === "thinking" || (item.kind === "tool" && item.status === "running")
+          );
+          if (hasStreamingItems && currentHistory.timeline.length >= diskHistory.timeline.length) {
+            return {
+              ...currentHistory,
+              revision: diskHistory.revision,
+              usage:
+                currentHistory.usage.totalTokens > diskHistory.usage.totalTokens
+                  ? currentHistory.usage
+                  : diskHistory.usage,
+            };
+          }
+        }
+
+        return diskHistory;
+      });
       try {
         const capabilities = await api.capabilities(agentId);
         if (generation === agentLoadGeneration.current) setCapabilities(capabilities);
@@ -488,7 +326,7 @@ function App() {
         }
         const envelope = (value && typeof value === "object" && "type" in value) ? (value as { type?: string }) : undefined;
         const type = envelope?.type;
-        if (type === "settled" || type === "agent_settled" || type === "turn_end" || type === "agent_end" || type === "message_end") {
+        if (type === "settled" || type === "agent_settled") {
           void loadAgent(selectedAgentId, false);
           if (settingsRef.current.notificationsEnabled) {
             const agentObj = agentsRef.current.find((a) => a.id === selectedAgentId);
