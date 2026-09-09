@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Project, Workspace, WorkspaceSnapshot } from "../shared/domain/workspaces.ts";
 import type { AgentCapabilities, AgentHistory, AgentSummary, TimelineItem, ToolActivity } from "../shared/domain/agents.ts";
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
@@ -16,6 +16,9 @@ import {
 import { Folder, GitBranch, ChevronDown, ChevronRight, MoreHorizontal, Bot, Terminal as TerminalIcon, FolderDown, FileText, FilePlus, Pencil, Search, Settings } from "lucide-react";
 import { cn } from "./lib/utils.ts";
 import { getToolDiff, type ToolDiff } from "./lib/tool-diff.ts";
+import { estimateUpdatedTokens, getStreamingTokenText, type TokenEstimateCacheEntry } from "./lib/streaming-tokens.ts";
+
+const STREAMING_STATS_INTERVAL_MS = 300;
 
 type SidebarProps = {
   data: WorkspaceSnapshot;
@@ -329,6 +332,38 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
   const reservedImageCount = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
   const running = agent.status === "running";
+  const timeline = history?.timeline ?? [];
+  const streamActive = running || hasPendingStreamingItem(timeline);
+  const streamingTokenText = useMemo(() => getStreamingTokenText(timeline), [timeline]);
+  const streamingTokenTextRef = useRef(streamingTokenText);
+  const streamingTokenCacheRef = useRef<TokenEstimateCacheEntry | undefined>(undefined);
+  const streamingStartedAtRef = useRef<number | null>(null);
+  const [streamingTokens, setStreamingTokens] = useState(0);
+  const [streamingTokensPerSecond, setStreamingTokensPerSecond] = useState<number | null>(null);
+  streamingTokenTextRef.current = streamingTokenText;
+
+  useEffect(() => {
+    if (!streamActive) {
+      streamingStartedAtRef.current = null;
+      streamingTokenCacheRef.current = undefined;
+      setStreamingTokens(0);
+      setStreamingTokensPerSecond(null);
+      return;
+    }
+
+    if (streamingStartedAtRef.current === null) streamingStartedAtRef.current = Date.now();
+    const tick = () => {
+      const text = streamingTokenTextRef.current;
+      const tokens = estimateUpdatedTokens(streamingTokenCacheRef.current, text);
+      streamingTokenCacheRef.current = { text, tokens };
+      setStreamingTokens(tokens);
+      const elapsed = (Date.now() - (streamingStartedAtRef.current ?? Date.now())) / 1000;
+      setStreamingTokensPerSecond(elapsed > 0.5 && tokens > 0 ? tokens / elapsed : null);
+    };
+    tick();
+    const interval = setInterval(tick, STREAMING_STATS_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [streamActive]);
 
   useEffect(() => {
     if (timelineRef.current) {
@@ -467,7 +502,14 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
               <h3>What are we working on?</h3>
               <p>Type a prompt below to start an autonomous session.</p>
             </div>
-          ) : history.timeline.map((item) => <TimelineRow key={item.id} item={item} concise={concise} />)}
+          ) : history.timeline.map((item, index) => (
+            <Fragment key={item.id}>
+              {streamActive && index === findStreamingStartIndex(history.timeline) && streamingTokenText && (
+                <LiveStreamingStats tokens={streamingTokens} tokensPerSecond={streamingTokensPerSecond} />
+              )}
+              <TimelineRow item={item} concise={concise} />
+            </Fragment>
+          ))}
       </div>
 
       <footer className="composer-container">
@@ -683,6 +725,39 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: "tool" }> }) {
 }
 
 const MAX_INLINE_DIFF_LINES = 80;
+
+function findStreamingStartIndex(timeline: TimelineItem[]): number {
+  let lastUserIndex = -1;
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    if (timeline[index]?.kind === "user") {
+      lastUserIndex = index;
+      break;
+    }
+  }
+  for (let index = lastUserIndex + 1; index < timeline.length; index += 1) {
+    const item = timeline[index];
+    if (item?.kind === "assistant" || item?.kind === "thinking" || item?.kind === "tool" || item?.kind === "process") return index;
+  }
+  return -1;
+}
+
+function hasPendingStreamingItem(timeline: TimelineItem[]): boolean {
+  const startIndex = findStreamingStartIndex(timeline);
+  if (startIndex < 0) return false;
+  const last = timeline.at(-1);
+  return last?.kind === "thinking" || (last?.kind === "tool" && last.status === "running");
+}
+
+function LiveStreamingStats({ tokens, tokensPerSecond }: { tokens: number; tokensPerSecond: number | null }) {
+  return (
+    <div className="live-streaming-stats" role="status" aria-live="polite">
+      <span className="live-streaming-token-count" title="Estimated streamed tokens">
+        ↓ {Math.round(tokens).toLocaleString()}
+      </span>
+      {tokensPerSecond !== null && <span className="live-streaming-rate">{tokensPerSecond.toFixed(1)} t/s</span>}
+    </div>
+  );
+}
 
 function ToolDiffPreview({ diff }: { diff: ToolDiff }) {
   const visibleLines = diff.lines.slice(0, MAX_INLINE_DIFF_LINES);

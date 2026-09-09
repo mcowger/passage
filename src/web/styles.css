@@ -364,6 +364,9 @@ code { font-family: var(--font-mono); }
   flex-direction: column;
   gap: 8px;
 }
+.live-streaming-stats { display: inline-flex; align-items: center; align-self: flex-start; gap: 6px; min-height: 22px; padding: 2px 7px; color: var(--muted); background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 999px; font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.live-streaming-token-count { color: var(--foreground); }
+.live-streaming-rate { padding: 1px 5px; color: var(--accent); background: var(--accent-subtle); border-radius: 5px; font-weight: 650; }
 .empty-transcript { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 200px; text-align: center; color: var(--muted); margin: auto 0; }
 .empty-transcript-icon { font-size: 28px; color: var(--accent); margin-bottom: 6px; }
 .empty-transcript h3 { margin: 0 0 4px; font-size: 18px; font-weight: 500; color: var(--foreground); }

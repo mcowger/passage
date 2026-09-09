@@ -62,7 +62,14 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
     cost: usage.cost?.total ?? base.usage.cost,
   } : base.usage;
 
-  const event = payload.assistantMessageEvent as { type?: string; delta?: string; content?: string } | undefined;
+  const event = payload.assistantMessageEvent as {
+    type?: string;
+    delta?: string;
+    content?: string;
+    id?: string;
+    toolName?: string;
+    toolCall?: { id?: string; name?: string; arguments?: JsonValue };
+  } | undefined;
   const delta = (event?.type === "text_delta" && typeof event.delta === "string" ? event.delta : undefined)
     ?? (typeof payload.delta === "string" ? payload.delta : undefined)
     ?? (typeof payload.text === "string" ? payload.text : undefined);
@@ -100,6 +107,43 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
     }
     if (!found) {
       timeline.push({ kind: "thinking", id: `thinking-${Date.now()}`, text: thinkingDelta });
+    }
+    return { ...base, timeline, usage: nextUsage };
+  }
+
+  if (event?.type === "toolcall_start" || event?.type === "toolcall_delta" || event?.type === "toolcall_end") {
+    const toolCall = event.toolCall && typeof event.toolCall === "object" ? event.toolCall : undefined;
+    const toolCallId = String(event.id ?? toolCall?.id ?? `tool-${Date.now()}`);
+    const toolName = String(event.toolName ?? toolCall?.name ?? "tool");
+    const timeline = [...base.timeline];
+    const existingIndex = timeline.findIndex((item) => item.kind === "tool" && item.id === toolCallId);
+
+    if (event.type === "toolcall_end") {
+      const input = (toolCall?.arguments ?? {}) as JsonValue;
+      if (existingIndex >= 0) {
+        const current = timeline[existingIndex];
+        if (current?.kind === "tool") timeline[existingIndex] = { ...current, name: toolName, input, status: "running" };
+      } else {
+        timeline.push({ kind: "tool", id: toolCallId, name: toolName, input, status: "running", significant: true });
+      }
+    } else if (event.type === "toolcall_delta" && typeof event.delta === "string") {
+      const current = existingIndex >= 0 ? timeline[existingIndex] : undefined;
+      const rawInput = current?.kind === "tool" && current.input && typeof current.input === "object" && !Array.isArray(current.input)
+        && typeof current.input.rawInput === "string"
+        ? current.input.rawInput
+        : "";
+      const nextTool = {
+        kind: "tool" as const,
+        id: toolCallId,
+        name: toolName,
+        input: { rawInput: rawInput + event.delta },
+        status: "running" as const,
+        significant: true,
+      };
+      if (existingIndex >= 0) timeline[existingIndex] = nextTool;
+      else timeline.push(nextTool);
+    } else if (existingIndex < 0) {
+      timeline.push({ kind: "tool", id: toolCallId, name: toolName, input: { rawInput: "" }, status: "running", significant: true });
     }
     return { ...base, timeline, usage: nextUsage };
   }
