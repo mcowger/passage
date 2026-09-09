@@ -10,6 +10,7 @@ import { HttpInputError, readJsonBody } from "./body.ts";
 const projectInput = z.object({ configuredRootPath: z.string().min(1).max(MAX_DOMAIN_PATH_LENGTH), displayLabel: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH) }).strict();
 const workspaceInput = z.object({ cwd: z.string().min(1).max(MAX_DOMAIN_PATH_LENGTH).optional(), displayLabel: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH) }).strict();
 const locationInput = z.object({ projectId: opaqueDomainIdSchema.optional(), displayLabel: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH), configuredRootPath: z.string().min(1).max(MAX_DOMAIN_PATH_LENGTH), enabled: z.boolean().optional() }).strict();
+const locationEnabledInput = z.object({ enabled: z.boolean() }).strict();
 const labelInput = z.object({ displayLabel: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH) }).strict();
 
 type RouteContext = { req: { raw: Request; param: (name: string) => string } };
@@ -45,6 +46,8 @@ export const createWorkspaceRoutes = (service: WorkspaceService): Hono => {
   app.post("/api/workspaces/:workspaceId/archive", (context) => { try { service.archiveWorkspace(id(context, "workspaceId")); return success({ ok: true }); } catch (error) { return errorResponse(error); } });
   app.post("/api/workspaces/:workspaceId/reopen", (context) => { try { return success(service.reopenWorkspace(id(context, "workspaceId"))); } catch (error) { return errorResponse(error); } });
   app.post("/api/worktree-locations", async (context) => { try { const input = locationInput.parse(await readJsonBody(context.req.raw)); return success(await service.configureLocation(input), 201); } catch (error) { return errorResponse(error); } });
+  app.get("/api/worktree-locations", (context) => { try { return success(service.listAllLocations()); } catch (error) { return errorResponse(error); } });
+  app.patch("/api/worktree-locations/:locationId", async (context) => { try { const input = locationEnabledInput.parse(await readJsonBody(context.req.raw)); return success(await service.setLocationEnabled(id(context, "locationId"), input.enabled)); } catch (error) { return errorResponse(error); } });
 
   // Layout routes
   app.get("/api/workspaces/:workspaceId/layout", (context) => {

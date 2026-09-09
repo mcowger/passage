@@ -93,15 +93,15 @@ code { font-family: var(--font-mono); }
 
 .app { display: flex; height: 100dvh; max-height: 100dvh; overflow: hidden; }
 
-/* Sidebar (~240px) */
+/* Sidebar (320px default per UI spec) */
 .sidebar {
   position: relative;
   z-index: 20;
   display: flex;
-  flex: 0 0 240px;
+  flex: 0 0 320px;
   flex-direction: column;
   gap: 8px;
-  width: 240px;
+  width: 320px;
   height: 100dvh;
   padding: 12px 10px;
   overflow: hidden;
@@ -257,8 +257,8 @@ code { font-family: var(--font-mono); }
   border-bottom: 1px solid var(--border);
   flex: none;
 }
-.workspace-nav-brand { display: flex; align-items: center; gap: 8px; }
-.workspace-crumb-title { font-size: 13.5px; display: flex; align-items: center; gap: 6px; color: var(--foreground); }
+.workspace-nav-brand { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.workspace-crumb-title { font-size: 13.5px; display: flex; align-items: center; gap: 6px; color: var(--foreground); min-width: 0; }
 .workspace-crumb-title b { font-weight: 600; }
 .branch-pill { padding: 1px 6px; background: var(--surface-subtle); border-radius: 4px; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
 .nav-tabs { display: flex; align-items: center; gap: 4px; }
@@ -363,6 +363,10 @@ code { font-family: var(--font-mono); }
   display: flex;
   flex-direction: column;
   gap: 8px;
+  scroll-padding-bottom: 12px;
+}
+.timeline > :last-child {
+  margin-bottom: 4px;
 }
 .live-streaming-stats { display: inline-flex; align-items: center; align-self: flex-start; gap: 6px; min-height: 22px; padding: 2px 7px; color: var(--muted); background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 999px; font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .live-streaming-token-count { color: var(--foreground); }
@@ -408,7 +412,6 @@ code { font-family: var(--font-mono); }
 .tool-row {
   margin: 1px 0;
   border-radius: 5px;
-  overflow: hidden;
   background: transparent;
   transition: background 100ms ease;
 }

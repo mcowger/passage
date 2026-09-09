@@ -13,12 +13,33 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./components/ui/dialog.tsx";
-import { Folder, GitBranch, ChevronDown, ChevronRight, MoreHorizontal, Bot, Terminal as TerminalIcon, FolderDown, FileText, FilePlus, Pencil, Search, Settings } from "lucide-react";
+import { Folder, GitBranch, ChevronDown, ChevronRight, MoreHorizontal, Bot, Terminal as TerminalIcon, FolderDown, FileText, FilePlus, Pencil, Search, Settings, Copy, Check } from "lucide-react";
 import { cn } from "./lib/utils.ts";
 import { getToolDiff, type ToolDiff } from "./lib/tool-diff.ts";
 import { estimateUpdatedTokens, getStreamingTokenText, type TokenEstimateCacheEntry } from "./lib/streaming-tokens.ts";
 
 const STREAMING_STATS_INTERVAL_MS = 300;
+
+export function CopyValueButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground transition-colors shrink-0"
+      title={`Copy ${label}`}
+      aria-label={`Copy ${label}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        void navigator.clipboard.writeText(value).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        }).catch(() => {});
+      }}
+    >
+      {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+    </button>
+  );
+}
 
 type SidebarProps = {
   data: WorkspaceSnapshot;
@@ -213,7 +234,7 @@ function ProjectRow({
                     )}
                     <div className="workspace-copy min-w-0 flex-1">
                       <div className="flex items-center gap-1 leading-tight">
-                        <b className="truncate text-xs font-medium">{workspace.displayLabel}</b>
+                        <b className="truncate text-xs font-medium" title={workspace.displayLabel}>{workspace.displayLabel}</b>
                         {workspace.kind === "worktree" ? (
                           <span className="text-[9px] px-1 py-0.2 rounded bg-muted text-muted-foreground font-mono shrink-0">
                             worktree
@@ -230,26 +251,32 @@ function ProjectRow({
                         )}
                       </div>
                       {workspace.branchRef && (
-                        <small className="text-[10px] text-muted-foreground font-mono truncate block mt-0.5">
+                        <small className="text-[10px] text-muted-foreground font-mono truncate block mt-0.5" title={workspace.branchRef}>
                           ⎇ {workspace.branchRef}
                         </small>
                       )}
+                      <small className="text-[10px] text-muted-foreground/70 font-mono truncate block" title={workspace.cwd}>
+                        {workspace.cwd}
+                      </small>
                     </div>
                   </div>
 
                   {onManageWorkspace && (
-                    <button
-                      type="button"
-                      className="opacity-0 group-hover/ws:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground transition-opacity"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onManageWorkspace(workspace);
-                      }}
-                      title="Workspace details and actions"
-                      aria-label="Workspace details and actions"
-                    >
-                      <MoreHorizontal className="w-3.5 h-3.5" />
-                    </button>
+                    <span className="flex items-center gap-0.5 opacity-0 group-hover/ws:opacity-100 transition-opacity">
+                      <CopyValueButton value={workspace.cwd} label="workspace path" />
+                      <button
+                        type="button"
+                        className="p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onManageWorkspace(workspace);
+                        }}
+                        title="Workspace details and actions"
+                        aria-label="Workspace details and actions"
+                      >
+                        <MoreHorizontal className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
                   )}
                 </div>
 
@@ -319,9 +346,12 @@ type AgentPanelProps = {
   onRefresh: () => Promise<void>;
   onArchive: () => Promise<void>;
   onOptimisticMessage?: (message: string) => void;
+  /** Offline transcript override for rendering verification (never live state). */
+  previewHistory?: AgentHistory;
 };
 
-export function AgentPanel({ agent, history, capabilities, loading, error, api, onRefresh, onArchive, onOptimisticMessage }: AgentPanelProps) {
+export function AgentPanel({ agent, history, capabilities, loading, error, api, onRefresh, onArchive, onOptimisticMessage, previewHistory }: AgentPanelProps) {
+  const effectiveHistory = previewHistory ?? history;
   const draftKey = `passage:agent:${agent.id}:draft`;
   const conciseKey = `passage:agent:${agent.id}:concise`;
   const [draft, setDraft] = useState(() => localStorage.getItem(draftKey) ?? "");
@@ -332,7 +362,7 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
   const reservedImageCount = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
   const running = agent.status === "running";
-  const timeline = history?.timeline ?? [];
+  const timeline = effectiveHistory?.timeline ?? [];
   const streamActive = running || hasPendingStreamingItem(timeline);
   const streamingTokenText = useMemo(() => getStreamingTokenText(timeline), [timeline]);
   const streamingTokenTextRef = useRef(streamingTokenText);
@@ -369,7 +399,23 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
     if (timelineRef.current) {
       timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
     }
-  }, [history?.timeline]);
+  }, [effectiveHistory?.timeline]);
+
+  // After a run settles, layout can shift (composer status line hides, change
+  // summary appears, tool details expand). Scroll again after paint so the
+  // latest assistant content is fully above the composer.
+  const wasStreaming = useRef(streamActive);
+  useEffect(() => {
+    const settled = wasStreaming.current && !streamActive;
+    wasStreaming.current = streamActive;
+    if (!settled || !timelineRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      if (timelineRef.current) {
+        timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [streamActive]);
 
   useEffect(() => {
     setDraft(localStorage.getItem(draftKey) ?? "");
@@ -465,16 +511,16 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
     }
   };
 
-  const model = history?.currentModel
-    ? `${history.currentModel.provider}/${history.currentModel.modelId}`
+  const model = effectiveHistory?.currentModel
+    ? `${effectiveHistory.currentModel.provider}/${effectiveHistory.currentModel.modelId}`
     : agent.modelPreference ?? "model unavailable";
-  const thinking = history?.currentThinkingLevel ?? agent.thinkingPreference ?? "default";
+  const thinking = effectiveHistory?.currentThinkingLevel ?? agent.thinkingPreference ?? "default";
   const modelOptions = capabilities?.models.filter((option) => option.authenticated) ?? [];
-  const currentModel = history?.currentModel
-    ? (modelOptions.find((option) => option.provider === history.currentModel!.provider && option.id === history.currentModel!.modelId) ?? {
-        name: history.currentModel.modelId,
-        id: history.currentModel.modelId,
-        provider: history.currentModel.provider,
+  const currentModel = effectiveHistory?.currentModel
+    ? (modelOptions.find((option) => option.provider === effectiveHistory.currentModel!.provider && option.id === effectiveHistory.currentModel!.modelId) ?? {
+        name: effectiveHistory.currentModel.modelId,
+        id: effectiveHistory.currentModel.modelId,
+        provider: effectiveHistory.currentModel.provider,
       })
     : modelOptions.find((option) => `${option.provider}/${option.id}` === agent.modelPreference || option.id === agent.modelPreference)
       ? modelOptions.find((option) => `${option.provider}/${option.id}` === agent.modelPreference || option.id === agent.modelPreference)!
@@ -482,9 +528,9 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
   const currentModelValue = currentModel ? `${currentModel.provider}:${currentModel.id}` : "";
   const currentModelDisplayName = currentModel?.name ?? (model.includes("/") ? model.split("/")[1] : model);
 
-  const totalTokens = history?.usage?.totalTokens ?? ((history?.usage?.input ?? 0) + (history?.usage?.output ?? 0));
+  const totalTokens = effectiveHistory?.usage?.totalTokens ?? ((effectiveHistory?.usage?.input ?? 0) + (effectiveHistory?.usage?.output ?? 0));
   const contextPercentage = totalTokens > 0 ? Math.min(100, Math.max(0.1, (totalTokens / 200000) * 100)).toFixed(1) : "0.0";
-  const changeSummary = summarizeChanges(history?.timeline ?? []);
+  const changeSummary = summarizeChanges(effectiveHistory?.timeline ?? []);
 
   return (
     <section className="agent-panel" aria-label={`Agent conversation ${agent.title}`}>
@@ -496,15 +542,15 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
       )}
       <div className="timeline" ref={timelineRef}>
         {loading ? <p className="muted timeline-loading">Loading history…</p>
-          : !history?.timeline.length ? (
+          : !effectiveHistory?.timeline.length ? (
             <div className="empty-transcript">
               <span className="empty-transcript-icon">◈</span>
               <h3>What are we working on?</h3>
               <p>Type a prompt below to start an autonomous session.</p>
             </div>
-          ) : history.timeline.map((item, index) => (
+          ) : effectiveHistory.timeline.map((item, index) => (
             <Fragment key={item.id}>
-              {streamActive && index === findStreamingStartIndex(history.timeline) && streamingTokenText && (
+              {streamActive && index === findStreamingStartIndex(effectiveHistory.timeline) && streamingTokenText && (
                 <LiveStreamingStats tokens={streamingTokens} tokensPerSecond={streamingTokensPerSecond} />
               )}
               <TimelineRow item={item} concise={concise} />
@@ -584,15 +630,15 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
                 <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(event) => { void addImages(event.target.files); event.currentTarget.value = ""; }} />
               </label>
               {totalTokens > 0 && (
-                <span className="composer-ctx-pill" title={`${totalTokens.toLocaleString()} tokens (${history?.usage?.input.toLocaleString() ?? 0} in · ${history?.usage?.output.toLocaleString() ?? 0} out · ${history?.usage?.cacheRead.toLocaleString() ?? 0} cache) · $${history?.usage?.cost.toFixed(4) ?? "0.0000"}`}>
+                <span className="composer-ctx-pill" title={`${totalTokens.toLocaleString()} tokens (${effectiveHistory?.usage?.input.toLocaleString() ?? 0} in · ${effectiveHistory?.usage?.output.toLocaleString() ?? 0} out · ${effectiveHistory?.usage?.cacheRead.toLocaleString() ?? 0} cache) · $${effectiveHistory?.usage?.cost.toFixed(4) ?? "0.0000"}`}>
                   <span className="context-dot" />
                   <span>{contextPercentage}% ctx</span>
                   <span className="composer-stat-sep">·</span>
                   <span>{totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}k tok` : `${totalTokens} tok`}</span>
-                  {history?.usage?.cost !== undefined && history.usage.cost > 0 && (
+                  {effectiveHistory?.usage?.cost !== undefined && effectiveHistory.usage.cost > 0 && (
                     <>
                       <span className="composer-stat-sep">·</span>
-                      <span>${history.usage.cost.toFixed(3)}</span>
+                      <span>${effectiveHistory.usage.cost.toFixed(3)}</span>
                     </>
                   )}
                 </span>
@@ -687,9 +733,31 @@ function ToolIcon({ kind }: { kind: ToolIconKind }) {
   }
 }
 
-function ToolRow({ item }: { item: Extract<TimelineItem, { kind: "tool" }> }) {
+function ToolRow({ item, conciseBadge }: { item: Extract<TimelineItem, { kind: "tool" }>; conciseBadge?: boolean }) {
   const { icon, title, subtitle } = getToolSummary(item);
   const diff = getToolDiff(item);
+  if (conciseBadge) {
+    return (
+      <details className={`tool-row concise ${item.status}`}>
+        <summary className="timeline-concise-badge" title={`${title}${subtitle ? ` ${subtitle}` : ""} — expand for details`}>
+          <span className="timeline-concise-title"><ToolIcon kind={icon} /> {title}</span>
+          {subtitle && icon !== "command" && <FileTypeIcon path={subtitle} size={13} />}
+          {subtitle && <code title={subtitle}>{subtitle}</code>}
+        </summary>
+        <div className="tool-expanded-body">
+          {diff ? <ToolDiffPreview diff={diff} /> : item.input && (
+            <pre className="tool-input-pre"><code>{typeof item.input === "string" ? item.input : JSON.stringify(item.input, null, 2)}</code></pre>
+          )}
+          {(item.error || item.result) && (
+            <div className="tool-output-wrap">
+              <span className="tool-output-label">{item.error ? "Error" : "Output"}</span>
+              <pre className={`tool-output-pre ${item.error ? "error" : ""}`}><code>{item.error ?? item.result}</code></pre>
+            </div>
+          )}
+        </div>
+      </details>
+    );
+  }
   return (
     <details className={`tool-row ${item.status}`} open={item.status === "error"}>
       <summary className="tool-row-summary">
@@ -820,14 +888,7 @@ function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }
   if (item.kind === "unknown") return <article className="timeline-row unknown"><strong>Unknown activity</strong><code>{item.entryType}</code></article>;
   if (item.kind === "tool") {
     if (concise && !item.significant && item.status !== "error") {
-      const { icon, title, subtitle } = getToolSummary(item);
-      return (
-        <div className="timeline-concise-badge">
-          <span className="timeline-concise-title"><ToolIcon kind={icon} /> {title}</span>
-          {subtitle && icon !== "command" && <FileTypeIcon path={subtitle} size={13} />}
-          {subtitle && <code title={subtitle}>{subtitle}</code>}
-        </div>
-      );
+      return <ToolRow item={item} conciseBadge />;
     }
     return <ToolRow item={item} />;
   }
@@ -835,7 +896,13 @@ function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }
     return (
       <details className="timeline-row process">
         <summary><strong>Process</strong><span>{item.activities.length} activities</span></summary>
-        {item.activities.map((activity) => <ToolRow key={activity.id} item={activity} />)}
+        {item.activities.map((activity) => (
+          <ToolRow
+            key={activity.id}
+            item={activity}
+            conciseBadge={concise && !activity.significant && activity.status !== "error"}
+          />
+        ))}
       </details>
     );
   }

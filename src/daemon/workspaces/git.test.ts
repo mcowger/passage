@@ -27,4 +27,36 @@ describe("GitService", () => {
     expect(list.some((w) => w.branchRef === "feature-x")).toBe(true);
   });
   test("honors cancellation, limits, and git failures", async () => { const root = await fixture(); const service = new GitService(); const controller = new AbortController(); controller.abort(); await expect(service.status(root, { signal: controller.signal })).rejects.toBeInstanceOf(GitError); await expect(service.status(join(root, "missing"))).rejects.toBeInstanceOf(GitError); const r = await service.diff(root, "working-tree", { maxOutputBytes: 2 }); expect(r[0]?.oversized ?? true).toBe(true); });
+  test("renders untracked files as add-only diffs in the working tree", async () => {
+    const root = await fixture();
+    await writeFile(join(root, "tracked.txt"), "one\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "initial");
+    await writeFile(join(root, "new-file.txt"), "alpha\nbeta\n");
+    const diffs = await new GitService().diff(root, "working-tree");
+    const untracked = diffs.find((d) => d.path === "new-file.txt");
+    expect(untracked).toBeDefined();
+    expect(untracked?.additions).toBe(2);
+    expect(untracked?.deletions).toBe(0);
+    expect(untracked?.hunks.length).toBeGreaterThan(0);
+    expect(untracked?.hunks[0].lines.every((l) => l.kind === "added")).toBe(true);
+  });
+  test("omits untracked diffs from the staged target", async () => {
+    const root = await fixture();
+    await writeFile(join(root, "tracked.txt"), "one\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "initial");
+    await writeFile(join(root, "new-file.txt"), "alpha\n");
+    const diffs = await new GitService().diff(root, "staged");
+    expect(diffs.find((d) => d.path === "new-file.txt")).toBeUndefined();
+  });
+  test("marks binary and oversized untracked files without reading full contents", async () => {
+    const root = await fixture();
+    await writeFile(join(root, "tracked.txt"), "one\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "initial");
+    await writeFile(join(root, "blob.bin"), Buffer.from([0x00, 0x01, 0x02]));
+    const diffs = await new GitService().diff(root, "working-tree");
+    expect(diffs.find((d) => d.path === "blob.bin")?.binary).toBe(true);
+  });
 });

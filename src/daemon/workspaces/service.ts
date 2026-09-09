@@ -48,6 +48,16 @@ export class WorkspaceService {
   }
 
   labelWorkspace(workspaceId: string, displayLabel: string): Workspace { const workspace = this.requireWorkspace(workspaceId); const updated = workspaceSchema.parse({ ...workspace, displayLabel }); this.repositories.workspaces.save(updated); return updated; }
+  async setLocationEnabled(locationId: string, enabled: boolean): Promise<WorktreeLocation> {
+    const existing = this.repositories.worktreeLocations.get(locationId);
+    if (!existing) throw new WorkspaceError("not-found", "Worktree location not found");
+    this.repositories.worktreeLocations.setEnabled(locationId, enabled);
+    return locationSchema.parse({ ...existing, enabled });
+  }
+
+  listAllLocations(): WorktreeLocation[] {
+    return this.repositories.worktreeLocations.listAll(this.listLimit).map((l) => locationSchema.parse(l));
+  }
   archiveProject(projectId: string): void { this.requireProject(projectId); this.repositories.projects.archive(projectId, now()); }
   reopenProject(projectId: string): Project { const project = this.requireProject(projectId); const updated = projectSchema.parse({ ...project, archivedAt: null }); this.repositories.projects.save(updated); return updated; }
   archiveWorkspace(workspaceId: string): void { this.requireWorkspace(workspaceId); this.repositories.workspaces.archive(workspaceId, now()); }

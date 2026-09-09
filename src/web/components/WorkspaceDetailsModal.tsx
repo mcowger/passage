@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Project, Workspace } from "../../shared/domain/workspaces.ts";
 import type { WorkspaceApi } from "../api.ts";
+import { CopyValueButton } from "../components.tsx";
 import { Button } from "./ui/button.tsx";
 import { Input } from "./ui/input.tsx";
 import { Badge } from "./ui/badge.tsx";
@@ -57,10 +58,12 @@ export function WorkspaceDetailsModal({
       setError("");
       if (workspace.archivedAt) {
         await api.reopenWorkspace(workspace.id);
+        await onRefresh();
       } else {
         await api.archiveWorkspace(workspace.id);
+        await onRefresh();
+        onClose();
       }
-      await onRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update workspace");
     } finally {
@@ -202,16 +205,16 @@ export function WorkspaceDetailsModal({
             </h4>
             <dl className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-2 text-xs">
               <dt className="text-muted-foreground">Project root</dt>
-              <dd className="font-mono break-all">{project.canonicalRootPath}</dd>
+              <dd className="font-mono break-all flex items-start gap-1">{project.canonicalRootPath}<CopyValueButton value={project.canonicalRootPath} label="project root path" /></dd>
 
               <dt className="text-muted-foreground">Working directory</dt>
-              <dd className="font-mono break-all">{workspace.cwd}</dd>
+              <dd className="font-mono break-all flex items-start gap-1">{workspace.cwd}<CopyValueButton value={workspace.cwd} label="working directory path" /></dd>
 
               <dt className="text-muted-foreground">Checkout root</dt>
-              <dd className="font-mono break-all">{workspace.checkoutRoot ?? "Not applicable"}</dd>
+              <dd className="font-mono break-all flex items-start gap-1">{workspace.checkoutRoot ?? "Not applicable"}{workspace.checkoutRoot && <CopyValueButton value={workspace.checkoutRoot} label="checkout root path" />}</dd>
 
               <dt className="text-muted-foreground">Main repository</dt>
-              <dd className="font-mono break-all">{workspace.mainRepositoryRoot ?? "Not applicable"}</dd>
+              <dd className="font-mono break-all flex items-start gap-1">{workspace.mainRepositoryRoot ?? "Not applicable"}{workspace.mainRepositoryRoot && <CopyValueButton value={workspace.mainRepositoryRoot} label="main repository path" />}</dd>
 
               <dt className="text-muted-foreground">Branch ref</dt>
               <dd className="font-mono">{workspace.branchRef ?? "None (directory)"}</dd>

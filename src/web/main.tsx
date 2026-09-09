@@ -285,6 +285,7 @@ function App() {
   const [terminals, setTerminals] = useState<TerminalSummary[]>([]);
   const [history, setHistory] = useState<AgentHistory>();
   const [capabilities, setCapabilities] = useState<AgentCapabilities>();
+  const [previewHistory, setPreviewHistory] = useState<AgentHistory | null>(null);
   const [agentError, setAgentError] = useState("");
   const [agentLoading, setAgentLoading] = useState(false);
   const [form, setForm] = useState<FormKind>();
@@ -331,6 +332,18 @@ function App() {
       };
     }
   }, []);
+
+  // Offline transcript preview for rendering verification (?transcriptPreview=1
+  // with PASSAGE_TRANSCRIPT_PREVIEW=1 on the daemon). Never live agent state.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("transcriptPreview") !== "1") return;
+    let cancelled = false;
+    void api.transcriptPreview()
+      .then((preview) => { if (!cancelled) setPreviewHistory(preview); })
+      .catch(() => { if (!cancelled) setPreviewHistory(null); });
+    return () => { cancelled = true; };
+  }, [api]);
 
   // Global keyboard shortcuts (Command Palette, Layout reset)
   useEffect(() => {
@@ -644,6 +657,8 @@ function App() {
       case "agent": {
         const agentId = tab.targetId ?? selectedAgentId;
         const currentAgent = agents.find((a) => a.id === agentId) ?? selectedAgent ?? agents[0];
+        const previewEnabled = typeof window !== "undefined"
+          && new URLSearchParams(window.location.search).get("transcriptPreview") === "1";
         return currentAgent ? (
           <AgentPanel
             key={currentAgent.id}
@@ -655,6 +670,7 @@ function App() {
             api={api}
             onRefresh={() => loadAgent(currentAgent.id)}
             onArchive={archiveSelectedAgent}
+            previewHistory={previewEnabled ? previewHistory ?? undefined : undefined}
             onOptimisticMessage={(message) => {
               setHistory((prev) => {
                 const base: AgentHistory = prev ? { ...prev, timeline: [...prev.timeline] } : {
@@ -917,11 +933,11 @@ function App() {
                   title="View workspace details & management options"
                 >
                   <span className="workspace-crumb-title">
-                    <b className="font-semibold text-xs text-foreground">{project?.displayLabel}</b>
+                    <b className="font-semibold text-xs text-foreground truncate max-w-[220px]" title={project?.displayLabel}>{project?.displayLabel}</b>
                     <span className="text-muted-foreground mx-1">/</span>
-                    <span className="text-xs text-foreground font-medium">{workspace.displayLabel}</span>
+                    <span className="text-xs text-foreground font-medium truncate max-w-[280px]" title={workspace.displayLabel}>{workspace.displayLabel}</span>
                   </span>
-                  {workspace.branchRef && <code className="branch-pill">⎇ {workspace.branchRef}</code>}
+                  {workspace.branchRef && <code className="branch-pill truncate max-w-[200px]" title={workspace.branchRef}>⎇ {workspace.branchRef}</code>}
                   {workspace.archivedAt && (
                     <span className="text-[10px] px-1 py-0.2 rounded bg-amber-500/15 text-amber-600 font-medium">
                       archived
@@ -1062,6 +1078,10 @@ function App() {
         onSaveSettings={handleSaveSettings}
         themes={themes}
         fonts={fonts}
+        api={api}
+        projects={snapshot?.projects ?? []}
+        locations={snapshot?.locations ?? []}
+        onLocationsChanged={async () => { await refreshWorkspaces(); }}
       />
 
       {/* Workspace Details & Management Modal */}
@@ -1137,6 +1157,7 @@ function App() {
               setActiveTab("agent");
             });
           }}
+          onLocationsChanged={async () => { await refreshWorkspaces(); }}
         />
       )}
     </div>

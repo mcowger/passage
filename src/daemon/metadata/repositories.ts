@@ -44,6 +44,8 @@ export class WorktreeLocationRepository {
   save(value: WorktreeLocation): void { this.db.query("INSERT INTO worktree_locations VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id, scope=excluded.scope, display_label=excluded.display_label, configured_root_path=excluded.configured_root_path, canonical_root_path=excluded.canonical_root_path, enabled=excluded.enabled").run(value.id, value.projectId, value.scope, value.displayLabel, value.configuredRootPath, value.canonicalRootPath, integer(value.enabled)); }
   get(id: string): WorktreeLocation | undefined { return locationFromRow(this.db.query<LocationRow, [string]>("SELECT * FROM worktree_locations WHERE id=?").get(id)); }
   listForProject(projectId: string | null, limit: number): WorktreeLocation[] { return this.db.query<LocationRow, [string | null, number]>("SELECT * FROM worktree_locations WHERE (project_id IS NULL OR project_id=?) AND enabled=1 ORDER BY id LIMIT ?").all(projectId, limit).map((row) => locationFromRow(row)!); }
+  listAll(limit: number): WorktreeLocation[] { return this.db.query<LocationRow, [number]>("SELECT * FROM worktree_locations ORDER BY id LIMIT ?").all(limit).map((row) => locationFromRow(row)!); }
+  setEnabled(id: string, enabled: boolean): void { this.db.query("UPDATE worktree_locations SET enabled=? WHERE id=?").run(integer(enabled), id); }
 }
 
 export class WorkspaceRepository {

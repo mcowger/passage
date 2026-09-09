@@ -98,3 +98,56 @@ describe("WorktreeService discovery and import", () => {
     ).rejects.toMatchObject({ code: "wrong-project" });
   });
 });
+
+describe("WorktreeService creation", () => {
+  test("creates a worktree on an existing ref", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "existing-feature");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const workspace = await f.worktreeService.create(f.project.id, location.id, "existing-feature", "Feature", "wt-feature");
+    expect(workspace.branchRef).toBe("existing-feature");
+    expect(workspace.displayLabel).toBe("Feature");
+  });
+
+  test("rejects a missing ref with an actionable error", async () => {
+    const f = await fixture();
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const failure = await f.worktreeService.create(f.project.id, location.id, "feature/does-not-exist", "Feature").then(
+      () => null,
+      (error: unknown) => error as { code: string; message: string },
+    );
+    expect(failure?.code).toBe("ref-not-found");
+    expect(failure?.message).toContain("feature/does-not-exist");
+  });
+
+  test("creates a new branch from a base ref", async () => {
+    const f = await fixture();
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const workspace = await f.worktreeService.create(f.project.id, location.id, "feature/brand-new", "Feature", "wt-new", {
+      createBranch: true,
+      baseRef: "main",
+    });
+    expect(workspace.branchRef).toBe("feature/brand-new");
+  });
+
+  test("rejects new-branch creation when the branch already exists", async () => {
+    const f = await fixture();
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const failure = await f.worktreeService.create(f.project.id, location.id, "main", "Feature", undefined, {
+      createBranch: true,
+      baseRef: "main",
+    }).then(
+      () => null,
+      (error: unknown) => error as { code: string },
+    );
+    expect(failure?.code).toBe("branch-exists");
+  });
+});

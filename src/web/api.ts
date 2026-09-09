@@ -2,11 +2,13 @@ import {
   projectSchema,
   workspaceSchema,
   workspaceSnapshotSchema,
+  locationSchema,
   type Project,
   type Workspace,
   type WorkspaceSnapshot,
+  type WorktreeLocation,
 } from "../shared/domain/workspaces.ts";
-import { agentCapabilitiesSchema, agentHistoryResponseSchema, agentSummarySchema, type AgentCapabilities, type AgentHistoryResponse, type AgentSummary } from "../shared/domain/agents.ts";
+import { agentCapabilitiesSchema, agentHistoryResponseSchema, agentHistorySchema, agentSummarySchema, type AgentCapabilities, type AgentHistory, type AgentHistoryResponse, type AgentSummary } from "../shared/domain/agents.ts";
 import { terminalSummarySchema, type CreateTerminalInput, type TerminalSummary } from "../shared/domain/terminals.ts";
 import { workspaceLayoutSchema, type WorkspaceLayout } from "../shared/domain/layout.ts";
 import { workspaceSettingsSchema, type WorkspaceSettings } from "../shared/domain/settings.ts";
@@ -91,10 +93,16 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     async configureLocation(input: { projectId?: string; displayLabel: string; configuredRootPath: string; enabled?: boolean }) {
       return await request("/api/worktree-locations", { method: "POST", body: JSON.stringify(input) });
     },
+    async listLocations(): Promise<WorktreeLocation[]> {
+      return locationSchema.array().parse(await request("/api/worktree-locations"));
+    },
+    async setLocationEnabled(locationId: string, enabled: boolean): Promise<WorktreeLocation> {
+      return locationSchema.parse(await request(`/api/worktree-locations/${encodeURIComponent(locationId)}`, { method: "PATCH", body: JSON.stringify({ enabled }) }));
+    },
     async suggestWorktree(projectId: string, purpose: string): Promise<{ label: string; branch: string; folder: string }> {
       return await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees/suggest`, { method: "POST", body: JSON.stringify({ purpose }) }) as { label: string; branch: string; folder: string };
     },
-    async createWorktree(projectId: string, input: { locationId: string; ref: string; label: string; folder?: string }): Promise<Workspace> {
+    async createWorktree(projectId: string, input: { locationId: string; ref: string; label: string; folder?: string; createBranch?: boolean; baseRef?: string }): Promise<Workspace> {
       return workspaceSchema.parse(await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees`, { method: "POST", body: JSON.stringify(input) }));
     },
     async discoverWorktrees(projectId: string): Promise<DiscoveredWorktree[]> {
@@ -181,6 +189,10 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     },
     async deleteTerminal(terminalId: string): Promise<void> {
       okResponseSchema.parse(await request(`/api/terminals/${encodeURIComponent(terminalId)}`, { method: "DELETE" }));
+    },
+    async transcriptPreview(): Promise<AgentHistory> {
+      const json = (await request("/api/dev/transcript-preview?mode=transcript")) as { history: unknown };
+      return agentHistorySchema.parse(json.history);
     },
   };
 }

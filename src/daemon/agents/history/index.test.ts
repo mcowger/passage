@@ -153,4 +153,47 @@ describe("Pi history projection", () => {
     expect(pageHistory(history, history.timeline.length, 1)).toMatchObject({ nextBefore: 1, history: { timeline: [{ kind: "user", text: "Two" }] } });
     expect(() => parsePiJsonl(source, revision(source), { maxRecords: 1 })).toThrow("record limit");
   });
+
+  test("projects a deterministic write, bash, and read tool sequence", () => {
+    const source = [
+      line(header),
+      line({ type: "message", id: "u1", parentId: null, timestamp: "t", message: { role: "user", content: "Create the file and verify it" } }),
+      line({ type: "message", id: "a1", parentId: "u1", timestamp: "t", message: { role: "assistant", content: [
+        { type: "toolCall", id: "write-1", name: "write", arguments: { path: "LIVE_SEQUENCE.md", content: "# Live\n" } },
+      ] } }),
+      line({ type: "message", id: "r1", parentId: "a1", timestamp: "t", message: { role: "toolResult", toolCallId: "write-1", toolName: "write", content: [{ type: "text", text: "Wrote LIVE_SEQUENCE.md" }], isError: false } }),
+      line({ type: "message", id: "a2", parentId: "r1", timestamp: "t", message: { role: "assistant", content: [
+        { type: "toolCall", id: "bash-1", name: "bash", arguments: { command: "git status --short" } },
+        { type: "toolCall", id: "read-1", name: "read", arguments: { path: "LIVE_SEQUENCE.md" } },
+      ] } }),
+      line({ type: "message", id: "r2", parentId: "a2", timestamp: "t", message: { role: "toolResult", toolCallId: "bash-1", toolName: "bash", content: [{ type: "text", text: "?? LIVE_SEQUENCE.md" }], isError: false } }),
+      line({ type: "message", id: "r3", parentId: "r2", timestamp: "t", message: { role: "toolResult", toolCallId: "read-1", toolName: "read", content: [{ type: "text", text: "# Live\n" }], isError: false } }),
+      line({ type: "message", id: "a3", parentId: "r3", timestamp: "t", message: { role: "assistant", content: [{ type: "text", text: "File created and verified." }] } }),
+    ].join("");
+    const history = parsePiJsonl(source, revision(source));
+    const activities = history.timeline.flatMap((item) => item.kind === "tool" ? [item] : item.kind === "process" ? item.activities : []);
+    expect(activities.map((item) => item.name)).toEqual(["write", "bash", "read"]);
+    expect(activities.every((item) => item.status === "complete")).toBe(true);
+    expect(activities.map((item) => item.result)).toEqual(["Wrote LIVE_SEQUENCE.md", "?? LIVE_SEQUENCE.md", "# Live\n"]);
+    // Significant write stays prominent; bash/read group into one process row.
+    expect(history.timeline.some((item) => item.kind === "tool" && item.name === "write")).toBe(true);
+    const process = history.timeline.find((item) => item.kind === "process");
+    expect(process?.kind === "process" ? process.activities.map((item) => item.name) : []).toEqual(["bash", "read"]);
+    expect(history.timeline.at(-1)).toMatchObject({ kind: "assistant", text: "File created and verified." });
+  });
+
+  test("projects unknown model tools as non-significant generic activities", () => {
+    // Mirrors the NullModel `tool_calls` persona shape (get_weather and friends):
+    // Pi records the call, Passage renders it through the safe generic card.
+    const source = [
+      line(header),
+      line({ type: "message", id: "a1", parentId: null, timestamp: "t", message: { role: "assistant", content: [
+        { type: "toolCall", id: "tc-1", name: "get_weather", arguments: { location: "San Francisco, CA" } },
+      ] } }),
+      line({ type: "message", id: "r1", parentId: "a1", timestamp: "t", message: { role: "toolResult", toolCallId: "tc-1", toolName: "get_weather", content: [{ type: "text", text: "sunny" }], isError: false } }),
+    ].join("");
+    const history = parsePiJsonl(source, revision(source));
+    const tool = history.timeline.flatMap((item) => item.kind === "tool" ? [item] : item.kind === "process" ? item.activities : []).find((item) => item.name === "get_weather");
+    expect(tool).toMatchObject({ status: "complete", significant: false, result: "sunny" });
+  });
 });

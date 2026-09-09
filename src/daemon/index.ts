@@ -6,7 +6,7 @@ import { AgentService } from "./agents/service.ts";
 import { AgentEventHub } from "./agents/events/index.ts";
 import { createAgentRoutes } from "./http/agents.ts";
 import { createWorkspaceRoutes } from "./http/workspaces.ts";
-import { createGitRoutes } from "./http/git.ts";
+import { createGitRoutes, createTranscriptPreviewRoutes } from "./http/git.ts";
 import { createFileRoutes } from "./http/files.ts";
 import { createWorktreeRoutes } from "./http/worktrees.ts";
 import { createTerminalRoutes } from "./http/terminals.ts";
@@ -73,6 +73,7 @@ app.route("/", createFileRoutes(fileService));
 app.route("/", createWorktreeRoutes(worktreeService));
 app.route("/", createTerminalRoutes(terminalManager));
 app.route("/", createAgentRoutes(agentService));
+app.route("/", createTranscriptPreviewRoutes());
 
 function protocolError(requestId: string, code: string, message: string): ProtocolError {
   return { version: PROTOCOL_VERSION, requestId, ok: false, error: { code, message } };

@@ -20,6 +20,7 @@ type Props = {
   api: WorkspaceApi;
   onClose: () => void;
   onCreated: (workspace: Workspace) => void;
+  onLocationsChanged?: () => Promise<void>;
 };
 
 export function NewWorktreeModal({
@@ -30,6 +31,7 @@ export function NewWorktreeModal({
   api,
   onClose,
   onCreated,
+  onLocationsChanged,
 }: Props) {
   const activeProjects = projects.filter((p) => !p.archivedAt);
   const [activeTab, setActiveTab] = useState<"create" | "discover">(initialTab);
@@ -40,9 +42,21 @@ export function NewWorktreeModal({
     (loc) => loc.enabled && (!loc.projectId || loc.projectId === projectId)
   );
   const [locationId, setLocationId] = useState(availableLocations[0]?.id ?? "");
+  useEffect(() => {
+    if (!availableLocations.some((loc) => loc.id === locationId) && availableLocations[0]) {
+      setLocationId(availableLocations[0].id);
+    }
+  }, [availableLocations, locationId]);
+  const [showLocationForm, setShowLocationForm] = useState(false);
+  const [newLocationLabel, setNewLocationLabel] = useState("");
+  const [newLocationPath, setNewLocationPath] = useState("");
+  const [newLocationScope, setNewLocationScope] = useState<"global" | "project">("global");
+  const [savingLocation, setSavingLocation] = useState(false);
   const [purpose, setPurpose] = useState("");
   const [label, setLabel] = useState("");
   const [branch, setBranch] = useState("feature/worktree");
+  const [branchMode, setBranchMode] = useState<"existing" | "new">("new");
+  const [baseRef, setBaseRef] = useState("main");
   const [folder, setFolder] = useState("");
   const [suggesting, setSuggesting] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -93,8 +107,24 @@ export function NewWorktreeModal({
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!projectId || !locationId || !label.trim() || !branch.trim()) {
-      setError("Please fill in all required fields.");
+    if (!projectId) {
+      setError("Choose a project first.");
+      return;
+    }
+    if (!locationId) {
+      setError("No worktree location is configured. Add a location below before creating a worktree.");
+      return;
+    }
+    if (!label.trim()) {
+      setError("Give the workspace a label.");
+      return;
+    }
+    if (!branch.trim()) {
+      setError(branchMode === "new" ? "Enter a name for the new branch." : "Enter an existing branch or ref to check out.");
+      return;
+    }
+    if (branchMode === "new" && !baseRef.trim()) {
+      setError("Enter the base branch or ref the new branch starts from (e.g. main).");
       return;
     }
 
@@ -106,6 +136,7 @@ export function NewWorktreeModal({
         ref: branch.trim(),
         label: label.trim(),
         folder: folder.trim() || undefined,
+        ...(branchMode === "new" ? { createBranch: true, baseRef: baseRef.trim() } : {}),
       });
       onCreated(created);
       onClose();
@@ -113,6 +144,31 @@ export function NewWorktreeModal({
       setError(err instanceof Error ? err.message : "Failed to create worktree");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleCreateLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLocationLabel.trim() || !newLocationPath.trim()) {
+      setError("Location needs a name and a directory path.");
+      return;
+    }
+    setSavingLocation(true);
+    setError("");
+    try {
+      await api.configureLocation({
+        ...(newLocationScope === "project" && projectId ? { projectId } : {}),
+        displayLabel: newLocationLabel.trim(),
+        configuredRootPath: newLocationPath.trim(),
+      });
+      setNewLocationLabel("");
+      setNewLocationPath("");
+      setShowLocationForm(false);
+      if (onLocationsChanged) await onLocationsChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add location");
+    } finally {
+      setSavingLocation(false);
     }
   };
 
@@ -183,8 +239,8 @@ export function NewWorktreeModal({
               </select>
             </label>
 
-            <label className="flex flex-col gap-1 text-xs font-medium">
-              Worktree Location
+            <div className="flex flex-col gap-1 text-xs font-medium">
+              <span>Worktree Location</span>
               {availableLocations.length > 0 ? (
                 <select
                   className="rounded-md border border-input bg-background px-3 py-1.5 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -200,10 +256,78 @@ export function NewWorktreeModal({
                 </select>
               ) : (
                 <p className="text-xs text-muted-foreground mt-1">
-                  No configured locations found. A global or project location must be configured.
+                  No configured locations found. Add a global or project location below to continue.
                 </p>
               )}
-            </label>
+              {!showLocationForm ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs self-start px-1"
+                  onClick={() => setShowLocationForm(true)}
+                >
+                  <PlusCircle className="w-3.5 h-3.5" /> New location
+                </Button>
+              ) : (
+                <div className="flex flex-col gap-1.5 rounded-md border border-border/50 p-2 bg-muted/20">
+                  <Input
+                    type="text"
+                    className="h-8 text-xs"
+                    placeholder="Location name, e.g. Fast SSD worktrees"
+                    value={newLocationLabel}
+                    onChange={(e) => setNewLocationLabel(e.target.value)}
+                  />
+                  <Input
+                    type="text"
+                    className="h-8 text-xs font-mono"
+                    placeholder="Directory path, e.g. /mnt/fast/worktrees"
+                    value={newLocationPath}
+                    onChange={(e) => setNewLocationPath(e.target.value)}
+                  />
+                  <div className="flex items-center gap-3 text-xs font-normal">
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="location-scope"
+                        checked={newLocationScope === "global"}
+                        onChange={() => setNewLocationScope("global")}
+                      />
+                      Global
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="location-scope"
+                        checked={newLocationScope === "project"}
+                        onChange={() => setNewLocationScope("project")}
+                      />
+                      This project only
+                    </label>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-7 text-xs"
+                      disabled={savingLocation}
+                      onClick={handleCreateLocation}
+                    >
+                      {savingLocation ? "Adding..." : "Add location"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setShowLocationForm(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <div className="flex flex-col gap-1">
               <label className="flex flex-col gap-1 text-xs font-medium">
@@ -244,17 +368,56 @@ export function NewWorktreeModal({
               />
             </label>
 
-            <label className="flex flex-col gap-1 text-xs font-medium">
-              Git Branch / Ref
+            <div className="flex flex-col gap-1 text-xs font-medium">
+              <span>Git Branch</span>
+              <div className="flex items-center gap-3 text-xs font-normal" role="radiogroup" aria-label="Branch mode">
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="branch-mode"
+                    checked={branchMode === "new"}
+                    onChange={() => setBranchMode("new")}
+                  />
+                  Create new branch
+                </label>
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="branch-mode"
+                    checked={branchMode === "existing"}
+                    onChange={() => setBranchMode("existing")}
+                  />
+                  Use existing branch / ref
+                </label>
+              </div>
               <Input
                 type="text"
                 className="h-8 text-xs font-mono"
-                placeholder="e.g. feature/webhook-retries or main"
+                placeholder={branchMode === "new" ? "e.g. feature/webhook-retries" : "e.g. main or a commit SHA"}
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
                 required
+                aria-label={branchMode === "new" ? "New branch name" : "Existing branch or ref"}
               />
-            </label>
+              {branchMode === "new" && (
+                <label className="flex flex-col gap-1 text-xs font-medium mt-1">
+                  Based on (base branch or ref)
+                  <Input
+                    type="text"
+                    className="h-8 text-xs font-mono"
+                    placeholder="e.g. main"
+                    value={baseRef}
+                    onChange={(e) => setBaseRef(e.target.value)}
+                    required
+                  />
+                </label>
+              )}
+              <p className="text-[11px] text-muted-foreground font-normal">
+                {branchMode === "new"
+                  ? "Creates the branch from the base ref in the new worktree."
+                  : "Checks out an existing branch, tag, or commit in the new worktree."}
+              </p>
+            </div>
 
             <label className="flex flex-col gap-1 text-xs font-medium">
               Destination Folder Name (Optional)

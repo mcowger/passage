@@ -146,7 +146,7 @@ export function getToolDiff(tool: ToolLike): ToolDiff | undefined {
   if (patch) return unifiedPatch(patch, path);
 
   const isEdit = name.includes("edit") || name.includes("patch");
-  const isWrite = name.includes("write") || name.includes("create");
+  const isWrite = name.includes("write") || name.includes("create") || name === "apply_patch";
   if (!isEdit && !isWrite) return undefined;
 
   const oldText = text(input.oldText) ?? text(input.oldContent) ?? text(input.original);
