@@ -15,6 +15,18 @@ describe("getToolDiff", () => {
     ]);
   });
 
+  test("supports oldString and newString from Pi/Claude edit tools", () => {
+    const diff = getToolDiff({
+      name: "edit",
+      input: { filePath: "src/index.ts", oldString: "const x = 1;", newString: "const x = 2;" },
+    });
+    expect(diff).toMatchObject({ path: "src/index.ts", additions: 1, deletions: 1 });
+    expect(diff?.lines).toEqual([
+      { kind: "removed", text: "const x = 1;", oldLine: 1 },
+      { kind: "added", text: "const x = 2;", newLine: 1 },
+    ]);
+  });
+
   test("supports unified patches and write content", () => {
     const patch = getToolDiff({
       name: "apply_patch",

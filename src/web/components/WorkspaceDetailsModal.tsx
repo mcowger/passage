@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Project, Workspace } from "../../shared/domain/workspaces.ts";
 import type { WorkspaceApi } from "../api.ts";
-import { CopyValueButton } from "../components.tsx";
+import { CopyValueButton } from "./CopyValueButton.tsx";
 import { Button } from "./ui/button.tsx";
 import { Input } from "./ui/input.tsx";
 import { Badge } from "./ui/badge.tsx";

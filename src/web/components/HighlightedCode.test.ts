@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { getLanguageFromPath, HighlightedCode } from "./HighlightedCode.tsx";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { ensureHighlighter, getLanguageFromPath, HighlightedCode } from "./HighlightedCode.tsx";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
 
@@ -8,6 +8,12 @@ describe("getLanguageFromPath", () => {
     expect(getLanguageFromPath("/home/matt.cowger/workspace/ybr/src/index.ts")).toBe("typescript");
     expect(getLanguageFromPath("src/components/App.tsx")).toBe("tsx");
     expect(getLanguageFromPath("utils.mts")).toBe("typescript");
+  });
+
+  test("correctly identifies shell and bash scripts", () => {
+    expect(getLanguageFromPath("deploy.sh")).toBe("bash");
+    expect(getLanguageFromPath("setup.bash")).toBe("bash");
+    expect(getLanguageFromPath("config.zsh")).toBe("bash");
   });
 
   test("correctly identifies other common programming languages", () => {
@@ -32,6 +38,10 @@ describe("getLanguageFromPath", () => {
 });
 
 describe("HighlightedCode component", () => {
+  beforeAll(async () => {
+    await ensureHighlighter();
+  });
+
   test("renders syntax-highlighted tokens for TypeScript code", () => {
     const code = 'import { HStack } from "@earendil-works/pi-tui";';
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -46,6 +56,22 @@ describe("HighlightedCode component", () => {
     expect(html).toContain("language-typescript");
     expect(html).toContain("import");
     expect(html).toContain("HStack");
+  });
+
+  test("renders syntax-highlighted tokens for bash command", () => {
+    const code = 'echo "hello from terminal"';
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(HighlightedCode, {
+        code,
+        language: "bash",
+        className: "tool-command-code",
+      })
+    );
+
+    expect(html).toContain("tool-command-code");
+    expect(html).toContain("language-bash");
+    expect(html).toContain("echo");
+    expect(html).toContain("hello from terminal");
   });
 
   test("falls back to plain pre block if language is unknown", () => {

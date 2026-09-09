@@ -1,5 +1,25 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { Highlight, themes } from "prism-react-renderer";
+import { createHighlighterCore, type HighlighterCore, type ThemedToken } from "shiki/core";
+import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+
+import bashLang from "shiki/langs/bash.mjs";
+import jsonLang from "shiki/langs/json.mjs";
+import tsLang from "shiki/langs/typescript.mjs";
+import jsLang from "shiki/langs/javascript.mjs";
+import tsxLang from "shiki/langs/tsx.mjs";
+import jsxLang from "shiki/langs/jsx.mjs";
+import diffLang from "shiki/langs/diff.mjs";
+import mdLang from "shiki/langs/markdown.mjs";
+import pyLang from "shiki/langs/python.mjs";
+import rustLang from "shiki/langs/rust.mjs";
+import goLang from "shiki/langs/go.mjs";
+import htmlLang from "shiki/langs/html.mjs";
+import cssLang from "shiki/langs/css.mjs";
+import yamlLang from "shiki/langs/yaml.mjs";
+import sqlLang from "shiki/langs/sql.mjs";
+
+import vitesseDark from "shiki/themes/vitesse-dark.mjs";
+import vitesseLight from "shiki/themes/vitesse-light.mjs";
 
 export type HighlightedCodeProps = {
   code: string;
@@ -8,6 +28,110 @@ export type HighlightedCodeProps = {
   className?: string;
   style?: CSSProperties;
 };
+
+let cachedHighlighter: HighlighterCore | null = null;
+let highlighterPromise: Promise<HighlighterCore> | null = null;
+
+export async function ensureHighlighter(): Promise<HighlighterCore> {
+  if (cachedHighlighter) return cachedHighlighter;
+  if (!highlighterPromise) {
+    highlighterPromise = createHighlighterCore({
+      themes: [vitesseDark, vitesseLight],
+      langs: [
+        bashLang,
+        jsonLang,
+        tsLang,
+        jsLang,
+        tsxLang,
+        jsxLang,
+        diffLang,
+        mdLang,
+        pyLang,
+        rustLang,
+        goLang,
+        htmlLang,
+        cssLang,
+        yamlLang,
+        sqlLang,
+      ],
+      engine: createJavaScriptRegexEngine(),
+    })
+      .then((hl) => {
+        cachedHighlighter = hl;
+        return hl;
+      })
+      .catch((err) => {
+        console.error("Failed to initialize Shiki highlighter:", err);
+        throw err;
+      });
+  }
+  return highlighterPromise;
+}
+
+// Start warming up the highlighter eagerly
+void ensureHighlighter();
+
+export function normalizeLanguage(lang?: string): string | undefined {
+  if (!lang) return undefined;
+  const lower = lang.trim().toLowerCase();
+  switch (lower) {
+    case "bash":
+    case "sh":
+    case "shell":
+    case "zsh":
+      return "bash";
+    case "typescript":
+    case "ts":
+    case "mts":
+    case "cts":
+      return "typescript";
+    case "tsx":
+      return "tsx";
+    case "javascript":
+    case "js":
+    case "mjs":
+    case "cjs":
+      return "javascript";
+    case "jsx":
+      return "jsx";
+    case "json":
+    case "jsonc":
+    case "json5":
+      return "json";
+    case "diff":
+    case "patch":
+      return "diff";
+    case "markdown":
+    case "md":
+    case "mdx":
+      return "markdown";
+    case "python":
+    case "py":
+      return "python";
+    case "rust":
+    case "rs":
+      return "rust";
+    case "go":
+      return "go";
+    case "html":
+    case "htm":
+    case "svg":
+    case "xml":
+    case "markup":
+      return "html";
+    case "css":
+    case "scss":
+    case "less":
+      return "css";
+    case "yaml":
+    case "yml":
+      return "yaml";
+    case "sql":
+      return "sql";
+    default:
+      return lower;
+  }
+}
 
 export function getLanguageFromPath(path?: string): string | undefined {
   if (!path) return undefined;
@@ -43,7 +167,7 @@ export function getLanguageFromPath(path?: string): string | undefined {
     case "htm":
     case "svg":
     case "xml":
-      return "markup";
+      return "html";
     case "md":
     case "markdown":
     case "mdx":
@@ -52,26 +176,21 @@ export function getLanguageFromPath(path?: string): string | undefined {
     case "python":
       return "python";
     case "rs":
-    case "rust":
       return "rust";
     case "go":
       return "go";
-    case "c":
-    case "h":
-      return "c";
-    case "cpp":
-    case "hpp":
-    case "cc":
-    case "cxx":
-      return "cpp";
     case "yaml":
     case "yml":
       return "yaml";
     case "sql":
       return "sql";
-    case "graphql":
-    case "gql":
-      return "graphql";
+    case "sh":
+    case "bash":
+    case "zsh":
+      return "bash";
+    case "diff":
+    case "patch":
+      return "diff";
     default:
       return undefined;
   }
@@ -111,9 +230,15 @@ export function HighlightedCode({
   className,
   style,
 }: HighlightedCodeProps) {
-  const resolvedLang = language || getLanguageFromPath(filePath);
+  const resolvedLang = normalizeLanguage(language) || getLanguageFromPath(filePath);
   const isDark = useIsDarkMode();
-  const theme = isDark ? themes.vsDark : themes.vsLight;
+  const [highlighter, setHighlighter] = useState<HighlighterCore | null>(cachedHighlighter);
+
+  useEffect(() => {
+    if (!cachedHighlighter) {
+      void ensureHighlighter().then((hl) => setHighlighter(hl));
+    }
+  }, []);
 
   if (!resolvedLang || code.length > 250000) {
     return (
@@ -123,35 +248,65 @@ export function HighlightedCode({
     );
   }
 
+  const activeHighlighter = highlighter || cachedHighlighter;
+  let tokens: ThemedToken[][] | null = null;
+
+  if (activeHighlighter) {
+    const loadedLangs = activeHighlighter.getLoadedLanguages();
+    const targetLang = loadedLangs.includes(resolvedLang) ? resolvedLang : "text";
+    try {
+      const result = activeHighlighter.codeToTokens(code.trimEnd(), {
+        lang: targetLang,
+        theme: isDark ? "vitesse-dark" : "vitesse-light",
+      });
+      tokens = result.tokens;
+    } catch {
+      tokens = null;
+    }
+  }
+
+  const langClass = `language-${resolvedLang}`;
+  const preClass = `${className ?? ""} ${langClass}`.trim();
+
+  if (!tokens) {
+    return (
+      <pre className={preClass} style={style}>
+        <code>{code}</code>
+      </pre>
+    );
+  }
+
   return (
-    <Highlight theme={theme} code={code.trimEnd()} language={resolvedLang}>
-      {({ className: highlightClass, style: highlightStyle, tokens, getLineProps, getTokenProps }) => (
-        <pre
-          className={`${className ?? ""} ${highlightClass}`.trim()}
-          style={{
-            ...style,
-            ...highlightStyle,
-            backgroundColor: undefined,
-          }}
-        >
-          <code>
-            {tokens.map((line, i) => {
-              const isEmpty =
-                line.length === 0 ||
-                (line.length === 1 && (!line[0].content || line[0].content === "\n"));
-              return (
-                <div key={i} {...getLineProps({ line })}>
-                  {isEmpty ? (
-                    <span>{"\n"}</span>
-                  ) : (
-                    line.map((token, key) => <span key={key} {...getTokenProps({ token })} />)
-                  )}
-                </div>
-              );
-            })}
-          </code>
-        </pre>
-      )}
-    </Highlight>
+    <pre className={preClass} style={{ ...style, backgroundColor: undefined }}>
+      <code>
+        {tokens.map((line, i) => {
+          const isEmpty =
+            line.length === 0 ||
+            (line.length === 1 && (!line[0].content || line[0].content === "\n"));
+          return (
+            <div key={i} className="line">
+              {isEmpty ? (
+                <span>{"\n"}</span>
+              ) : (
+                line.map((token, key) => (
+                  <span
+                    key={key}
+                    style={{
+                      color: token.color,
+                      fontStyle: token.fontStyle && token.fontStyle & 1 ? "italic" : undefined,
+                      fontWeight: token.fontStyle && token.fontStyle & 2 ? "bold" : undefined,
+                      textDecoration:
+                        token.fontStyle && token.fontStyle & 4 ? "underline" : undefined,
+                    }}
+                  >
+                    {token.content}
+                  </span>
+                ))
+              )}
+            </div>
+          );
+        })}
+      </code>
+    </pre>
   );
 }

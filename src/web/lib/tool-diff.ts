@@ -142,15 +142,40 @@ export function getToolDiff(tool: ToolLike): ToolDiff | undefined {
   if (!input) return undefined;
   const name = tool.name.toLowerCase();
   const path = pathFrom(input);
-  const patch = text(input.patch) ?? text(input.diff) ?? text(input.unifiedDiff);
+  const patch = text(input.patch) ?? text(input.patchText) ?? text(input.diff) ?? text(input.unifiedDiff);
   if (patch) return unifiedPatch(patch, path);
 
   const isEdit = name.includes("edit") || name.includes("patch");
   const isWrite = name.includes("write") || name.includes("create") || name === "apply_patch";
   if (!isEdit && !isWrite) return undefined;
 
-  const oldText = text(input.oldText) ?? text(input.oldContent) ?? text(input.original);
-  const newText = text(input.newText) ?? text(input.newContent) ?? text(input.content) ?? text(input.text);
+  if (Array.isArray(input.edits) && input.edits.length > 0) {
+    const allLines: ToolDiffLine[] = [];
+    let totalAdditions = 0;
+    let totalDeletions = 0;
+    let totalContext = 0;
+    for (const edit of input.edits) {
+      if (typeof edit === "object" && edit !== null) {
+        const eOld = text((edit as Record<string, unknown>).oldString) ?? text((edit as Record<string, unknown>).oldText) ?? "";
+        const eNew = text((edit as Record<string, unknown>).newString) ?? text((edit as Record<string, unknown>).newText) ?? "";
+        const d = lineDiff(eOld, eNew, path);
+        allLines.push(...d.lines);
+        totalAdditions += d.additions;
+        totalDeletions += d.deletions;
+        totalContext += d.contextLines;
+      }
+    }
+    return {
+      path,
+      additions: totalAdditions,
+      deletions: totalDeletions,
+      contextLines: totalContext,
+      lines: allLines,
+    };
+  }
+
+  const oldText = text(input.oldString) ?? text(input.oldText) ?? text(input.oldContent) ?? text(input.original);
+  const newText = text(input.newString) ?? text(input.newText) ?? text(input.newContent) ?? text(input.content) ?? text(input.text);
   if (oldText === undefined && newText === undefined) return undefined;
   return lineDiff(oldText ?? "", newText ?? "", path);
 }
