@@ -767,6 +767,14 @@ function App() {
             setSelectedWorkspaceId(ws.id);
             setWorkspaceDetailsOpen(true);
           }}
+          onArchiveProject={async (id) => {
+            try {
+              await api.archiveProject(id);
+              await refreshWorkspaces();
+            } catch (err) {
+              setSnapshotError(err instanceof Error ? err.message : String(err));
+            }
+          }}
         />
       ) : (
         <aside className="sidebar loading">Loading Passage…</aside>

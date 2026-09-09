@@ -13,6 +13,7 @@ import {
   MoreHorizontal,
   Bot,
   Terminal as TerminalIcon,
+  Trash2,
 } from "lucide-react";
 import { cn } from "../lib/utils.ts";
 
@@ -33,6 +34,7 @@ export type SidebarProps = {
   onSelectTerminal: (id: string) => void;
   onManageWorkspace?: (workspace: Workspace) => void;
   onDiscoverWorktrees?: (projectId?: string) => void;
+  onArchiveProject?: (id: string) => void;
 };
 
 export function Sidebar({
@@ -52,6 +54,7 @@ export function Sidebar({
   onSelectTerminal,
   onManageWorkspace,
   onDiscoverWorktrees,
+  onArchiveProject,
 }: SidebarProps) {
   const activeProjects = data.projects.filter((project) => !project.archivedAt);
   return (
@@ -104,6 +107,7 @@ export function Sidebar({
             onSelectTerminal={onSelectTerminal}
             onManageWorkspace={onManageWorkspace}
             onDiscoverWorktrees={onDiscoverWorktrees}
+            onArchiveProject={onArchiveProject}
           />
         ))}
       </div>
@@ -129,6 +133,7 @@ function ProjectRow({
   onSelectTerminal,
   onManageWorkspace,
   onDiscoverWorktrees,
+  onArchiveProject,
 }: {
   project: Project;
   workspaces: Workspace[];
@@ -142,6 +147,7 @@ function ProjectRow({
   onSelectTerminal: (id: string) => void;
   onManageWorkspace?: (workspace: Workspace) => void;
   onDiscoverWorktrees?: (projectId?: string) => void;
+  onArchiveProject?: (id: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const activeRows = workspaces.filter((workspace) => workspace.projectId === project.id && !workspace.archivedAt);
@@ -175,6 +181,21 @@ function ProjectRow({
             title="Discover & import worktrees for this project"
           >
             <FolderDown className="w-3 h-3" />
+          </button>
+        )}
+        {onArchiveProject && (
+          <button
+            type="button"
+            className="opacity-0 group-hover/proj:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-danger transition-opacity ml-1"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm("Are you sure you want to remove this project? This will not delete any files on disk.")) {
+                onArchiveProject(project.id);
+              }
+            }}
+            title="Remove project"
+          >
+            <Trash2 className="w-3 h-3" />
           </button>
         )}
       </div>
