@@ -60,6 +60,7 @@ export function AgentPanel({
   const streamingStartedAtRef = useRef<number | null>(null);
   const [streamingTokens, setStreamingTokens] = useState(0);
   const [streamingTokensPerSecond, setStreamingTokensPerSecond] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   streamingTokenTextRef.current = streamingTokenText;
 
   useEffect(() => {
@@ -68,6 +69,7 @@ export function AgentPanel({
       streamingTokenCacheRef.current = undefined;
       setStreamingTokens(0);
       setStreamingTokensPerSecond(null);
+      setElapsedSeconds(0);
       return;
     }
 
@@ -78,6 +80,7 @@ export function AgentPanel({
       streamingTokenCacheRef.current = { text, tokens };
       setStreamingTokens(tokens);
       const elapsed = (Date.now() - (streamingStartedAtRef.current ?? Date.now())) / 1000;
+      setElapsedSeconds(elapsed);
       setStreamingTokensPerSecond(elapsed > 0.5 && tokens > 0 ? tokens / elapsed : null);
     };
     tick();
@@ -159,7 +162,6 @@ export function AgentPanel({
   const contextPct = totalTokens > 0 ? Math.min(100, Math.max(1, Math.round((totalTokens / maxTokens) * 100))) : 0;
   const pieColor = contextPct >= 95 ? "var(--danger, #b91c1c)" : contextPct >= 80 ? "var(--warning, #b45309)" : "currentColor";
   const changeSummary = useMemo(() => summarizeChanges(effectiveHistory?.timeline ?? []), [effectiveHistory?.timeline]);
-  const streamingStartIndex = useMemo(() => findStreamingStartIndex(effectiveHistory?.timeline ?? []), [effectiveHistory?.timeline]);
 
   return (
     <section className="agent-panel" aria-label={`Agent conversation ${agent.title}`}>
@@ -177,19 +179,18 @@ export function AgentPanel({
               <h3>What are we working on?</h3>
               <p>Type a prompt below to start an autonomous session.</p>
             </div>
-          ) : effectiveHistory.timeline.map((item, index) => (
-            <Fragment key={item.id}>
-              {streamActive && index === streamingStartIndex && streamingTokenText && (
-                <LiveStreamingStats tokens={streamingTokens} tokensPerSecond={streamingTokensPerSecond} />
-              )}
-              <TimelineRow item={item} concise={concise} />
-            </Fragment>
+          ) : effectiveHistory.timeline.map((item) => (
+            <TimelineRow key={item.id} item={item} concise={concise} />
           ))}
       </div>
 
       <AgentComposer
         agentId={agent.id}
         running={running}
+        streamActive={streamActive}
+        streamingTokens={streamingTokens}
+        streamingTokensPerSecond={streamingTokensPerSecond}
+        elapsedSeconds={elapsedSeconds}
         capabilities={capabilities}
         api={api}
         busy={busy}
@@ -212,9 +213,42 @@ export function AgentPanel({
   );
 }
 
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  const mins = Math.floor(seconds / 60);
+  const remSecs = (seconds % 60).toFixed(0).padStart(2, "0");
+  return `${mins}m ${remSecs}s`;
+}
+
+const LiveStreamingStats = memo(function LiveStreamingStats({
+  tokens,
+  tokensPerSecond,
+}: {
+  tokens: number;
+  tokensPerSecond: number | null;
+}) {
+  if (tokens <= 0) return null;
+  return (
+    <div className="live-streaming-stats" role="status" aria-live="polite">
+      <span className="live-streaming-token-count" title="Estimated streamed tokens">
+        ↓ {Math.round(tokens).toLocaleString()}
+      </span>
+      {tokensPerSecond !== null && (
+        <span className="live-streaming-rate">{tokensPerSecond.toFixed(1)} t/s</span>
+      )}
+    </div>
+  );
+});
+
 type AgentComposerProps = {
   agentId: string;
   running: boolean;
+  streamActive: boolean;
+  streamingTokens: number;
+  streamingTokensPerSecond: number | null;
+  elapsedSeconds: number;
   capabilities?: AgentCapabilities;
   api: WorkspaceApi;
   busy: boolean;
@@ -237,6 +271,10 @@ type AgentComposerProps = {
 function AgentComposerInner({
   agentId,
   running,
+  streamActive,
+  streamingTokens,
+  streamingTokensPerSecond,
+  elapsedSeconds,
   capabilities,
   api,
   busy,
@@ -388,10 +426,11 @@ function AgentComposerInner({
 
   return (
     <footer className="composer-container">
-      {running && (
-        <div className="composer-status-line">
+      {streamActive && (
+        <div className="composer-status-line" role="status" aria-live="polite">
           <span className="pulse-dot" />
-          <span>Pi Agent is running…</span>
+          <span className="composer-status-duration">{formatDuration(elapsedSeconds)}</span>
+          <LiveStreamingStats tokens={streamingTokens} tokensPerSecond={streamingTokensPerSecond} />
         </div>
       )}
       {changeSummary && (
@@ -609,37 +648,10 @@ function AgentComposerInner({
 
 const AgentComposer = memo(AgentComposerInner);
 
-function findStreamingStartIndex(timeline: TimelineItem[]): number {
-  for (let i = timeline.length - 1; i >= 0; i--) {
-    const item = timeline[i];
-    if (item.kind === "user") {
-      return i + 1;
-    }
-  }
-  return 0;
-}
-
 function hasPendingStreamingItem(timeline: TimelineItem[]): boolean {
   const last = timeline.at(-1);
   return last?.kind === "thinking" || (last?.kind === "tool" && last.status === "running");
 }
-
-const LiveStreamingStats = memo(function LiveStreamingStats({
-  tokens,
-  tokensPerSecond,
-}: {
-  tokens: number;
-  tokensPerSecond: number | null;
-}) {
-  return (
-    <div className="live-streaming-stats" role="status" aria-live="polite">
-      <span className="live-streaming-token-count" title="Estimated streamed tokens">
-        ↓ {Math.round(tokens).toLocaleString()}
-      </span>
-      {tokensPerSecond !== null && <span className="live-streaming-rate">{tokensPerSecond.toFixed(1)} t/s</span>}
-    </div>
-  );
-});
 
 function summarizeChanges(timeline: TimelineItem[]): { fileCount: number; additions: number; deletions: number } | undefined {
   const files = new Set<string>();
