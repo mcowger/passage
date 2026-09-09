@@ -42,6 +42,22 @@ interface ModelSection {
   isRecent?: boolean;
 }
 
+/** Signal-strength indicator for thinking effort: one bar per available level. */
+function ThinkingSignalBars({ options, current }: { options: string[]; current: string }) {
+  const activeIndex = Math.max(0, options.indexOf(current));
+  return (
+    <span className="thinking-bars" aria-hidden="true">
+      {options.map((level, index) => (
+        <span
+          key={level}
+          className={`thinking-bar${index <= activeIndex ? " filled" : ""}`}
+          style={{ height: `${4 + (index * 8) / Math.max(1, options.length - 1)}px` }}
+        />
+      ))}
+    </span>
+  );
+}
+
 export function ModelPicker({
   currentModelId,
   currentModelName,
@@ -330,11 +346,11 @@ export function ModelPicker({
           }}
           disabled={disabled || thinkingOptions.length === 0}
           title={`Thinking / Effort: ${currentThinking}`}
+          aria-label={`Thinking effort: ${currentThinking}. Activate to change.`}
           aria-haspopup="listbox"
           aria-expanded={thinkingOpen}
         >
-          <span className="chip-sparkle">❖</span>
-          <span className="chip-label">{currentThinking}</span>
+          <ThinkingSignalBars options={thinkingOptions} current={currentThinking} />
         </button>
 
         {thinkingOpen && (
@@ -351,6 +367,7 @@ export function ModelPicker({
                   setThinkingOpen(false);
                 }}
               >
+                <ThinkingSignalBars options={thinkingOptions} current={level} />
                 <span className="thinking-option-name">{level}</span>
                 {level === currentThinking && <span className="check-icon">✓</span>}
               </div>

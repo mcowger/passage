@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./components/ui/dialog.tsx";
-import { Folder, GitBranch, ChevronDown, ChevronRight, MoreHorizontal, Bot, Terminal as TerminalIcon, FolderDown, FileText, FilePlus, Pencil, Search, Settings, Copy, Check } from "lucide-react";
+import { Folder, GitBranch, ChevronDown, ChevronRight, MoreHorizontal, Bot, Terminal as TerminalIcon, FolderDown, FileText, FilePlus, Pencil, Search, Settings, Copy, Check, Plus, Expand, Shrink, ArrowUp, Clock, Square } from "lucide-react";
 import { cn } from "./lib/utils.ts";
 import { getToolDiff, type ToolDiff } from "./lib/tool-diff.ts";
 import { estimateUpdatedTokens, getStreamingTokenText, type TokenEstimateCacheEntry } from "./lib/streaming-tokens.ts";
@@ -625,20 +625,19 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
           )}
           <div className="composer-toolbar">
             <div className="composer-toolbar-left">
-              <label className="composer-attach-btn" title="Attach image">
-                <span>⊕ Attach</span>
+              <label className="composer-attach-btn" title="Attach image" aria-label="Attach image">
+                <Plus size={14} aria-hidden="true" />
                 <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(event) => { void addImages(event.target.files); event.currentTarget.value = ""; }} />
               </label>
               {totalTokens > 0 && (
                 <span className="composer-ctx-pill" title={`${totalTokens.toLocaleString()} tokens (${effectiveHistory?.usage?.input.toLocaleString() ?? 0} in · ${effectiveHistory?.usage?.output.toLocaleString() ?? 0} out · ${effectiveHistory?.usage?.cacheRead.toLocaleString() ?? 0} cache) · $${effectiveHistory?.usage?.cost.toFixed(4) ?? "0.0000"}`}>
-                  <span className="context-dot" />
-                  <span>{contextPercentage}% ctx</span>
+                  <span>{contextPercentage}%</span>
                   <span className="composer-stat-sep">·</span>
-                  <span>{totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}k tok` : `${totalTokens} tok`}</span>
+                  <span>{totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : `${totalTokens}`}</span>
                   {effectiveHistory?.usage?.cost !== undefined && effectiveHistory.usage.cost > 0 && (
                     <>
                       <span className="composer-stat-sep">·</span>
-                      <span>${effectiveHistory.usage.cost.toFixed(3)}</span>
+                      <span>${effectiveHistory.usage.cost.toFixed(2)}</span>
                     </>
                   )}
                 </span>
@@ -647,11 +646,13 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
             <div className="composer-toolbar-right">
               <button
                 type="button"
-                className="composer-mode-toggle"
+                className="composer-icon-btn"
                 onClick={toggleConcise}
                 title={concise ? "Switch to Detailed mode" : "Switch to Concise mode"}
+                aria-label={concise ? "Switch to Detailed mode" : "Switch to Concise mode"}
+                aria-pressed={concise}
               >
-                {concise ? "Concise" : "Detailed"}
+                {concise ? <Shrink size={14} aria-hidden="true" /> : <Expand size={14} aria-hidden="true" />}
               </button>
               <ModelPicker
                 currentModelId={currentModel ? `${currentModel.provider}:${currentModel.id}` : undefined}
@@ -668,9 +669,15 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
               />
               {running ? (
                 <>
-                  <Button size="sm" onClick={() => send("steer")} disabled={busy}>Steer now</Button>
-                  <Button variant="secondary" size="sm" onClick={() => send("followUp")} disabled={busy}>Queue follow-up</Button>
-                  <Button variant="destructive" size="sm" onClick={() => void run(() => api.abort(agent.id))} disabled={busy} title="Stop agent execution">⏹ Stop</Button>
+                  <Button size="sm" className="composer-action-btn" onClick={() => send("steer")} disabled={busy} title="Steer now (Enter)" aria-label="Steer now">
+                    <ArrowUp size={14} aria-hidden="true" />
+                  </Button>
+                  <Button variant="secondary" size="sm" className="composer-action-btn" onClick={() => send("followUp")} disabled={busy} title="Queue follow-up" aria-label="Queue follow-up">
+                    <Clock size={14} aria-hidden="true" />
+                  </Button>
+                  <Button variant="destructive" size="sm" className="composer-action-btn" onClick={() => void run(() => api.abort(agent.id))} disabled={busy} title="Stop agent execution" aria-label="Stop agent execution">
+                    <Square size={13} aria-hidden="true" />
+                  </Button>
                 </>
               ) : (
                 <Button size="sm" className="send-btn" onClick={() => send("prompt")} disabled={busy || (!draft.trim() && images.length === 0)}>
@@ -895,7 +902,10 @@ function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }
   if (item.kind === "process") {
     return (
       <details className="timeline-row process">
-        <summary><strong>Process</strong><span>{item.activities.length} activities</span></summary>
+        <summary className="process-summary">
+          <span className="process-title">Process</span>
+          <span className="process-count">{item.activities.length} {item.activities.length === 1 ? "activity" : "activities"}</span>
+        </summary>
         {item.activities.map((activity) => (
           <ToolRow
             key={activity.id}

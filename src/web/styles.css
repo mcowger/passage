@@ -310,19 +310,19 @@ code { font-family: var(--font-mono); }
 }
 
 .composer-ctx-pill {
-  height: 26px;
-  min-height: 26px;
-  max-height: 26px;
+  height: 22px;
+  min-height: 22px;
+  max-height: 22px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 0 8px;
+  gap: 3px;
+  padding: 0 6px;
   background: var(--chip-blue-bg);
   color: var(--chip-blue-fg);
   border: 1px solid transparent;
-  border-radius: 6px;
-  font-size: 11px;
+  border-radius: 5px;
+  font-size: 10px;
   font-weight: 600;
   font-family: var(--font-mono);
   white-space: nowrap;
@@ -330,6 +330,30 @@ code { font-family: var(--font-mono); }
   line-height: 1;
 }
 .composer-stat-sep { opacity: 0.45; margin: 0 1px; }
+
+.composer-icon-btn {
+  height: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  width: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  box-sizing: border-box;
+  line-height: 1;
+  transition: background 120ms ease, color 120ms ease;
+}
+.composer-icon-btn:hover { background: var(--surface-hover); color: var(--foreground); }
+.composer-icon-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+/* Icon-only action buttons in the composer (steer / queue / stop) */
+.composer-action-btn { padding: 0 8px; }
+.composer-action-btn svg { flex: none; }
 
 .composer-mode-toggle {
   height: 26px;
@@ -484,6 +508,24 @@ code { font-family: var(--font-mono); }
 .timeline-concise-title { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--foreground); font-weight: 500; }
 .timeline-concise-badge code { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 
+/* Process Group Header */
+.timeline-row.process > summary.process-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 24px;
+  padding: 2px 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12.5px;
+  list-style: none;
+  border-radius: 5px;
+}
+.timeline-row.process > summary.process-summary::-webkit-details-marker { display: none; }
+.timeline-row.process > summary.process-summary:hover { background: var(--surface-hover); }
+.process-title { font-weight: 600; color: var(--foreground); }
+.process-count { color: var(--muted); font-size: 12px; }
+
 /* Thinking Row (Marginalia) */
 .thinking-row { margin: 1px 0; border-radius: 5px; }
 .thinking-summary {
@@ -559,8 +601,13 @@ code { font-family: var(--font-mono); }
 }
 
 .composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--surface-subtle); min-height: 28px; }
-.composer-toolbar-left { display: flex; align-items: center; gap: 6px; }
-.composer-toolbar-right { display: flex; align-items: center; gap: 6px; }
+.composer-toolbar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: none; }
+.composer-toolbar-right { display: flex; align-items: center; gap: 6px; min-width: 0; margin-left: auto; }
+@media (max-width: 640px) {
+  .composer-toolbar { flex-wrap: wrap; row-gap: 6px; }
+  .composer-toolbar-right { flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; }
+  .composer-chip-btn .chip-label { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
 .composer-attach-btn {
   height: 26px;
   min-height: 26px;
@@ -768,7 +815,7 @@ code { font-family: var(--font-mono); }
 .thinking-option-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 6px 12px;
   font-size: 12px;
   cursor: pointer;
@@ -780,7 +827,13 @@ code { font-family: var(--font-mono); }
   color: var(--accent);
   font-weight: 600;
 }
+.thinking-option-row .check-icon { margin-left: auto; }
 .thinking-option-name { text-transform: capitalize; }
+
+/* Signal-strength bars for thinking effort (one bar per level) */
+.thinking-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.thinking-bar { width: 3px; border-radius: 1px; background: var(--border-strong); opacity: 0.45; }
+.thinking-bar.filled { background: currentColor; opacity: 1; }
 
 .send-btn, .stop-btn {
   height: 26px;
