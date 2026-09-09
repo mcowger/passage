@@ -1,0 +1,100 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { MetadataRepositories, MetadataStore } from "../metadata/index.ts";
+import { WorkspaceService } from "./service.ts";
+import { WorktreeService } from "./worktrees.ts";
+import { GitService } from "./git.ts";
+
+const roots: string[] = [];
+const git = async (cwd: string, ...args: string[]) => {
+  const p = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "pipe" });
+  if ((await p.exited) !== 0) throw new Error(await new Response(p.stderr).text());
+};
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "passage-wt-test-"));
+  roots.push(root);
+  const repo = join(root, "repo");
+  await mkdir(repo);
+  await git(repo, "init", "-b", "main");
+  await git(repo, "config", "user.email", "test@example.com");
+  await git(repo, "config", "user.name", "Test");
+  await writeFile(join(repo, "README.md"), "# Test\n");
+  await git(repo, "add", ".");
+  await git(repo, "commit", "-m", "initial");
+
+  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const repositories = new MetadataRepositories(store.db);
+  const workspaceService = new WorkspaceService(repositories);
+  const gitService = new GitService();
+  const worktreeService = new WorktreeService(repositories, gitService);
+
+  const project = await workspaceService.registerProject(repo, "Test Project");
+  return { root, repo, store, repositories, workspaceService, worktreeService, project };
+}
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
+});
+
+describe("WorktreeService discovery and import", () => {
+  test("discovers worktrees and identifies registered vs unregistered", async () => {
+    const f = await fixture();
+    const wtPath = join(f.root, "wt-feature");
+    await git(f.repo, "worktree", "add", "-b", "feature-branch", wtPath);
+
+    const discovered = await f.worktreeService.discover(f.project.id);
+    expect(discovered.length).toBe(2);
+
+    const mainEntry = discovered.find((d) => d.isMain);
+    expect(mainEntry).toBeDefined();
+    expect(mainEntry?.branchRef).toBe("main");
+
+    const featureEntry = discovered.find((d) => d.branchRef === "feature-branch");
+    expect(featureEntry).toBeDefined();
+    expect(featureEntry?.isRegistered).toBe(false);
+    expect(featureEntry?.isMain).toBe(false);
+  });
+
+  test("imports an existing worktree into Passage", async () => {
+    const f = await fixture();
+    const wtPath = join(f.root, "wt-feature");
+    await git(f.repo, "worktree", "add", "-b", "feature-branch", wtPath);
+
+    const imported = await f.worktreeService.importWorktree(f.project.id, {
+      path: wtPath,
+      label: "My Feature",
+    });
+
+    expect(imported.id).toBeDefined();
+    expect(imported.projectId).toBe(f.project.id);
+    expect(imported.displayLabel).toBe("My Feature");
+    expect(imported.branchRef).toBe("feature-branch");
+    expect(imported.kind).toBe("worktree");
+    expect(imported.ownershipState).toBe("unowned");
+
+    // After import, discover should report it as registered
+    const discovered = await f.worktreeService.discover(f.project.id);
+    const featureEntry = discovered.find((d) => d.branchRef === "feature-branch");
+    expect(featureEntry?.isRegistered).toBe(true);
+    expect(featureEntry?.workspaceId).toBe(imported.id);
+  });
+
+  test("rejects worktrees from a different repository", async () => {
+    const f = await fixture();
+    const otherRepo = join(f.root, "other");
+    await mkdir(otherRepo);
+    await git(otherRepo, "init", "-b", "main");
+    await git(otherRepo, "config", "user.email", "test@example.com");
+    await git(otherRepo, "config", "user.name", "Test");
+    await writeFile(join(otherRepo, "README.md"), "# Other\n");
+    await git(otherRepo, "add", ".");
+    await git(otherRepo, "commit", "-m", "initial");
+
+    await expect(
+      f.worktreeService.importWorktree(f.project.id, { path: otherRepo })
+    ).rejects.toMatchObject({ code: "wrong-project" });
+  });
+});

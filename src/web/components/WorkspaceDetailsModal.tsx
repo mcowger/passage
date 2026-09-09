@@ -96,6 +96,8 @@ export function WorkspaceDetailsModal({
     }
   };
 
+  const isWorktree = workspace.kind === "worktree";
+
   return (
     <>
       <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
@@ -139,7 +141,7 @@ export function WorkspaceDetailsModal({
                 <Input
                   value={label}
                   onChange={(e) => setLabel(e.target.value)}
-                  placeholder="Workspace label"
+                  placeholder={isWorktree ? "Worktree label" : "Workspace label"}
                   className="h-8 text-xs flex-1"
                   autoFocus
                   required
@@ -153,7 +155,9 @@ export function WorkspaceDetailsModal({
               </form>
             ) : (
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Workspace label: <b>{workspace.displayLabel}</b></span>
+                <span className="text-xs text-muted-foreground">
+                  {isWorktree ? "Worktree" : "Workspace"} label: <b>{workspace.displayLabel}</b>
+                </span>
                 <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEditing(true)}>
                   Rename
                 </Button>
@@ -165,11 +169,11 @@ export function WorkspaceDetailsModal({
           <div className="flex items-center gap-2 py-1 flex-wrap">
             {workspace.archivedAt ? (
               <Button size="sm" variant="default" onClick={handleToggleArchive} disabled={busy}>
-                Reopen Workspace
+                {isWorktree ? "Reopen Worktree" : "Reopen Workspace"}
               </Button>
             ) : (
               <Button size="sm" variant="secondary" onClick={handleToggleArchive} disabled={busy}>
-                Archive Workspace
+                {isWorktree ? "Archive Worktree" : "Archive Workspace"}
               </Button>
             )}
 
@@ -179,14 +183,14 @@ export function WorkspaceDetailsModal({
               </Button>
             )}
 
-            {workspace.kind === "worktree" && (
+            {isWorktree && (
               <Button
                 size="sm"
                 variant="destructive"
                 onClick={() => setConfirmRemove(true)}
                 disabled={busy}
               >
-                Remove Worktree
+                Delete Worktree
               </Button>
             )}
           </div>
@@ -226,15 +230,15 @@ export function WorkspaceDetailsModal({
         </DialogContent>
       </Dialog>
 
-      {/* Confirmation Dialog for Worktree Removal */}
+      {/* Confirmation Dialog for Worktree Deletion */}
       {confirmRemove && (
         <Dialog open onOpenChange={(open) => { if (!open) setConfirmRemove(false); }}>
           <DialogContent className="max-w-[440px]">
             <DialogHeader>
-              <DialogTitle className="text-base font-semibold">Remove Git Worktree</DialogTitle>
+              <DialogTitle className="text-base font-semibold">Delete Git Worktree</DialogTitle>
             </DialogHeader>
             <p className="text-xs text-muted-foreground my-2">
-              Are you sure you want to remove the worktree at <code className="font-mono text-xs">{workspace.cwd}</code>?
+              Are you sure you want to permanently delete the worktree at <code className="font-mono text-xs">{workspace.cwd}</code> from disk?
             </p>
             <label className="flex items-center gap-2 text-xs text-destructive font-medium my-2 cursor-pointer">
               <input
@@ -243,12 +247,12 @@ export function WorkspaceDetailsModal({
                 onChange={(e) => setForceRemove(e.target.checked)}
                 className="rounded border-input text-destructive focus:ring-destructive"
               />
-              Force remove (discard any uncommitted or dirty changes)
+              Force delete (discard any uncommitted or dirty changes)
             </label>
             <div className="flex justify-end gap-2 pt-2">
               <Button size="sm" variant="secondary" onClick={() => setConfirmRemove(false)}>Cancel</Button>
               <Button size="sm" variant="destructive" onClick={handleRemoveWorktree} disabled={busy}>
-                {busy ? "Removing..." : "Confirm Removal"}
+                {busy ? "Deleting..." : "Delete Worktree"}
               </Button>
             </div>
           </DialogContent>

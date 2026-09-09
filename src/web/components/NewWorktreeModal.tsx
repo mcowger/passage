@@ -1,19 +1,22 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Project, WorktreeLocation, Workspace } from "../../shared/domain/workspaces.ts";
-import type { WorkspaceApi } from "../api.ts";
+import type { DiscoveredWorktree, WorkspaceApi } from "../api.ts";
 import { Button } from "./ui/button.tsx";
 import { Input } from "./ui/input.tsx";
+import { Badge } from "./ui/badge.tsx";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog.tsx";
+import { GitBranch, RefreshCw, FolderDown, PlusCircle } from "lucide-react";
 
 type Props = {
   projects: Project[];
   locations: WorktreeLocation[];
   defaultProjectId?: string;
+  initialTab?: "create" | "discover";
   api: WorkspaceApi;
   onClose: () => void;
   onCreated: (workspace: Workspace) => void;
@@ -23,17 +26,19 @@ export function NewWorktreeModal({
   projects,
   locations,
   defaultProjectId,
+  initialTab = "create",
   api,
   onClose,
   onCreated,
 }: Props) {
   const activeProjects = projects.filter((p) => !p.archivedAt);
+  const [activeTab, setActiveTab] = useState<"create" | "discover">(initialTab);
   const [projectId, setProjectId] = useState(defaultProjectId ?? activeProjects[0]?.id ?? "");
-  
+
+  // Create Tab State
   const availableLocations = locations.filter(
     (loc) => loc.enabled && (!loc.projectId || loc.projectId === projectId)
   );
-
   const [locationId, setLocationId] = useState(availableLocations[0]?.id ?? "");
   const [purpose, setPurpose] = useState("");
   const [label, setLabel] = useState("");
@@ -42,6 +47,33 @@ export function NewWorktreeModal({
   const [suggesting, setSuggesting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+
+  // Discover Tab State
+  const [discovered, setDiscovered] = useState<DiscoveredWorktree[]>([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [manualPath, setManualPath] = useState("");
+  const [manualLabel, setManualLabel] = useState("");
+  const [importingPath, setImportingPath] = useState<string | null>(null);
+
+  const loadDiscovered = useCallback(async (projId: string) => {
+    if (!projId) return;
+    setDiscovering(true);
+    setError("");
+    try {
+      const items = await api.discoverWorktrees(projId);
+      setDiscovered(items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to discover worktrees");
+    } finally {
+      setDiscovering(false);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    if (activeTab === "discover" && projectId) {
+      void loadDiscovered(projectId);
+    }
+  }, [activeTab, projectId, loadDiscovered]);
 
   const handleSuggest = async () => {
     if (!purpose.trim() || !projectId) return;
@@ -84,127 +116,293 @@ export function NewWorktreeModal({
     }
   };
 
+  const handleImport = async (targetPath: string, defaultLabel?: string | null) => {
+    if (!projectId || !targetPath.trim()) return;
+    setImportingPath(targetPath);
+    setError("");
+    try {
+      const imported = await api.importWorktree(projectId, {
+        path: targetPath.trim(),
+        label: (defaultLabel ?? targetPath.split("/").pop()) || undefined,
+      });
+      onCreated(imported);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to import worktree");
+    } finally {
+      setImportingPath(null);
+    }
+  };
+
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-[540px]">
+      <DialogContent className="max-w-[560px]">
         <DialogHeader>
-          <DialogTitle className="text-lg font-semibold">New Git Worktree</DialogTitle>
-        </DialogHeader>
-
-        {error && <div className="alert form-alert text-sm text-destructive">{error}</div>}
-
-        <form onSubmit={handleCreate} className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            Project
-            <select
-              className="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              value={projectId}
-              onChange={(e) => {
-                setProjectId(e.target.value);
-                const locs = locations.filter(
-                  (l) => l.enabled && (!l.projectId || l.projectId === e.target.value)
-                );
-                if (locs[0]) setLocationId(locs[0].id);
-              }}
-              required
+          <DialogTitle className="text-lg font-semibold">Git Worktrees</DialogTitle>
+          <div className="flex gap-2 pt-2 border-b border-border/50 pb-2">
+            <Button
+              size="sm"
+              variant={activeTab === "create" ? "default" : "ghost"}
+              className="text-xs h-7 gap-1.5"
+              onClick={() => { setActiveTab("create"); setError(""); }}
             >
-              {activeProjects.map((p) => (
-                <option key={p.id} value={p.id}>{p.displayLabel} ({p.canonicalRootPath})</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            Worktree Location
-            {availableLocations.length > 0 ? (
-              <select
-                className="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
-                required
-              >
-                {availableLocations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.displayLabel} ({loc.configuredRootPath})
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <p className="text-xs text-muted-foreground mt-1">
-                No configured locations found. A global or project location must be configured.
-              </p>
-            )}
-          </label>
-
-          <div className="flex flex-col gap-1">
-            <label className="flex flex-col gap-1 text-sm font-medium">
-              Task Purpose / Goal (Optional)
-              <div className="flex gap-2 mt-1">
-                <Input
-                  type="text"
-                  placeholder="e.g. Implement customer webhook retry backoff"
-                  value={purpose}
-                  onChange={(e) => setPurpose(e.target.value)}
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={handleSuggest}
-                  disabled={!purpose.trim() || suggesting || !projectId}
-                  title="Generate label, branch and folder suggestions using AI"
-                  className="shrink-0"
-                >
-                  {suggesting ? "Thinking..." : "⚡ Suggest"}
-                </Button>
-              </div>
-            </label>
-            <p className="text-xs text-muted-foreground">Type your goal and click Suggest to auto-fill metadata.</p>
-          </div>
-
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            Workspace Label
-            <Input
-              type="text"
-              placeholder="e.g. Webhook retry logic"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              required
-            />
-          </label>
-
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            Git Branch / Ref
-            <Input
-              type="text"
-              placeholder="e.g. feature/webhook-retries or main"
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              required
-            />
-          </label>
-
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            Destination Folder Name (Optional)
-            <Input
-              type="text"
-              placeholder="e.g. webhook-retries--wk_7d2a"
-              value={folder}
-              onChange={(e) => setFolder(e.target.value)}
-            />
-          </label>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={onClose}>
-              Cancel
+              <PlusCircle className="w-3.5 h-3.5" /> Create New
             </Button>
             <Button
-              type="submit"
-              disabled={creating || !locationId || !label.trim() || !branch.trim()}
+              size="sm"
+              variant={activeTab === "discover" ? "default" : "ghost"}
+              className="text-xs h-7 gap-1.5"
+              onClick={() => { setActiveTab("discover"); setError(""); }}
             >
-              {creating ? "Creating Worktree..." : "Create Worktree"}
+              <FolderDown className="w-3.5 h-3.5" /> Discover &amp; Import
             </Button>
           </div>
-        </form>
+        </DialogHeader>
+
+        {error && <div className="p-2 text-xs bg-destructive/10 border border-destructive/20 text-destructive rounded my-1">{error}</div>}
+
+        {activeTab === "create" ? (
+          <form onSubmit={handleCreate} className="flex flex-col gap-3 pt-1">
+            <label className="flex flex-col gap-1 text-xs font-medium">
+              Project
+              <select
+                className="rounded-md border border-input bg-background px-3 py-1.5 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                value={projectId}
+                onChange={(e) => {
+                  setProjectId(e.target.value);
+                  const locs = locations.filter(
+                    (l) => l.enabled && (!l.projectId || l.projectId === e.target.value)
+                  );
+                  if (locs[0]) setLocationId(locs[0].id);
+                }}
+                required
+              >
+                {activeProjects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.displayLabel} ({p.canonicalRootPath})</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1 text-xs font-medium">
+              Worktree Location
+              {availableLocations.length > 0 ? (
+                <select
+                  className="rounded-md border border-input bg-background px-3 py-1.5 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  value={locationId}
+                  onChange={(e) => setLocationId(e.target.value)}
+                  required
+                >
+                  {availableLocations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.displayLabel} ({loc.configuredRootPath})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-xs text-muted-foreground mt-1">
+                  No configured locations found. A global or project location must be configured.
+                </p>
+              )}
+            </label>
+
+            <div className="flex flex-col gap-1">
+              <label className="flex flex-col gap-1 text-xs font-medium">
+                Task Purpose / Goal (Optional)
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    type="text"
+                    className="h-8 text-xs"
+                    placeholder="e.g. Implement customer webhook retry backoff"
+                    value={purpose}
+                    onChange={(e) => setPurpose(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleSuggest}
+                    disabled={!purpose.trim() || suggesting || !projectId}
+                    title="Generate label, branch and folder suggestions using AI"
+                    className="shrink-0 h-8 text-xs"
+                  >
+                    {suggesting ? "Thinking..." : "⚡ Suggest"}
+                  </Button>
+                </div>
+              </label>
+              <p className="text-[11px] text-muted-foreground">Type your goal and click Suggest to auto-fill metadata.</p>
+            </div>
+
+            <label className="flex flex-col gap-1 text-xs font-medium">
+              Workspace Label
+              <Input
+                type="text"
+                className="h-8 text-xs"
+                placeholder="e.g. Webhook retry logic"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                required
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 text-xs font-medium">
+              Git Branch / Ref
+              <Input
+                type="text"
+                className="h-8 text-xs font-mono"
+                placeholder="e.g. feature/webhook-retries or main"
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                required
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 text-xs font-medium">
+              Destination Folder Name (Optional)
+              <Input
+                type="text"
+                className="h-8 text-xs font-mono"
+                placeholder="e.g. webhook-retries--wk_7d2a"
+                value={folder}
+                onChange={(e) => setFolder(e.target.value)}
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-border/40">
+              <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={creating}>
+                {creating ? "Creating..." : "Create Worktree"}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="flex flex-col gap-3 pt-1">
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex items-center gap-2 text-xs font-medium flex-1">
+                Project:
+                <select
+                  className="rounded-md border border-input bg-background px-2.5 py-1 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring flex-1"
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}
+                >
+                  {activeProjects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.displayLabel}</option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() => void loadDiscovered(projectId)}
+                disabled={discovering}
+              >
+                <RefreshCw className={`w-3 h-3 ${discovering ? "animate-spin" : ""}`} />
+                Rescan
+              </Button>
+            </div>
+
+            {/* List of Discovered Worktrees */}
+            <div className="flex flex-col gap-1.5 max-h-[260px] overflow-y-auto border border-border/50 rounded-md p-2 bg-muted/20">
+              {discovering ? (
+                <div className="p-4 text-center text-xs text-muted-foreground">Scanning repository worktrees...</div>
+              ) : discovered.length === 0 ? (
+                <div className="p-4 text-center text-xs text-muted-foreground">No linked git worktrees found for this project repository.</div>
+              ) : (
+                discovered.map((item) => (
+                  <div
+                    key={item.path}
+                    className="flex items-center justify-between gap-2 p-2 rounded border border-border/40 bg-card hover:bg-surface-hover text-xs transition-colors"
+                  >
+                    <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <GitBranch className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <span className="font-mono font-medium text-foreground truncate">
+                          {item.branchRef ?? "(detached HEAD)"}
+                        </span>
+                        {item.isMain && (
+                          <Badge variant="outline" className="text-[10px] py-0 px-1">main repo</Badge>
+                        )}
+                        {item.isRegistered && !item.archived && (
+                          <Badge variant="secondary" className="text-[10px] py-0 px-1 text-emerald-600 bg-emerald-500/10">registered</Badge>
+                        )}
+                        {item.archived && (
+                          <Badge variant="destructive" className="text-[10px] py-0 px-1">archived</Badge>
+                        )}
+                      </div>
+                      <span className="font-mono text-[11px] text-muted-foreground truncate" title={item.path}>
+                        {item.path}
+                      </span>
+                    </div>
+
+                    <div className="shrink-0">
+                      {item.isRegistered && !item.archived ? (
+                        <span className="text-[11px] text-muted-foreground">Active</span>
+                      ) : item.archived ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="h-7 text-xs"
+                          disabled={importingPath === item.path}
+                          onClick={() => void handleImport(item.path, item.branchRef)}
+                        >
+                          Reopen
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs"
+                          disabled={importingPath === item.path}
+                          onClick={() => void handleImport(item.path, item.branchRef)}
+                        >
+                          {importingPath === item.path ? "Importing..." : "Import"}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Manual Path Import */}
+            <div className="pt-2 border-t border-border/50">
+              <span className="text-xs font-medium text-muted-foreground block mb-1.5">Or import by directory path:</span>
+              <div className="flex gap-2">
+                <Input
+                  type="text"
+                  placeholder="/path/to/existing/worktree"
+                  value={manualPath}
+                  onChange={(e) => setManualPath(e.target.value)}
+                  className="h-8 text-xs font-mono flex-1"
+                />
+                <Input
+                  type="text"
+                  placeholder="Label (optional)"
+                  value={manualLabel}
+                  onChange={(e) => setManualLabel(e.target.value)}
+                  className="h-8 text-xs w-32"
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-8 text-xs shrink-0"
+                  disabled={!manualPath.trim() || Boolean(importingPath)}
+                  onClick={() => void handleImport(manualPath, manualLabel || null)}
+                >
+                  Import Path
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-border/40">
+              <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+                Close
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

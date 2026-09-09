@@ -29,6 +29,16 @@ export class WorkspaceApiError extends Error {
   }
 }
 
+export type DiscoveredWorktree = {
+  path: string;
+  branchRef: string | null;
+  head: string;
+  isMain: boolean;
+  isRegistered: boolean;
+  workspaceId: string | null;
+  archived: boolean;
+};
+
 export function createWorkspaceApi(fetcher: Fetcher = fetch) {
   async function request(path: string, init?: RequestInit): Promise<unknown> {
     const headers = new Headers(init?.headers);
@@ -86,6 +96,17 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     },
     async createWorktree(projectId: string, input: { locationId: string; ref: string; label: string; folder?: string }): Promise<Workspace> {
       return workspaceSchema.parse(await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees`, { method: "POST", body: JSON.stringify(input) }));
+    },
+    async discoverWorktrees(projectId: string): Promise<DiscoveredWorktree[]> {
+      return (await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees/discover`)) as DiscoveredWorktree[];
+    },
+    async importWorktree(projectId: string, input: { path: string; label?: string }): Promise<Workspace> {
+      return workspaceSchema.parse(
+        await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees/import`, {
+          method: "POST",
+          body: JSON.stringify(input),
+        })
+      );
     },
     async repairWorktree(workspaceId: string): Promise<Workspace> {
       return workspaceSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/worktree/repair`, { method: "POST" }));

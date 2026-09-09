@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./components/ui/dialog.tsx";
-import { Folder, GitBranch, ChevronDown, ChevronRight, MoreHorizontal, Bot, Terminal as TerminalIcon } from "lucide-react";
+import { Folder, GitBranch, ChevronDown, ChevronRight, MoreHorizontal, Bot, Terminal as TerminalIcon, FolderDown } from "lucide-react";
 import { cn } from "./lib/utils.ts";
 
 type SidebarProps = {
@@ -31,6 +31,7 @@ type SidebarProps = {
   terminals: TerminalSummary[];
   onSelectTerminal: (id: string) => void;
   onManageWorkspace?: (workspace: Workspace) => void;
+  onDiscoverWorktrees?: (projectId?: string) => void;
 };
 
 export function Sidebar({
@@ -49,6 +50,7 @@ export function Sidebar({
   terminals,
   onSelectTerminal,
   onManageWorkspace,
+  onDiscoverWorktrees,
 }: SidebarProps) {
   const activeProjects = data.projects.filter((project) => !project.archivedAt);
   return (
@@ -60,9 +62,22 @@ export function Sidebar({
       </div>
       <div className="sidebar-actions flex flex-col gap-1.5">
         {onNewWorktree && (
-          <Button variant="secondary" size="sm" className="w-full justify-start text-xs font-normal" onClick={onNewWorktree}>
-            ＋ New worktree
-          </Button>
+          <div className="flex gap-1.5 w-full">
+            <Button variant="secondary" size="sm" className="flex-1 justify-start text-xs font-normal" onClick={onNewWorktree}>
+              ＋ New worktree
+            </Button>
+            {onDiscoverWorktrees && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="px-2.5 text-xs font-normal"
+                onClick={() => onDiscoverWorktrees()}
+                title="Discover and import existing git worktrees"
+              >
+                <FolderDown className="w-3.5 h-3.5" />
+              </Button>
+            )}
+          </div>
         )}
         <Button variant="secondary" size="sm" className="w-full justify-start text-xs font-normal" onClick={onNewWorkspace}>
           ＋ Directory workspace
@@ -87,6 +102,7 @@ export function Sidebar({
             terminals={selected ? terminals : []}
             onSelectTerminal={onSelectTerminal}
             onManageWorkspace={onManageWorkspace}
+            onDiscoverWorktrees={onDiscoverWorktrees}
           />
         ))}
       </div>
@@ -111,6 +127,7 @@ function ProjectRow({
   terminals,
   onSelectTerminal,
   onManageWorkspace,
+  onDiscoverWorktrees,
 }: {
   project: Project;
   workspaces: Workspace[];
@@ -123,13 +140,17 @@ function ProjectRow({
   terminals: TerminalSummary[];
   onSelectTerminal: (id: string) => void;
   onManageWorkspace?: (workspace: Workspace) => void;
+  onDiscoverWorktrees?: (projectId?: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const rows = workspaces.filter((workspace) => workspace.projectId === project.id);
+  const activeRows = workspaces.filter((workspace) => workspace.projectId === project.id && !workspace.archivedAt);
+  const archivedRows = workspaces.filter((workspace) => workspace.projectId === project.id && workspace.archivedAt);
+  const [showArchived, setShowArchived] = useState(false);
+  const rows = showArchived ? [...activeRows, ...archivedRows] : activeRows;
   return (
     <section className="project">
       <div
-        className="project-title"
+        className="project-title group/proj"
         onClick={() => setCollapsed(!collapsed)}
         role="button"
         tabIndex={0}
@@ -142,6 +163,19 @@ function ProjectRow({
         <Folder className="w-3.5 h-3.5 text-muted-foreground/80 shrink-0" />
         <strong>{project.displayLabel}</strong>
         <code title={project.canonicalRootPath}>{project.canonicalRootPath}</code>
+        {onDiscoverWorktrees && (
+          <button
+            type="button"
+            className="opacity-0 group-hover/proj:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground transition-opacity ml-1"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDiscoverWorktrees(project.id);
+            }}
+            title="Discover & import worktrees for this project"
+          >
+            <FolderDown className="w-3 h-3" />
+          </button>
+        )}
       </div>
       {!collapsed && (
         <div className="workspace-list">
@@ -249,7 +283,19 @@ function ProjectRow({
               </div>
             );
           })}
-          {rows.length === 0 && <p className="muted project-empty">No workspaces</p>}
+          {archivedRows.length > 0 && (
+            <button
+              type="button"
+              className="text-[10.5px] text-muted-foreground/60 hover:text-muted-foreground transition-colors px-2 py-0.5 mt-0.5 text-left flex items-center gap-1 cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowArchived(!showArchived);
+              }}
+            >
+              <span>{showArchived ? "▾ Hide archived" : `▸ Archived (${archivedRows.length})`}</span>
+            </button>
+          )}
+          {rows.length === 0 && <p className="muted project-empty">No active workspaces</p>}
         </div>
       )}
     </section>

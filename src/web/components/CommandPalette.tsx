@@ -28,6 +28,7 @@ export interface CommandPaletteProps {
   onCreateTerminal: () => void;
   onResetLayout: () => void;
   onOpenSettings: () => void;
+  onDiscoverWorktrees?: () => void;
 }
 
 export function CommandPalette({
@@ -45,6 +46,7 @@ export function CommandPalette({
   onCreateTerminal,
   onResetLayout,
   onOpenSettings,
+  onDiscoverWorktrees,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -108,6 +110,14 @@ export function CommandPalette({
         icon: ">_",
         run: onCreateTerminal,
       },
+      ...(onDiscoverWorktrees ? [{
+        id: "action-discover-worktrees",
+        category: "Actions" as const,
+        title: "Discover & Import Git Worktrees",
+        subtitle: "Scan repository for existing worktrees and register as workspaces",
+        icon: "📂",
+        run: onDiscoverWorktrees,
+      }] : []),
       {
         id: "action-reset-layout",
         category: "Actions",

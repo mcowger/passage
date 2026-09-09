@@ -252,6 +252,8 @@ function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [workspaceDetailsOpen, setWorkspaceDetailsOpen] = useState(false);
+  const [worktreeModalTab, setWorktreeModalTab] = useState<"create" | "discover">("create");
+  const [worktreeModalProjectId, setWorktreeModalProjectId] = useState<string>();
   const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
 
@@ -304,7 +306,7 @@ function App() {
       const next = await api.snapshot();
       setSnapshot(next);
       setSelectedWorkspaceId((current) => {
-        if (current && next.workspaces.some((workspace) => workspace.id === current)) return current;
+        if (current && next.workspaces.some((workspace) => workspace.id === current && !workspace.archivedAt)) return current;
         return next.workspaces.find((workspace) => !workspace.archivedAt)?.id ?? next.workspaces[0]?.id;
       });
       return true;
@@ -825,7 +827,18 @@ function App() {
           onSelect={handleSelectWorkspace}
           onNewProject={() => { setFormError(""); setForm("project"); }}
           onNewWorkspace={() => { setFormError(""); setForm("workspace"); }}
-          onNewWorktree={() => { setFormError(""); setForm("worktree"); }}
+          onNewWorktree={() => {
+            setFormError("");
+            setWorktreeModalTab("create");
+            setWorktreeModalProjectId(undefined);
+            setForm("worktree");
+          }}
+          onDiscoverWorktrees={(projId) => {
+            setFormError("");
+            setWorktreeModalTab("discover");
+            setWorktreeModalProjectId(projId);
+            setForm("worktree");
+          }}
           agents={agents}
           onSelectAgent={handleSelectAgent}
           terminals={terminals}
@@ -989,6 +1002,12 @@ function App() {
           if (workspace) handleLayoutChange(createDefaultLayout(workspace.id));
         }}
         onOpenSettings={() => setSettingsModalOpen(true)}
+        onDiscoverWorktrees={() => {
+          setFormError("");
+          setWorktreeModalTab("discover");
+          setWorktreeModalProjectId(activeProject?.id);
+          setForm("worktree");
+        }}
       />
 
       {/* Settings Modal */}
@@ -1061,9 +1080,13 @@ function App() {
         <NewWorktreeModal
           projects={snapshot.projects}
           locations={snapshot.locations}
-          defaultProjectId={activeProject?.id}
+          defaultProjectId={worktreeModalProjectId ?? activeProject?.id}
+          initialTab={worktreeModalTab}
           api={api}
-          onClose={() => setForm(undefined)}
+          onClose={() => {
+            setForm(undefined);
+            setWorktreeModalProjectId(undefined);
+          }}
           onCreated={(created) => {
             void refreshWorkspaces().then(() => {
               setSelectedWorkspaceId(created.id);
