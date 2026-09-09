@@ -222,6 +222,12 @@ function applyStreamEvent(prev: AgentHistory | undefined, envelope: unknown): Ag
 function applyThemeTokens(theme?: ThemePack) {
   if (!theme || typeof document === "undefined") return;
   const root = document.documentElement;
+  root.dataset.themeMode = theme.mode;
+  if (theme.mode === "dark") {
+    root.classList.add("dark");
+  } else {
+    root.classList.remove("dark");
+  }
   for (const [key, value] of Object.entries(theme.tokens)) {
     if (value) {
       const cssVar = `--${key.replace(/([A-Z])/g, "-$1").toLowerCase()}`;

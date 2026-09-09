@@ -6,6 +6,8 @@ import { MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentImage } from ".
 import type { WorkspaceApi } from "./api.ts";
 import { FileTypeIcon } from "./components/FileTypeIcon.tsx";
 import { ModelPicker } from "./components/ModelPicker.tsx";
+import { HighlightedCode } from "./components/HighlightedCode.tsx";
+import { Streamdown } from "streamdown";
 import { Button } from "./components/ui/button.tsx";
 import {
   Dialog,
@@ -806,6 +808,7 @@ function ToolIcon({ kind }: { kind: ToolIconKind }) {
 function ToolRow({ item, conciseBadge }: { item: Extract<TimelineItem, { kind: "tool" }>; conciseBadge?: boolean }) {
   const { icon, title, subtitle } = getToolSummary(item);
   const diff = getToolDiff(item);
+  const filePath = subtitle || (item.input && typeof item.input === "object" ? String((item.input as Record<string, unknown>).path ?? (item.input as Record<string, unknown>).filePath ?? "") : undefined);
   if (conciseBadge) {
     return (
       <details className={`tool-row concise ${item.status}`}>
@@ -816,12 +819,24 @@ function ToolRow({ item, conciseBadge }: { item: Extract<TimelineItem, { kind: "
         </summary>
         <div className="tool-expanded-body">
           {diff ? <ToolDiffPreview diff={diff} /> : item.input && (
-            <pre className="tool-input-pre"><code>{typeof item.input === "string" ? item.input : JSON.stringify(item.input, null, 2)}</code></pre>
+            <HighlightedCode
+              code={typeof item.input === "string" ? item.input : JSON.stringify(item.input, null, 2)}
+              language="json"
+              className="tool-input-pre"
+            />
           )}
           {(item.error || item.result) && (
             <div className="tool-output-wrap">
               <span className="tool-output-label">{item.error ? "Error" : "Output"}</span>
-              <pre className={`tool-output-pre ${item.error ? "error" : ""}`}><code>{item.error ?? item.result}</code></pre>
+              {item.error ? (
+                <pre className="tool-output-pre error"><code>{item.error}</code></pre>
+              ) : (
+                <HighlightedCode
+                  code={item.result ?? ""}
+                  filePath={filePath}
+                  className="tool-output-pre"
+                />
+              )}
             </div>
           )}
         </div>
@@ -849,12 +864,24 @@ function ToolRow({ item, conciseBadge }: { item: Extract<TimelineItem, { kind: "
       </summary>
       <div className="tool-expanded-body">
         {diff ? <ToolDiffPreview diff={diff} /> : item.input && (
-          <pre className="tool-input-pre"><code>{typeof item.input === "string" ? item.input : JSON.stringify(item.input, null, 2)}</code></pre>
+          <HighlightedCode
+            code={typeof item.input === "string" ? item.input : JSON.stringify(item.input, null, 2)}
+            language="json"
+            className="tool-input-pre"
+          />
         )}
         {(item.error || item.result) && (
           <div className="tool-output-wrap">
             <span className="tool-output-label">{item.error ? "Error" : "Output"}</span>
-            <pre className={`tool-output-pre ${item.error ? "error" : ""}`}><code>{item.error ?? item.result}</code></pre>
+            {item.error ? (
+              <pre className="tool-output-pre error"><code>{item.error}</code></pre>
+            ) : (
+              <HighlightedCode
+                code={item.result ?? ""}
+                filePath={filePath}
+                className="tool-output-pre"
+              />
+            )}
           </div>
         )}
       </div>
@@ -939,21 +966,6 @@ function summarizeChanges(timeline: TimelineItem[]): { fileCount: number; additi
   return files.size > 0 ? { fileCount: files.size, additions, deletions } : undefined;
 }
 
-function renderFormattedProse(text: string) {
-  // Format commit references like "Committed in `0eaa8e7 feat(canvas): ...`."
-  const commitMatch = text.match(/Committed in `([0-9a-f]{7,40})\s+([^`]+)`/);
-  if (commitMatch) {
-    const [full, hash, message] = commitMatch;
-    const parts = text.split(full);
-    return (
-      <p>
-        {parts[0]}Committed in <span className="commit-chip"><code>{hash} {message}</code></span>{parts[1]}
-      </p>
-    );
-  }
-  return <p>{text}</p>;
-}
-
 function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }) {
   if (item.kind === "unknown") return <article className="timeline-row unknown"><strong>Unknown activity</strong><code>{item.entryType}</code></article>;
   if (item.kind === "tool") {
@@ -980,7 +992,7 @@ function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }
     );
   }
   if (item.kind === "thinking") {
-    const preview = item.text.slice(0, 70).replace(/\n/g, " ");
+    const preview = item.text.replace(/^[#*\-\s]+/, "").slice(0, 70).replace(/\n/g, " ");
     return (
       <details className="thinking-row">
         <summary className="thinking-summary">
@@ -989,7 +1001,9 @@ function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }
           <span className="thinking-preview">{preview}…</span>
         </summary>
         <div className="thinking-body">
-          <p>{item.text}</p>
+          <Streamdown className="text-[12.5px] leading-relaxed text-muted-foreground italic">
+            {item.text}
+          </Streamdown>
         </div>
       </details>
     );
@@ -1014,7 +1028,7 @@ function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }
   return (
     <article className="assistant-message-row">
       <div className="assistant-prose">
-        {renderFormattedProse(item.text)}
+        <Streamdown>{item.text}</Streamdown>
       </div>
     </article>
   );
