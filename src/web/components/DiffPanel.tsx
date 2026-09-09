@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DiffHunk, GitDiff } from "../../shared/domain/git.ts";
 import type { WorkspaceApi } from "../api.ts";
+import { FileTypeIcon } from "./FileTypeIcon.tsx";
 
 type DiffProps = {
   workspaceId: string;
@@ -147,6 +148,13 @@ export function DiffPanel({ workspaceId, initialPath, api, onOpenFile, onClose }
             onOpenFile={onOpenFile}
           />
         ))}
+        {diffs.length > 0 && (
+          <div className="diff-total-footer" aria-label={`${diffs.length} changed files, ${totalAdditions} additions, ${totalDeletions} deletions`}>
+            <span>{diffs.length} changed file{diffs.length === 1 ? "" : "s"}</span>
+            <span className="add-count">+{totalAdditions}</span>
+            <span className="del-count">-{totalDeletions}</span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -165,7 +173,7 @@ function DiffFileItem({
     <article className="diff-file-card">
       <header className="diff-file-header">
         <div className="diff-file-name">
-          <span aria-hidden="true">📄</span>
+          <FileTypeIcon path={diff.path} size={15} />
           <strong>{diff.oldPath && diff.oldPath !== diff.path ? `${diff.oldPath} → ${diff.path}` : diff.path}</strong>
           <span className="diff-stat-counts">
             <span className="add-count">+{diff.additions}</span>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { GitChangeKind, GitFileStatus, GitStatus } from "../../shared/domain/git.ts";
 import type { WorkspaceApi } from "../api.ts";
+import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { Button } from "./ui/button.tsx";
 import { Badge } from "./ui/badge.tsx";
 
@@ -155,6 +156,7 @@ function ChangeRow({
       </Badge>
       <div className="change-info">
         <span className="change-path" title={file.path}>
+          <FileTypeIcon path={file.path} size={14} />
           {file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
         </span>
         <div className="change-meta">

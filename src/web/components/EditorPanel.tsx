@@ -9,6 +9,7 @@ import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import type { FileRead, FileRevision } from "../../shared/domain/files.ts";
 import type { WorkspaceApi } from "../api.ts";
+import { FileTypeIcon } from "./FileTypeIcon.tsx";
 
 type EditorProps = {
   workspaceId: string;
@@ -163,7 +164,7 @@ export function EditorPanel({ workspaceId, filePath, api, onClose, onOpenDiff }:
     <div className="editor-panel" aria-label={`Editor for ${filePath}`}>
       <div className="editor-top-bar">
         <div className="editor-file-info">
-          <span className="file-icon" aria-hidden="true">📄</span>
+          <FileTypeIcon path={filePath} size={15} />
           <span className="editor-path"><b>{filePath}</b></span>
           {isDirty && <span className="dirty-indicator" title="Unsaved changes">● Unsaved</span>}
           {revision && (

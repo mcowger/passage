@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FileEntry, FileListing } from "../../shared/domain/files.ts";
 import type { WorkspaceApi } from "../api.ts";
+import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { Button } from "./ui/button.tsx";
 import { Input } from "./ui/input.tsx";
 
@@ -113,7 +114,7 @@ export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: Ex
                   aria-expanded={isExpanded}
                 >
                   <span className="tree-toggle" aria-hidden="true">{isExpanded ? "▾" : "▸"}</span>
-                  <span className="node-icon" aria-hidden="true">{isExpanded ? "📂" : "📁"}</span>
+                  <FileTypeIcon path={entry.name} isFolder isExpanded={isExpanded} size={14} />
                   <span className="node-name">{entry.name}</span>
                 </button>
                 {isExpanded && renderTree(entry.path, level + 1)}
@@ -129,7 +130,7 @@ export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: Ex
               aria-label={`Open file ${entry.name}`}
             >
               <span className="tree-indent" aria-hidden="true"> </span>
-              <span className="node-icon" aria-hidden="true">📄</span>
+              <FileTypeIcon path={entry.name} size={14} />
               <span className="node-name">{entry.name}</span>
               {entry.revision && (
                 <span className="node-size muted">{formatBytes(entry.revision.size)}</span>

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { Project, Workspace, WorkspaceSnapshot } from "../shared/domain/workspaces.ts";
-import type { AgentCapabilities, AgentHistory, AgentSummary, TimelineItem } from "../shared/domain/agents.ts";
+import type { AgentCapabilities, AgentHistory, AgentSummary, TimelineItem, ToolActivity } from "../shared/domain/agents.ts";
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import { MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentImage } from "../shared/protocol/agents.ts";
 import type { WorkspaceApi } from "./api.ts";
+import { FileTypeIcon } from "./components/FileTypeIcon.tsx";
 import { ModelPicker } from "./components/ModelPicker.tsx";
 import { Button } from "./components/ui/button.tsx";
 import {
@@ -12,8 +13,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./components/ui/dialog.tsx";
-import { Folder, GitBranch, ChevronDown, ChevronRight, MoreHorizontal, Bot, Terminal as TerminalIcon, FolderDown } from "lucide-react";
+import { Folder, GitBranch, ChevronDown, ChevronRight, MoreHorizontal, Bot, Terminal as TerminalIcon, FolderDown, FileText, FilePlus, Pencil, Search, Settings } from "lucide-react";
 import { cn } from "./lib/utils.ts";
+import { getToolDiff, type ToolDiff } from "./lib/tool-diff.ts";
 
 type SidebarProps = {
   data: WorkspaceSnapshot;
@@ -447,6 +449,7 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
 
   const totalTokens = history?.usage?.totalTokens ?? ((history?.usage?.input ?? 0) + (history?.usage?.output ?? 0));
   const contextPercentage = totalTokens > 0 ? Math.min(100, Math.max(0.1, (totalTokens / 200000) * 100)).toFixed(1) : "0.0";
+  const changeSummary = summarizeChanges(history?.timeline ?? []);
 
   return (
     <section className="agent-panel" aria-label={`Agent conversation ${agent.title}`}>
@@ -472,6 +475,19 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
           <div className="composer-status-line">
             <span className="pulse-dot" />
             <span>Pi Agent is running…</span>
+          </div>
+        )}
+        {changeSummary && (
+          <div
+            className="agent-change-summary"
+            aria-label={`${changeSummary.fileCount} changed files, ${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}
+          >
+            <span className="agent-change-files">
+              <Pencil size={12} aria-hidden="true" />
+              {changeSummary.fileCount} changed file{changeSummary.fileCount === 1 ? "" : "s"}
+            </span>
+            <span className="add-count">+{changeSummary.additions}</span>
+            <span className="del-count">-{changeSummary.deletions}</span>
           </div>
         )}
         <div className="composer-card">
@@ -581,54 +597,133 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
   );
 }
 
-function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): { icon: string; title: string; subtitle: string } {
+type ToolIconKind = "read" | "edit" | "write" | "command" | "search" | "other";
+
+type ToolSummary = {
+  icon: ToolIconKind;
+  title: string;
+  subtitle: string;
+};
+
+function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): ToolSummary {
   const input = (item.input ?? {}) as Record<string, unknown>;
   switch (item.name) {
     case "read":
     case "readFile":
-      return { icon: "📄", title: "Read File", subtitle: String(input.path ?? input.filePath ?? "") };
+      return fileToolSummary("read", "Read File", input);
     case "edit":
     case "editFile":
-      return { icon: "✏️", title: "Edit File", subtitle: String(input.path ?? input.filePath ?? "") };
+      return fileToolSummary("edit", "Edit File", input);
     case "write":
     case "writeFile":
-      return { icon: "📝", title: "Write File", subtitle: String(input.path ?? input.filePath ?? "") };
+      return fileToolSummary("write", "Write File", input);
     case "bash":
-      return { icon: "⚡", title: "Shell Command", subtitle: String(input.command ?? "") };
+      return { icon: "command", title: "Shell Command", subtitle: String(input.command ?? "") };
     case "glob":
-      return { icon: "🔍", title: "Find Files", subtitle: String(input.pattern ?? "") };
+      return { icon: "search", title: "Find Files", subtitle: String(input.pattern ?? "") };
     case "grep":
-      return { icon: "🔎", title: "Grep Code", subtitle: String(input.pattern ?? "") };
+      return { icon: "search", title: "Grep Code", subtitle: String(input.pattern ?? "") };
     default:
-      return { icon: "⚙", title: item.name, subtitle: "" };
+      return { icon: "other", title: item.name, subtitle: "" };
+  }
+}
+
+function fileToolSummary(icon: ToolIconKind, title: string, input: Record<string, unknown>): ToolSummary {
+  const path = String(input.path ?? input.filePath ?? "");
+  return { icon, title, subtitle: path };
+}
+
+function ToolIcon({ kind }: { kind: ToolIconKind }) {
+  const props = { size: 13, strokeWidth: 1.8, "aria-hidden": true };
+  switch (kind) {
+    case "read": return <FileText {...props} />;
+    case "edit": return <Pencil {...props} />;
+    case "write": return <FilePlus {...props} />;
+    case "command": return <TerminalIcon {...props} />;
+    case "search": return <Search {...props} />;
+    default: return <Settings {...props} />;
   }
 }
 
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: "tool" }> }) {
   const { icon, title, subtitle } = getToolSummary(item);
+  const diff = getToolDiff(item);
   return (
     <details className={`tool-row ${item.status}`} open={item.status === "error"}>
       <summary className="tool-row-summary">
         <span className="tool-row-left">
-          <span className="tool-row-icon">{icon}</span>
+          <span className="tool-row-icon"><ToolIcon kind={icon} /></span>
           <span className="tool-row-title">{title}</span>
-          <span className="tool-row-meta-tag">0.1s</span>
+          {subtitle && icon !== "command" && <FileTypeIcon path={subtitle} size={13} />}
           {subtitle && <span className="tool-row-target-text">{subtitle}</span>}
+          {diff && (diff.additions > 0 || diff.deletions > 0) && (
+            <span className="tool-row-delta" aria-label={`${diff.additions} additions, ${diff.deletions} deletions`}>
+              <span className="add-count">+{diff.additions}</span>
+              <span className="del-count">-{diff.deletions}</span>
+            </span>
+          )}
         </span>
         <span className="tool-row-right">
           <span className={`tool-badge ${item.status}`}>{item.status}</span>
         </span>
       </summary>
       <div className="tool-expanded-body">
-        {item.input && (
+        {diff ? <ToolDiffPreview diff={diff} /> : item.input && (
           <pre className="tool-input-pre"><code>{typeof item.input === "string" ? item.input : JSON.stringify(item.input, null, 2)}</code></pre>
         )}
         {(item.error || item.result) && (
-          <pre className={`tool-output-pre ${item.error ? "error" : ""}`}><code>{item.error ?? item.result}</code></pre>
+          <div className="tool-output-wrap">
+            <span className="tool-output-label">{item.error ? "Error" : "Output"}</span>
+            <pre className={`tool-output-pre ${item.error ? "error" : ""}`}><code>{item.error ?? item.result}</code></pre>
+          </div>
         )}
       </div>
     </details>
   );
+}
+
+const MAX_INLINE_DIFF_LINES = 80;
+
+function ToolDiffPreview({ diff }: { diff: ToolDiff }) {
+  const visibleLines = diff.lines.slice(0, MAX_INLINE_DIFF_LINES);
+  const omittedLines = diff.lines.length - visibleLines.length;
+  return (
+    <div className="tool-diff-preview" aria-label={`Inline diff for ${diff.path || "changed file"}`}>
+      <div className="tool-diff-header">
+        <span className="tool-diff-file">
+          {diff.path && <FileTypeIcon path={diff.path} size={14} />}
+          <code>{diff.path || "Changed content"}</code>
+        </span>
+        <span className="tool-diff-context">{diff.contextLines} unmodified lines</span>
+      </div>
+      <div className="tool-diff-lines">
+        {visibleLines.map((line, index) => (
+          <div className={`tool-diff-line ${line.kind}`} key={`${line.kind}:${line.oldLine ?? ""}:${line.newLine ?? ""}:${index}`}>
+            <span className="tool-diff-number">{line.oldLine ?? ""}</span>
+            <span className="tool-diff-number">{line.newLine ?? ""}</span>
+            <span className="tool-diff-marker">{line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " "}</span>
+            <code>{line.text}</code>
+          </div>
+        ))}
+        {omittedLines > 0 && <div className="tool-diff-omitted">{omittedLines} more lines hidden</div>}
+      </div>
+    </div>
+  );
+}
+
+function summarizeChanges(timeline: TimelineItem[]): { fileCount: number; additions: number; deletions: number } | undefined {
+  const files = new Set<string>();
+  let additions = 0;
+  let deletions = 0;
+  const activities = timeline.flatMap((item): ToolActivity[] => item.kind === "tool" ? [item] : item.kind === "process" ? item.activities : []);
+  for (const activity of activities) {
+    const diff = getToolDiff(activity);
+    if (!diff || !diff.path || (diff.additions === 0 && diff.deletions === 0)) continue;
+    files.add(diff.path);
+    additions += diff.additions;
+    deletions += diff.deletions;
+  }
+  return files.size > 0 ? { fileCount: files.size, additions, deletions } : undefined;
 }
 
 function renderFormattedProse(text: string) {
@@ -653,7 +748,8 @@ function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }
       const { icon, title, subtitle } = getToolSummary(item);
       return (
         <div className="timeline-concise-badge">
-          <span>{icon} {title}</span>
+          <span className="timeline-concise-title"><ToolIcon kind={icon} /> {title}</span>
+          {subtitle && icon !== "command" && <FileTypeIcon path={subtitle} size={13} />}
           {subtitle && <code title={subtitle}>{subtitle}</code>}
         </div>
       );
