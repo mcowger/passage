@@ -74,6 +74,10 @@ export async function runLiveAcceptance(): Promise<void> {
 }
 
 if (import.meta.main) {
-  if (process.env.PASSAGE_PI_LIVE !== "1") { console.error("SKIP: set PASSAGE_PI_LIVE=1 to run live Pi acceptance"); process.exit(0); }
-  await runLiveAcceptance();
+  if (process.env.PASSAGE_PI_LIVE === "real" || process.env.PASSAGE_PI_USE_REAL === "1") {
+    await runLiveAcceptance();
+  } else {
+    const { withNullModelHarness } = await import("./nullmodel-harness.ts");
+    await withNullModelHarness(() => runLiveAcceptance());
+  }
 }

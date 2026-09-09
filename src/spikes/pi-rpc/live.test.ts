@@ -1,10 +1,20 @@
 import { test } from "bun:test";
+import { runAgentServiceAcceptance } from "./agent-service-live.ts";
 import { runLiveAcceptance } from "./live.ts";
+import { withNullModelHarness } from "./nullmodel-harness.ts";
 
-const live = process.env.PASSAGE_PI_LIVE === "1" ? test : test.skip;
+test("Pi RPC acceptance gate (NullModel double)", async () => {
+  if (process.env.PASSAGE_PI_LIVE === "real" || process.env.PASSAGE_PI_USE_REAL === "1") {
+    await runLiveAcceptance();
+  } else {
+    await withNullModelHarness(() => runLiveAcceptance());
+  }
+}, 45_000);
 
-if (process.env.PASSAGE_PI_LIVE !== "1") console.info("SKIP: PASSAGE_PI_LIVE is not 1; live Pi acceptance gate was not run");
-
-live("LIVE Pi RPC acceptance gate (opt-in)", async () => {
-  await runLiveAcceptance();
-}, 90_000);
+test("Pi AgentService acceptance gate (NullModel double)", async () => {
+  if (process.env.PASSAGE_PI_LIVE === "real" || process.env.PASSAGE_PI_USE_REAL === "1") {
+    await runAgentServiceAcceptance();
+  } else {
+    await withNullModelHarness(() => runAgentServiceAcceptance());
+  }
+}, 45_000);
