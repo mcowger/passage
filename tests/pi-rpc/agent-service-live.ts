@@ -1,8 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentService } from "../../daemon/agents/service.ts";
-import { MetadataRepositories, MetadataStore } from "../../daemon/metadata/index.ts";
+import { AgentService } from "../../src/daemon/agents/service.ts";
+import { MetadataRepositories, MetadataStore } from "../../src/daemon/metadata/index.ts";
 
 const SETTLEMENT_TIMEOUT_MS = 90_000;
 const POLL_INTERVAL_MS = 100;

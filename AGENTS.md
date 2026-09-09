@@ -52,7 +52,10 @@ Passage is a single-user, trusted-LAN coding environment. A persistent Bun daemo
 bun install --frozen-lockfile
 bun run typecheck
 bun test
-bun run test:phase0
+bun run test:gate
 ```
 
-Run focused checks first, then the relevant integration gate. `bun run test:phase0` is the full compatibility gate: typecheck, unit tests, live Pi checks, PTY checks, smoke tests, build, package, and compiled-package smoke test. For daemon/build/package changes, also use the applicable `smoke:development`, `smoke:production`, `smoke:package`, `build`, or `package` script from `package.json`.
+Run focused checks first, then the relevant integration gate. `bun run test:gate` is the full integration gate: typecheck, unit tests, live Pi checks, PTY checks, smoke tests, build, package, and compiled-package smoke test. For daemon/build/package changes, also use the applicable `smoke:development`, `smoke:production`, `smoke:package`, `build`, or `package` script from `package.json`.
+
+- Never run live tests against real AI APIs or external model providers unless the user gives explicit permission in the current turn.
+- Always use the local NullModel test double for test runs. Do not set `PASSAGE_PI_LIVE=real` or `PASSAGE_PI_USE_REAL=1` without explicit turn-by-turn permission.

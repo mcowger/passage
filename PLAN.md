@@ -26,7 +26,7 @@ Work is currently paused at Step 8 (Security & hardening). Steps 1 through 7 are
 ```sh
 bun run typecheck
 bun test
-bun run test:phase0
+bun run test:gate
 ```
 
 The required compatibility and test suites pass, including typecheck, unit tests (108 pass across 26 files), live Pi process/session checks (with non-JSON stdout log tolerance), Bun native PTY checks, development/production smoke tests, and compiled-package smoke tests.

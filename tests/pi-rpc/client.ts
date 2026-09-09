@@ -1,4 +1,4 @@
-import { LfJsonlParser } from "../../shared/jsonl/parser.ts";
+import { LfJsonlParser } from "../../src/shared/jsonl/parser.ts";
 
 export type PiRecord = { type?: string; id?: string; [key: string]: unknown };
 export type PiCommand = { type: string; id?: string; [key: string]: unknown };
@@ -43,21 +43,27 @@ export class PiRpcClient {
     const command = options.executable
       ? [options.executable, ...(options.executableArgs ?? [])]
       : defaultPiCommand();
-    const process = Bun.spawn([...command, "--mode", "rpc", "--session-dir", options.sessionDir, "--session-id", options.sessionId, "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve"], { cwd: options.cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-    this.process = process;
+    const child = Bun.spawn([...command, "--mode", "rpc", "--session-dir", options.sessionDir, "--session-id", options.sessionId, "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve"], {
+      cwd: options.cwd,
+      env: { ...process.env },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    this.process = child;
     const parser = new LfJsonlParser<PiRecord>(
       (record) => this.receive(record),
       undefined,
       (line) => this.captureStderrChunk(new TextEncoder().encode(line + "\n")),
     );
     this.exit = (async () => {
-      await consumeStream(process.stdout, (chunk) => parser.push(chunk));
+      await consumeStream(child.stdout, (chunk) => parser.push(chunk));
       parser.finish();
     })().catch((error) => {
       this.failAll(error);
-      if (process.exitCode === null) process.kill();
+      if (child.exitCode === null) child.kill();
     });
-    void process.exited.then((code) => this.failAll(new Error(`Pi process exited (${code})`)));
+    void child.exited.then((code) => this.failAll(new Error(`Pi process exited (${code})`)));
     void this.captureStderr();
   }
 

@@ -1,3 +1,8 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { withNullModelHarness } from "../pi-rpc/nullmodel-harness.ts";
+
 const START_TIMEOUT_MS = 10_000;
 const REQUEST_INTERVAL_MS = 50;
 
@@ -93,84 +98,91 @@ async function verifyAgentSubscription(url: string, origin: string, agentId: str
   }
 }
 
-const port = await reservePort();
-const root = import.meta.dir + "/../..";
-const dist = import.meta.dir + "/../../dist";
-const temporaryData = await mkdtemp(join(tmpdir(), "passage-server-smoke-"));
-const origin = `http://localhost:${port}`;
-const source = process.argv.includes("--source");
-const command = source
-  ? [process.execPath, "run", "src/daemon/index.ts"]
-  : process.argv.includes("--compiled")
-    ? [dist + "/passage"]
-    : [process.execPath, "run", "./index.js"];
-const daemon = Bun.spawn(command, {
-  cwd: source ? root : dist,
-  env: {
-    ...process.env,
-    NODE_ENV: source ? "development" : "production",
-    PASSAGE_DB_PATH: join(temporaryData, "passage.sqlite"),
-    PASSAGE_PUBLIC_ORIGIN: origin,
-    PORT: String(port),
-  },
-  stdin: "ignore",
-  stdout: "pipe",
-  stderr: "pipe",
-});
+async function runSmoke(): Promise<void> {
+  const port = await reservePort();
+  const root = import.meta.dir + "/../..";
+  const dist = import.meta.dir + "/../../dist";
+  const temporaryData = await mkdtemp(join(tmpdir(), "passage-server-smoke-"));
+  const origin = `http://localhost:${port}`;
+  const source = process.argv.includes("--source");
+  const command = source
+    ? [process.execPath, "run", "src/daemon/index.ts"]
+    : process.argv.includes("--compiled")
+      ? [dist + "/passage"]
+      : [process.execPath, "run", "./index.js"];
+  const daemon = Bun.spawn(command, {
+    cwd: source ? root : dist,
+    env: {
+      ...process.env,
+      NODE_ENV: source ? "development" : "production",
+      PASSAGE_DB_PATH: join(temporaryData, "passage.sqlite"),
+      PASSAGE_PUBLIC_ORIGIN: origin,
+      PORT: String(port),
+    },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
 
-try {
-  const homepage = await waitForServer(`http://localhost:${port}/`, daemon);
-  if (!(await homepage.text()).includes('id="root"')) throw new Error("homepage is not the Passage HTML shell");
+  try {
+    const homepage = await waitForServer(`http://localhost:${port}/`, daemon);
+    if (!(await homepage.text()).includes('id="root"')) throw new Error("homepage is not the Passage HTML shell");
 
-  const health = await fetch(`http://localhost:${port}/api/health`);
-  if (!health.ok || (await health.json() as { ok?: boolean }).ok !== true) throw new Error("health endpoint failed");
+    const health = await fetch(`http://localhost:${port}/api/health`);
+    if (!health.ok || (await health.json() as { ok?: boolean }).ok !== true) throw new Error("health endpoint failed");
 
-  const snapshot = await fetch(`http://localhost:${port}/api/daemon/snapshot`);
-  const snapshotData = await snapshot.json() as { protocolVersion?: number; metadataSchemaVersion?: number };
-  if (!snapshot.ok || snapshotData.protocolVersion !== 1 || (snapshotData.metadataSchemaVersion ?? 0) < 1) {
-    throw new Error("daemon snapshot endpoint failed");
+    const snapshot = await fetch(`http://localhost:${port}/api/daemon/snapshot`);
+    const snapshotData = await snapshot.json() as { protocolVersion?: number; metadataSchemaVersion?: number };
+    if (!snapshot.ok || snapshotData.protocolVersion !== 1 || (snapshotData.metadataSchemaVersion ?? 0) < 1) {
+      throw new Error("daemon snapshot endpoint failed");
+    }
+
+    const projectResponse = await fetch(`http://localhost:${port}/api/projects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ configuredRootPath: temporaryData, displayLabel: "Smoke project" }),
+    });
+    const project = await projectResponse.json() as { id?: string };
+    if (projectResponse.status !== 201 || !project.id) throw new Error("project registration failed");
+
+    const workspaceResponse = await fetch(`http://localhost:${port}/api/projects/${project.id}/workspaces`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ displayLabel: "Smoke workspace" }),
+    });
+    const workspace = await workspaceResponse.json() as { id?: string };
+    if (workspaceResponse.status !== 201 || !workspace.id) throw new Error("directory workspace creation failed");
+
+    const workspaceSnapshot = await fetch(`http://localhost:${port}/api/workspaces/snapshot`);
+    const workspaceData = await workspaceSnapshot.json() as { projects?: unknown[]; workspaces?: unknown[] };
+    if (workspaceData.projects?.length !== 1 || workspaceData.workspaces?.length !== 1) {
+      throw new Error("workspace snapshot did not include created resources");
+    }
+
+    const agentResponse = await fetch(`http://localhost:${port}/api/workspaces/${workspace.id}/agents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const agent = await agentResponse.json() as { id?: string; live?: boolean };
+    if (agentResponse.status !== 201 || !agent.id || agent.live !== true) {
+      throw new Error(`agent creation failed (status ${agentResponse.status}): ${JSON.stringify(agent)}`);
+    }
+
+    const agents = await (await fetch(`http://localhost:${port}/api/workspaces/${workspace.id}/agents`)).json() as unknown[];
+    if (agents.length !== 1) throw new Error("agent snapshot did not include the created agent");
+
+    await verifyWebSocket(`ws://localhost:${port}/ws`, origin);
+    await verifyAgentSubscription(`ws://localhost:${port}/ws`, origin, agent.id);
+  } finally {
+    if (!daemon.killed) daemon.kill();
+    await daemon.exited;
+    await rm(temporaryData, { recursive: true, force: true });
   }
-
-  const projectResponse = await fetch(`http://localhost:${port}/api/projects`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ configuredRootPath: temporaryData, displayLabel: "Smoke project" }),
-  });
-  const project = await projectResponse.json() as { id?: string };
-  if (projectResponse.status !== 201 || !project.id) throw new Error("project registration failed");
-
-  const workspaceResponse = await fetch(`http://localhost:${port}/api/projects/${project.id}/workspaces`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ displayLabel: "Smoke workspace" }),
-  });
-  const workspace = await workspaceResponse.json() as { id?: string };
-  if (workspaceResponse.status !== 201 || !workspace.id) throw new Error("directory workspace creation failed");
-
-  const workspaceSnapshot = await fetch(`http://localhost:${port}/api/workspaces/snapshot`);
-  const workspaceData = await workspaceSnapshot.json() as { projects?: unknown[]; workspaces?: unknown[] };
-  if (workspaceData.projects?.length !== 1 || workspaceData.workspaces?.length !== 1) {
-    throw new Error("workspace snapshot did not include created resources");
-  }
-
-  const agentResponse = await fetch(`http://localhost:${port}/api/workspaces/${workspace.id}/agents`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: "{}",
-  });
-  const agent = await agentResponse.json() as { id?: string; live?: boolean };
-  if (agentResponse.status !== 201 || !agent.id || agent.live !== true) throw new Error("agent creation failed");
-
-  const agents = await (await fetch(`http://localhost:${port}/api/workspaces/${workspace.id}/agents`)).json() as unknown[];
-  if (agents.length !== 1) throw new Error("agent snapshot did not include the created agent");
-
-  await verifyWebSocket(`ws://localhost:${port}/ws`, origin);
-  await verifyAgentSubscription(`ws://localhost:${port}/ws`, origin, agent.id);
-} finally {
-  if (!daemon.killed) daemon.kill();
-  await daemon.exited;
-  await rm(temporaryData, { recursive: true, force: true });
 }
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+
+if (process.env.PASSAGE_PI_LIVE === "real" || process.env.PASSAGE_PI_USE_REAL === "1") {
+  await runSmoke();
+} else {
+  await withNullModelHarness(() => runSmoke());
+}

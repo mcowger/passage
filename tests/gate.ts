@@ -2,8 +2,8 @@ const commands: string[][] = [
   ["install", "--frozen-lockfile"],
   ["run", "typecheck"],
   ["test"],
-  ["run", "test:phase0:pty"],
-  ["run", "test:phase0:pi-live"],
+  ["run", "test:pty-live"],
+  ["run", "test:pi-live"],
   ["run", "smoke:development"],
   ["run", "build"],
   ["run", "smoke:production"],
@@ -13,7 +13,7 @@ const commands: string[][] = [
 
 for (const args of commands) {
   const command = Bun.spawn([process.execPath, ...args], {
-    cwd: import.meta.dir + "/../..",
+    cwd: import.meta.dir + "/..",
     env: process.env,
     stdin: "inherit",
     stdout: "inherit",

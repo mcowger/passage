@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { LfJsonlParser } from "../../shared/jsonl/parser.ts";
+import { LfJsonlParser } from "../../src/shared/jsonl/parser.ts";
 
 export async function readPiJsonl(path: string, maxBytes = 4 * 1024 * 1024): Promise<unknown[]> {
   const file = await readFile(path);

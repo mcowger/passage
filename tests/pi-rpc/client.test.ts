@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LfJsonlParser } from "../../shared/jsonl/parser.ts";
+import { LfJsonlParser } from "../../src/shared/jsonl/parser.ts";
 import { PiRpcClient } from "./client.ts";
 import { readPiJsonl } from "./history.ts";
 

@@ -37,7 +37,7 @@ claimed. Bun 1.4 types currently exclude Windows for native terminals.
 - The complete required workstation/CI gate is:
 
 ```sh
-bun run test:phase0
+bun run test:gate
 ```
 
 Its individual verification commands are:
@@ -46,9 +46,9 @@ Its individual verification commands are:
 bun install --frozen-lockfile
 bun test
 bun run test:pi-rpc
-bun run test:phase0:pi-live
+bun run test:pi-live
 bun run test:pty-websocket
-bun run test:phase0:pty
+bun run test:pty-live
 bun run typecheck
 bun run smoke:development
 bun run build
