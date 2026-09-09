@@ -86,9 +86,9 @@ test("retains bounded diagnostics after an unexpected process exit", async () =>
   f.store.close();
 });
 
-test("maps Pi extension UI requests to an attention state", async () => {
+test("maps Pi extension UI requests to an attention state and responds", async () => {
   const f = await make();
-  const attentionScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');if(r.type==='get_entries')setTimeout(()=>process.stdout.write(JSON.stringify({type:'extension_ui_request'})+'\\n'),5)}})`;
+  const attentionScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');if(r.type==='get_entries')setTimeout(()=>process.stdout.write(JSON.stringify({type:'extension_ui_request',id:'prompt-1',method:'select',title:'Pick'})+'\\n'),5)}})`;
   const service = new AgentService(f.repos, {
     sessionsRoot: join(f.root, "attention-sessions"),
     manager: new PiRpcManager(1),
@@ -96,7 +96,15 @@ test("maps Pi extension UI requests to an attention state", async () => {
   });
   const agent = await service.create("w");
   await Bun.sleep(30);
-  expect(service.snapshot(agent.id).lastKnownStatus).toBe("needs-attention");
+  const snap = service.snapshot(agent.id);
+  expect(snap.lastKnownStatus).toBe("needs-attention");
+  expect(snap.pendingUiRequest?.id).toBe("prompt-1");
+  expect(snap.pendingUiRequest?.title).toBe("Pick");
+
+  await service.respondExtensionUi(agent.id, { id: "prompt-1", value: "Option 1" });
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+  expect(service.snapshot(agent.id).pendingUiRequest).toBeUndefined();
+
   await service.shutdown();
   f.store.close();
 });

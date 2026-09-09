@@ -7,6 +7,7 @@ import {
   PiRpcManager,
   responseData,
   type PiEvent,
+  type PiExtensionUiResponse,
   type PiLifecycleEvent,
   type PiRpcOptions,
   type PiRpcProcess,
@@ -43,6 +44,7 @@ export type AgentSnapshot = Agent & {
   stderr?: string[];
   stderrTruncated?: boolean;
   exitStatus?: string;
+  pendingUiRequest?: Record<string, unknown>;
 };
 
 export type AgentServiceEvent = {
@@ -69,6 +71,7 @@ export class AgentService {
   private readonly previousRevisions = new Map<string, AgentHistory["revision"]>();
   private readonly leaves = new Map<string, string>();
   private readonly diagnostics = new Map<string, RuntimeDiagnostic>();
+  private readonly pendingUiRequests = new Map<string, Record<string, unknown>>();
   private readonly eventChains = new Map<string, Promise<void>>();
   private readonly manager: PiRpcManager;
   private readonly listLimit: number;
@@ -104,10 +107,14 @@ export class AgentService {
     const agent = this.requireAgent(agentId);
     const process = this.manager.get(agentId);
     const diagnostic = this.diagnostics.get(agentId);
+    const pendingUiRequest = (process?.getPendingUiRequest() as Record<string, unknown> | undefined) ?? this.pendingUiRequests.get(agentId);
+    const lastKnownStatus = pendingUiRequest ? "needs-attention" : agent.lastKnownStatus;
     return {
       ...agent,
+      lastKnownStatus,
       live: process !== undefined,
       persisted: agent.piSessionPath !== null,
+      ...(pendingUiRequest ? { pendingUiRequest } : {}),
       ...(process ? {
         generation: process.generation,
         stderr: [...process.stderr],
@@ -198,8 +205,16 @@ export class AgentService {
   }
 
   async abort(agentId: string): Promise<void> {
+    this.pendingUiRequests.delete(agentId);
     const process = this.manager.get(agentId);
     if (process) await process.request({ type: "abort" });
+  }
+
+  async respondExtensionUi(agentId: string, response: PiExtensionUiResponse): Promise<void> {
+    const process = this.requireProcess(agentId);
+    process.respondExtensionUi(response);
+    this.pendingUiRequests.delete(agentId);
+    this.updateStatus(agentId, "running", "status", process.generation);
   }
 
   async capabilities(agentId: string): Promise<AgentCapabilities> {
@@ -325,6 +340,7 @@ export class AgentService {
   }
 
   private detach(agentId: string): void {
+    this.pendingUiRequests.delete(agentId);
     const subscription = this.subscriptions.get(agentId);
     if (!subscription) return;
     subscription.unsubscribeEvents();
@@ -380,6 +396,18 @@ export class AgentService {
 
     const currentStatus = (this.repositories.agents.get(agentId)?.lastKnownStatus as AgentStatus) ?? "running";
     const rawPayload: Record<string, unknown> = {};
+    if (event.id !== undefined) rawPayload.id = event.id;
+    if (event.method !== undefined) rawPayload.method = event.method;
+    if (event.title !== undefined) rawPayload.title = event.title;
+    if (event.options !== undefined) rawPayload.options = event.options;
+    if (event.placeholder !== undefined) rawPayload.placeholder = event.placeholder;
+    if (event.prefill !== undefined) rawPayload.prefill = event.prefill;
+    if (event.timeout !== undefined) rawPayload.timeout = event.timeout;
+    if (event.questions !== undefined) rawPayload.questions = event.questions;
+    if (event.statusKey !== undefined) rawPayload.statusKey = event.statusKey;
+    if (event.statusText !== undefined) rawPayload.statusText = event.statusText;
+    if (event.widgetKey !== undefined) rawPayload.widgetKey = event.widgetKey;
+    if (event.widgetLines !== undefined) rawPayload.widgetLines = event.widgetLines;
     if (event.message !== undefined) rawPayload.message = event.message;
     if (event.assistantMessageEvent !== undefined) rawPayload.assistantMessageEvent = event.assistantMessageEvent;
     if (event.toolCallId !== undefined) rawPayload.toolCallId = event.toolCallId;
@@ -397,6 +425,7 @@ export class AgentService {
     const payload = this.sanitizeEventPayload(rawPayload) as Record<string, unknown>;
 
     if (event.type === "agent_settled") {
+      this.pendingUiRequests.delete(agentId);
       await this.reconcile(agentId);
       const status = this.requireAgent(agentId).lastKnownStatus as AgentStatus;
       this.emit({ agentId, type: "settled", status, generation: event.generation, payload });
@@ -406,6 +435,7 @@ export class AgentService {
       ["permission_request", "user_input_request"].includes(String(event.type)) ||
       (event.type === "extension_ui_request" && !["setStatus", "setWidget", "notify"].includes(String(event.method)))
     ) {
+      this.pendingUiRequests.set(agentId, { ...payload, type: event.type, method: event.method });
       this.updateStatus(agentId, "needs-attention", "attention", event.generation, undefined, payload);
     } else if (["error", "prompt_error", "extension_error"].includes(String(event.type))) {
       this.updateStatus(agentId, "error", "attention", event.generation, undefined, payload);

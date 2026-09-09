@@ -58,6 +58,11 @@ async function drain(stream: ReadableStream<Uint8Array>, consume: (chunk: Uint8A
   finally { reader.releaseLock(); }
 }
 
+export type PiExtensionUiResponse =
+  | { id: string; value: string }
+  | { id: string; confirmed: boolean }
+  | { id: string; cancelled: true };
+
 export class PiRpcProcess {
   readonly child: Bun.Subprocess<"pipe", "pipe", "pipe">;
   readonly generation: number;
@@ -67,6 +72,7 @@ export class PiRpcProcess {
   eventsTruncated = false;
   stderrTruncated = false;
   private sequence = 0; private eventBytes = 0; private stderrBytes = 0; private nextId = 0;
+  private pendingUiRequest?: PiRecord;
   private readonly stderrDecoder = new TextDecoder();
   private readonly listeners = new Set<(event: PiEvent) => void>();
   private readonly lifecycleListeners = new Set<(event: PiLifecycleEvent) => void>();
@@ -114,6 +120,11 @@ export class PiRpcProcess {
       if (record.success === false) request.reject(new Error(String(record.error ?? "Pi command failed"))); else request.resolve(record);
       return;
     }
+    if (record.type === "extension_ui_request" && !["setStatus", "setWidget", "notify"].includes(String(record.method))) {
+      this.pendingUiRequest = record;
+    } else if (record.type === "agent_settled" || record.type === "turn_end") {
+      this.pendingUiRequest = undefined;
+    }
     const event = { ...record, sequence: ++this.sequence, generation: this.generation };
     this.events.push(event); this.eventBytes += encoder.encode(JSON.stringify(event)).byteLength;
     while (this.eventBytes > this.limits.maxEventBytes && this.events.length) { const removed = this.events.shift()!; this.eventBytes -= encoder.encode(JSON.stringify(removed)).byteLength; this.eventsTruncated = true; }
@@ -159,6 +170,48 @@ export class PiRpcProcess {
       this.pending.set(id, { resolve, reject, timer });
       try { this.child.stdin.write(line); } catch (error) { clearTimeout(timer); this.pending.delete(id); reject(asError(error)); }
     });
+  }
+
+  getPendingUiRequest(): PiRecord | undefined {
+    return this.pendingUiRequest;
+  }
+
+  respondExtensionUi(response: PiExtensionUiResponse): void {
+    if (this.lifecycle !== "running") throw new Error(`Pi process is ${this.lifecycle}`);
+    const pending = this.getPendingUiRequest();
+    const targetId = pending?.id ? String(pending.id) : response.id;
+    let finalValue = "value" in response ? response.value : undefined;
+
+    // If this is a select dialog, match the value to the offered options so plugins like ask_user_question accept it
+    if (pending?.method === "select" && Array.isArray(pending.options) && finalValue) {
+      const options = pending.options as string[];
+      if (!options.includes(finalValue)) {
+        const match = options.find((opt) =>
+          opt.toLowerCase().includes(finalValue!.toLowerCase()) ||
+          opt.replace(/^\d+\.\s*/, "").split(" — ")[0]?.trim().toLowerCase() === finalValue!.toLowerCase()
+        );
+        if (match) {
+          finalValue = match;
+        }
+      }
+    }
+
+    const payload: Record<string, unknown> = {
+      type: "extension_ui_response",
+      id: targetId,
+    };
+    if ("cancelled" in response && response.cancelled) {
+      payload.cancelled = true;
+    } else if ("confirmed" in response && response.confirmed !== undefined) {
+      payload.confirmed = response.confirmed;
+    } else if (finalValue !== undefined) {
+      payload.value = finalValue;
+    }
+
+    const line = `${JSON.stringify(payload)}\n`;
+    if (encoder.encode(line).byteLength > this.limits.maxCommandBytes) throw new Error("Pi UI response exceeds byte limit");
+    this.child.stdin.write(line);
+    this.pendingUiRequest = undefined;
   }
   replay(after = 0): ReplayResult { const first = this.events[0]?.sequence; return { snapshotRequired: this.eventsTruncated && first !== undefined && after < first - 1, events: this.events.filter(event => event.sequence > after) }; }
   subscribe(listener: (event: PiEvent) => void, after = 0) { for (const event of this.replay(after).events) { try { listener(event); } catch {} } this.listeners.add(listener); return () => this.listeners.delete(listener); }

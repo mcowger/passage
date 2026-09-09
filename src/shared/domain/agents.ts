@@ -14,6 +14,7 @@ export const agentSummarySchema = z.object({
   live: z.boolean(),
   persisted: z.boolean(),
   generation: z.number().int().positive().safe().optional(),
+  pendingUiRequest: z.record(z.string(), z.unknown()).optional(),
 }).strict();
 export type AgentSummary = z.infer<typeof agentSummarySchema>;
 

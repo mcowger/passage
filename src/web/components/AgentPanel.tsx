@@ -6,6 +6,7 @@ import { ModelPicker } from "./ModelPicker.tsx";
 import { Streamdown } from "streamdown";
 import { Button } from "./ui/button.tsx";
 import { ToolRow } from "./ToolRow.tsx";
+import { QuestionCard, type QuestionRequest, type QuestionOption } from "./QuestionCard.tsx";
 import { getToolDiff } from "../lib/tool-diff.ts";
 import { estimateUpdatedTokens, getStreamingTokenText, type TokenEstimateCacheEntry } from "../lib/streaming-tokens.ts";
 import {
@@ -33,6 +34,133 @@ export type AgentPanelProps = {
   /** Offline transcript override for rendering verification (never live state). */
   previewHistory?: AgentHistory;
 };
+
+export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: TimelineItem[]): QuestionRequest | null {
+  const pending = agent.pendingUiRequest as Record<string, unknown> | undefined;
+  if (pending && pending.id) {
+    if (Array.isArray(pending.questions) && pending.questions.length > 0) {
+      return {
+        id: String(pending.id),
+        method: pending.method as any,
+        questions: (pending.questions as any[]).map((q) => ({
+          question: String(q.question || ""),
+          header: q.header ? String(q.header) : undefined,
+          options: Array.isArray(q.options)
+            ? q.options.map((o: any) =>
+                typeof o === "string"
+                  ? { label: o }
+                  : { label: String(o.label || ""), description: o.description ? String(o.description) : undefined }
+              )
+            : [],
+          multiple: Boolean(q.multiple || q.multiSelect),
+        })),
+      };
+    }
+
+    if (pending.method === "select") {
+      let header = "Select";
+      let question = String(pending.title || "Choose an option");
+      const titleMatch = question.match(/^\[(.*?)\]\s*(.*)$/);
+      if (titleMatch) {
+        header = titleMatch[1];
+        question = titleMatch[2];
+      }
+
+      const rawOptions = Array.isArray(pending.options) ? pending.options : [];
+      const options: QuestionOption[] = rawOptions.flatMap((opt: unknown) => {
+        const raw = typeof opt === "string" ? opt : (opt as any)?.label ? String((opt as any).label) : "";
+        if (!raw) return [];
+        // Filter out "Type something." sentinel from list because QuestionCard has its own "Other..." row
+        if (/^\d+\.\s*(Type something\.|Other\b)/i.test(raw) || raw === "Type something.") {
+          return [];
+        }
+        // Check for "1. Label — Description" (using em-dash, en-dash, or hyphen)
+        const matchWithDesc = raw.match(/^\d+\.\s*([^\u2014\u2013-]+?)\s*[\u2014\u2013-]\s*(.*)$/);
+        if (matchWithDesc) {
+          return [{ label: matchWithDesc[1].trim(), description: matchWithDesc[2].trim() }];
+        }
+        const matchNum = raw.match(/^\d+\.\s*(.*)$/);
+        if (matchNum) {
+          return [{ label: matchNum[1].trim() }];
+        }
+        return [typeof opt === "string" ? { label: opt } : { label: raw, description: (opt as any)?.description }];
+      });
+
+      return {
+        id: String(pending.id),
+        method: "select",
+        questions: [
+          {
+            question,
+            header,
+            options,
+          },
+        ],
+      };
+    }
+
+    if (pending.method === "confirm") {
+      return {
+        id: String(pending.id),
+        method: "confirm",
+        questions: [
+          {
+            question: String(pending.title || "Confirmation needed"),
+            header: "Confirm",
+            options: [
+              { label: "Yes", description: pending.message ? String(pending.message) : undefined },
+              { label: "No" },
+            ],
+          },
+        ],
+      };
+    }
+
+    if (pending.method === "input" || pending.method === "editor") {
+      return {
+        id: String(pending.id),
+        method: pending.method as "input" | "editor",
+        questions: [
+          {
+            question: String(pending.title || "Input needed"),
+            header: pending.method === "editor" ? "Editor" : "Input",
+            options: [],
+          },
+        ],
+      };
+    }
+  }
+
+  // Check last running tool in timeline
+  if (timeline && timeline.length > 0) {
+    for (let i = timeline.length - 1; i >= 0; i--) {
+      const item = timeline[i];
+      if (item.kind === "user") break;
+      if (item.kind === "tool" && item.status === "running") {
+        const input = item.input as { questions?: any[] } | undefined;
+        if (Array.isArray(input?.questions) && input.questions.length > 0) {
+          return {
+            id: item.id,
+            questions: input.questions.map((q: any) => ({
+              question: String(q.question || ""),
+              header: q.header ? String(q.header) : undefined,
+              options: Array.isArray(q.options)
+                ? q.options.map((o: any) =>
+                    typeof o === "string"
+                      ? { label: o }
+                      : { label: String(o.label || ""), description: o.description ? String(o.description) : undefined }
+                  )
+                : [],
+              multiple: Boolean(q.multiple || q.multiSelect),
+            })),
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+}
 
 export function AgentPanel({
   agent,
@@ -163,6 +291,26 @@ export function AgentPanel({
   const pieColor = contextPct >= 95 ? "var(--danger, #b91c1c)" : contextPct >= 80 ? "var(--warning, #b45309)" : "currentColor";
   const changeSummary = useMemo(() => summarizeChanges(effectiveHistory?.timeline ?? []), [effectiveHistory?.timeline]);
 
+  const questionRequest = useMemo(
+    () => resolveActiveQuestionRequest(agent, effectiveHistory?.timeline),
+    [agent, effectiveHistory?.timeline]
+  );
+
+  useEffect(() => {
+    if (questionRequest && timelineRef.current) {
+      timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
+    }
+  }, [questionRequest]);
+
+  const handleRespondUi = async (result: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) => {
+    try {
+      await api.respondUi(agent.id, result);
+      await onRefresh();
+    } catch (err) {
+      console.error("Failed to respond to UI prompt:", err);
+    }
+  };
+
   return (
     <section className="agent-panel" aria-label={`Agent conversation ${agent.title}`}>
       {error && (
@@ -173,15 +321,22 @@ export function AgentPanel({
       )}
       <div className="timeline" ref={timelineRef}>
         {loading ? <p className="muted timeline-loading">Loading history…</p>
-          : !effectiveHistory?.timeline.length ? (
+          : !effectiveHistory?.timeline.length && !questionRequest ? (
             <div className="empty-transcript">
               <span className="empty-transcript-icon">◈</span>
               <h3>What are we working on?</h3>
               <p>Type a prompt below to start an autonomous session.</p>
             </div>
-          ) : effectiveHistory.timeline.map((item) => (
-            <TimelineRow key={item.id} item={item} concise={concise} />
-          ))}
+          ) : (
+            <>
+              {effectiveHistory?.timeline?.map((item) => (
+                <TimelineRow key={item.id} item={item} concise={concise} />
+              ))}
+              {questionRequest && (
+                <QuestionCard request={questionRequest} onRespond={handleRespondUi} />
+              )}
+            </>
+          )}
       </div>
 
       <AgentComposer

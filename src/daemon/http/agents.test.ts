@@ -143,4 +143,16 @@ describe("agent HTTP API", () => {
     }));
     expect(oversized.status).toBe(400);
   });
+
+  test("handles extension UI responses", async () => {
+    const { app } = await fixture();
+    const created = await json(await app.fetch(request("/api/workspaces/workspace-1/agents", { method: "POST", body: "{}" })));
+    const agentId = String(created.id);
+    const res = await app.fetch(request(`/api/agents/${agentId}/ui-response`, {
+      method: "POST",
+      body: JSON.stringify({ id: "req-1", value: "Option A" }),
+    }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
 });

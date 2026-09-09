@@ -326,6 +326,20 @@ function App() {
         }
         const envelope = (value && typeof value === "object" && "type" in value) ? (value as { type?: string }) : undefined;
         const type = envelope?.type;
+        const payload = (value && typeof value === "object" && "payload" in value && typeof (value as { payload?: unknown }).payload === "object")
+          ? ((value as { payload: Record<string, unknown> }).payload)
+          : undefined;
+
+        if (type === "attention" && payload?.id) {
+          setAgents((current) =>
+            current.map((agent) => (agent.id === selectedAgentId ? { ...agent, pendingUiRequest: payload } : agent))
+          );
+        } else if (type === "settled" || type === "agent_settled" || (state.status && state.status !== "needs-attention")) {
+          setAgents((current) =>
+            current.map((agent) => (agent.id === selectedAgentId ? { ...agent, pendingUiRequest: undefined } : agent))
+          );
+        }
+
         if (type === "settled" || type === "agent_settled") {
           void loadAgent(selectedAgentId, false);
           if (settingsRef.current.notificationsEnabled) {

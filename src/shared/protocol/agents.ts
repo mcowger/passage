@@ -43,3 +43,15 @@ export const agentThinkingPayloadSchema = z.object({
   agentId: agentIdSchema,
   level: z.string().trim().min(1).max(MAX_AGENT_SETTING_LENGTH),
 }).strict();
+
+export const agentUiResponsePayloadSchema = z.object({
+  agentId: agentIdSchema,
+  id: z.string().min(1).max(256),
+  value: z.string().max(MAX_AGENT_MESSAGE_BYTES).optional(),
+  confirmed: z.boolean().optional(),
+  cancelled: z.literal(true).optional(),
+}).refine(
+  (data) => data.cancelled !== undefined || data.confirmed !== undefined || data.value !== undefined,
+  "Either value, confirmed, or cancelled must be provided"
+);
+export type AgentUiResponsePayload = z.infer<typeof agentUiResponsePayloadSchema>;

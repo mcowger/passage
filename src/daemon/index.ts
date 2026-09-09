@@ -24,6 +24,7 @@ import {
   agentSubscriptionPayloadSchema,
   agentTargetPayloadSchema,
   agentThinkingPayloadSchema,
+  agentUiResponsePayloadSchema,
   clientTerminalMessageSchema,
   commandEnvelopeSchema,
   decodeBinaryFrame,
@@ -142,6 +143,10 @@ async function handleCommand(command: CommandEnvelope, socket: Bun.ServerWebSock
     } else if (command.type === "thinking") {
       const input = agentThinkingPayloadSchema.parse(command.payload);
       await agentService.thinking(input.agentId, input.level);
+    } else if (command.type === "ui_response") {
+      const input = agentUiResponsePayloadSchema.parse(command.payload);
+      const { agentId, ...response } = input;
+      await agentService.respondExtensionUi(agentId, response as any);
     } else {
       return protocolError(command.requestId, "unsupported-command", "Command is not implemented");
     }

@@ -18,6 +18,15 @@ const messageInput = z.object({
 }).strict();
 const modelInput = z.object({ provider: z.string().trim().min(1).max(MAX_AGENT_SETTING_LENGTH), modelId: z.string().trim().min(1).max(MAX_AGENT_SETTING_LENGTH) }).strict();
 const thinkingInput = z.object({ level: z.string().trim().min(1).max(MAX_AGENT_SETTING_LENGTH) }).strict();
+const uiResponseInput = z.object({
+  id: z.string().min(1).max(256),
+  value: z.string().max(MAX_AGENT_MESSAGE_BYTES).optional(),
+  confirmed: z.boolean().optional(),
+  cancelled: z.literal(true).optional(),
+}).refine(
+  (data) => data.cancelled !== undefined || data.confirmed !== undefined || data.value !== undefined,
+  "Either value, confirmed, or cancelled must be provided"
+);
 const acceptedResponseSchema = z.object({ accepted: z.literal(true) }).strict();
 const okResponseSchema = z.object({ ok: z.literal(true) }).strict();
 
@@ -57,6 +66,7 @@ function publicSnapshot(snapshot: AgentSnapshot): AgentSummary {
     live: snapshot.live,
     persisted: snapshot.persisted,
     ...(snapshot.generation === undefined ? {} : { generation: snapshot.generation }),
+    ...(snapshot.pendingUiRequest === undefined ? {} : { pendingUiRequest: snapshot.pendingUiRequest }),
   };
 }
 
@@ -127,6 +137,14 @@ export function createAgentRoutes(service: AgentService): Hono {
   app.post("/api/agents/:agentId/thinking", async (context) => {
     try { const input = thinkingInput.parse(await readJsonBody(context.req.raw, MAX_AGENT_SETTING_BODY_BYTES)); const agentId = id(context.req.param("agentId")); await service.thinking(agentId, input.level); return success(publicSnapshot(service.snapshot(agentId))); }
     catch (error) { return errorResponse(error); }
+  });
+  app.post("/api/agents/:agentId/ui-response", async (context) => {
+    try {
+      const input = uiResponseInput.parse(await readJsonBody(context.req.raw, MAX_AGENT_JSON_BYTES));
+      const agentId = id(context.req.param("agentId") ?? "");
+      await service.respondExtensionUi(agentId, input as any);
+      return success(okResponseSchema.parse({ ok: true }));
+    } catch (error) { return errorResponse(error); }
   });
   app.post("/api/agents/:agentId/archive", async (context) => {
     try { await service.archive(id(context.req.param("agentId"))); return success(okResponseSchema.parse({ ok: true })); }

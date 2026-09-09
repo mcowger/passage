@@ -41,6 +41,7 @@ test("client validates typed agent responses and serializes commands", async () 
       return Response.json({ models: [{ provider: "test", id: "model", name: "Model", api: "test", input: ["text"], authenticated: true, supportedThinkingLevels: ["low"] }], thinkingLevels: ["low"] });
     }
     if (String(input).endsWith("/follow-up")) return Response.json({ accepted: true });
+    if (String(input).endsWith("/ui-response")) return Response.json({ ok: true });
     return Response.json(agent);
   });
   expect(await api.agent("agent-1")).toEqual(agent);
@@ -48,6 +49,9 @@ test("client validates typed agent responses and serializes commands", async () 
   await api.followUp("agent-1", "Review this");
   expect(calls.at(-1)?.url).toContain("/api/agents/agent-1/follow-up");
   expect(await calls.at(-1)?.json()).toEqual({ message: "Review this" });
+  await api.respondUi("agent-1", { id: "req-1", value: "Answer" });
+  expect(calls.at(-1)?.url).toContain("/api/agents/agent-1/ui-response");
+  expect(await calls.at(-1)?.json()).toEqual({ id: "req-1", value: "Answer" });
 });
 
 test("client rejects malformed successful command responses", async () => {

@@ -145,6 +145,12 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     async steer(id: string, message: string, images?: AgentImage[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/steer`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}) }) })); },
     async followUp(id: string, message: string, images?: AgentImage[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/follow-up`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}) }) })); },
     async abort(id: string) { okResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/abort`, { method: "POST" })); },
+    async respondUi(id: string, response: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) {
+      okResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/ui-response`, {
+        method: "POST",
+        body: JSON.stringify(response),
+      }));
+    },
     async setModel(id: string, provider: string, modelId: string): Promise<AgentSummary> { return agentSummarySchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/model`, { method: "POST", body: JSON.stringify({ provider, modelId }) })); },
     async setThinking(id: string, level: string): Promise<AgentSummary> { return agentSummarySchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/thinking`, { method: "POST", body: JSON.stringify({ level }) })); },
     async archiveAgent(id: string): Promise<void> { okResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/archive`, { method: "POST" })); },
