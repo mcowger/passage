@@ -359,6 +359,8 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
   const [busy, setBusy] = useState(false);
   const [composerError, setComposerError] = useState("");
   const [images, setImages] = useState<Array<AgentImage & { name: string }>>([]);
+  const [ctxDetailsOpen, setCtxDetailsOpen] = useState(false);
+  const ctxDetailsRef = useRef<HTMLDivElement>(null);
   const reservedImageCount = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
   const running = agent.status === "running";
@@ -421,8 +423,20 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
     setDraft(localStorage.getItem(draftKey) ?? "");
     setConcise(localStorage.getItem(conciseKey) === "true");
     setImages([]);
+    setCtxDetailsOpen(false);
     reservedImageCount.current = 0;
   }, [draftKey, conciseKey]);
+
+  useEffect(() => {
+    if (!ctxDetailsOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ctxDetailsRef.current && !ctxDetailsRef.current.contains(e.target as Node)) {
+        setCtxDetailsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [ctxDetailsOpen]);
 
   const updateDraft = (value: string) => {
     setDraft(value);
@@ -528,8 +542,12 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
   const currentModelValue = currentModel ? `${currentModel.provider}:${currentModel.id}` : "";
   const currentModelDisplayName = currentModel?.name ?? (model.includes("/") ? model.split("/")[1] : model);
 
+  const maxTokens = (currentModel && "contextWindow" in currentModel && typeof currentModel.contextWindow === "number")
+    ? currentModel.contextWindow
+    : 200_000;
   const totalTokens = effectiveHistory?.usage?.totalTokens ?? ((effectiveHistory?.usage?.input ?? 0) + (effectiveHistory?.usage?.output ?? 0));
-  const contextPercentage = totalTokens > 0 ? Math.min(100, Math.max(0.1, (totalTokens / 200000) * 100)).toFixed(1) : "0.0";
+  const contextPct = totalTokens > 0 ? Math.min(100, Math.max(1, Math.round((totalTokens / maxTokens) * 100))) : 0;
+  const pieColor = contextPct >= 95 ? "var(--danger, #b91c1c)" : contextPct >= 80 ? "var(--warning, #b45309)" : "currentColor";
   const changeSummary = summarizeChanges(effectiveHistory?.timeline ?? []);
 
   return (
@@ -630,17 +648,62 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
                 <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(event) => { void addImages(event.target.files); event.currentTarget.value = ""; }} />
               </label>
               {totalTokens > 0 && (
-                <span className="composer-ctx-pill" title={`${totalTokens.toLocaleString()} tokens (${effectiveHistory?.usage?.input.toLocaleString() ?? 0} in · ${effectiveHistory?.usage?.output.toLocaleString() ?? 0} out · ${effectiveHistory?.usage?.cacheRead.toLocaleString() ?? 0} cache) · $${effectiveHistory?.usage?.cost.toFixed(4) ?? "0.0000"}`}>
-                  <span>{contextPercentage}%</span>
-                  <span className="composer-stat-sep">·</span>
-                  <span>{totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : `${totalTokens}`}</span>
-                  {effectiveHistory?.usage?.cost !== undefined && effectiveHistory.usage.cost > 0 && (
-                    <>
-                      <span className="composer-stat-sep">·</span>
-                      <span>${effectiveHistory.usage.cost.toFixed(2)}</span>
-                    </>
+                <div className="composer-ctx-wrapper" ref={ctxDetailsRef}>
+                  <button
+                    type="button"
+                    className="composer-ctx-pill"
+                    onClick={() => setCtxDetailsOpen((prev) => !prev)}
+                    title={`${totalTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens · ${contextPct}% context · Click for details`}
+                    aria-label={`Context used: ${contextPct}%. Click for usage breakdown.`}
+                    aria-expanded={ctxDetailsOpen}
+                    aria-haspopup="dialog"
+                  >
+                    <span
+                      className="context-pie"
+                      style={{
+                        background: `conic-gradient(${pieColor} ${contextPct}%, rgba(3, 105, 161, 0.18) 0)`,
+                      }}
+                      aria-hidden="true"
+                    />
+                    <span>{contextPct}%</span>
+                    {effectiveHistory?.usage?.cost !== undefined && effectiveHistory.usage.cost > 0 && (
+                      <>
+                        <span className="composer-stat-sep">·</span>
+                        <span>${effectiveHistory.usage.cost.toFixed(2)}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {ctxDetailsOpen && (
+                    <div className="ctx-details-popover" role="dialog" aria-label="Context and usage breakdown">
+                      <div className="popover-header-title">Context &amp; Usage</div>
+                      <div className="ctx-details-grid">
+                        <div className="ctx-detail-row">
+                          <span>Context used</span>
+                          <b>{contextPct}% ({totalTokens.toLocaleString()} / {maxTokens.toLocaleString()})</b>
+                        </div>
+                        <div className="ctx-detail-row">
+                          <span>Input tokens</span>
+                          <span>{(effectiveHistory?.usage?.input ?? 0).toLocaleString()}</span>
+                        </div>
+                        <div className="ctx-detail-row">
+                          <span>Output tokens</span>
+                          <span>{(effectiveHistory?.usage?.output ?? 0).toLocaleString()}</span>
+                        </div>
+                        <div className="ctx-detail-row">
+                          <span>Cache read</span>
+                          <span>{(effectiveHistory?.usage?.cacheRead ?? 0).toLocaleString()}</span>
+                        </div>
+                        {effectiveHistory?.usage?.cost !== undefined && effectiveHistory.usage.cost > 0 && (
+                          <div className="ctx-detail-row total">
+                            <span>Cost</span>
+                            <b>${effectiveHistory.usage.cost.toFixed(4)}</b>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
-                </span>
+                </div>
               )}
             </div>
             <div className="composer-toolbar-right">
