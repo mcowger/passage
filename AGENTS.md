@@ -3,9 +3,8 @@
 ## Read first
 
 - `docs/DESIGN.md` is the product architecture, security, persistence, and scope authority.
-- `docs/UI.md` defines UI behavior and accessibility; `docs/UI_MOCKS.md` illustrates its interaction rules, not pixel-perfect output.
+- `docs/UI.md` defines UI behavior and accessibility.
 - `PI.md` defines the Pi RPC boundary and durable-history rules.
-- `PLAN.md` defines the implementation order, current resume point, and phase gates. Do not begin a dependent phase before its prerequisite gate passes.
 
 ## Product and runtime
 
