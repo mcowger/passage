@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { memo, useEffect, useState, type CSSProperties } from "react";
 import { createHighlighterCore, type HighlighterCore, type ThemedToken } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 
@@ -31,6 +31,50 @@ export type HighlightedCodeProps = {
 
 let cachedHighlighter: HighlighterCore | null = null;
 let highlighterPromise: Promise<HighlighterCore> | null = null;
+
+const MAX_TOKEN_CACHE_ENTRIES = 500;
+const tokenCache = new Map<string, ThemedToken[][]>();
+
+function fastHash(str: string): number {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
+  }
+  return hash >>> 0;
+}
+
+function getCachedTokens(
+  highlighter: HighlighterCore,
+  code: string,
+  lang: string,
+  isDark: boolean
+): ThemedToken[][] | null {
+  const theme = isDark ? "vitesse-dark" : "vitesse-light";
+  const key = `${lang}:${theme}:${code.length}:${fastHash(code)}`;
+  const cached = tokenCache.get(key);
+  if (cached) {
+    tokenCache.delete(key);
+    tokenCache.set(key, cached);
+    return cached;
+  }
+
+  const loadedLangs = highlighter.getLoadedLanguages();
+  const targetLang = loadedLangs.includes(lang) ? lang : "text";
+  try {
+    const result = highlighter.codeToTokens(code.trimEnd(), {
+      lang: targetLang,
+      theme,
+    });
+    if (tokenCache.size >= MAX_TOKEN_CACHE_ENTRIES) {
+      const oldestKey = tokenCache.keys().next().value;
+      if (oldestKey) tokenCache.delete(oldestKey);
+    }
+    tokenCache.set(key, result.tokens);
+    return result.tokens;
+  } catch {
+    return null;
+  }
+}
 
 export async function ensureHighlighter(): Promise<HighlighterCore> {
   if (cachedHighlighter) return cachedHighlighter;
@@ -223,7 +267,7 @@ function useIsDarkMode(): boolean {
   return isDark;
 }
 
-export function HighlightedCode({
+function HighlightedCodeInner({
   code,
   language,
   filePath,
@@ -249,21 +293,7 @@ export function HighlightedCode({
   }
 
   const activeHighlighter = highlighter || cachedHighlighter;
-  let tokens: ThemedToken[][] | null = null;
-
-  if (activeHighlighter) {
-    const loadedLangs = activeHighlighter.getLoadedLanguages();
-    const targetLang = loadedLangs.includes(resolvedLang) ? resolvedLang : "text";
-    try {
-      const result = activeHighlighter.codeToTokens(code.trimEnd(), {
-        lang: targetLang,
-        theme: isDark ? "vitesse-dark" : "vitesse-light",
-      });
-      tokens = result.tokens;
-    } catch {
-      tokens = null;
-    }
-  }
+  const tokens = activeHighlighter ? getCachedTokens(activeHighlighter, code, resolvedLang, isDark) : null;
 
   const langClass = `language-${resolvedLang}`;
   const preClass = `${className ?? ""} ${langClass}`.trim();
@@ -310,3 +340,5 @@ export function HighlightedCode({
     </pre>
   );
 }
+
+export const HighlightedCode = memo(HighlightedCodeInner);

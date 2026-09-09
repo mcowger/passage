@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { TimelineItem } from "../../shared/domain/agents.ts";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { HighlightedCode, getLanguageFromPath } from "./HighlightedCode.tsx";
@@ -107,7 +107,7 @@ export function renderPathWithIcon(path: string, showFileIcon = true) {
   );
 }
 
-export function ToolDiffPreview({ diff }: { diff: ToolDiff }) {
+function ToolDiffPreviewInner({ diff }: { diff: ToolDiff }) {
   const visibleLines = diff.lines.slice(0, MAX_INLINE_DIFF_LINES);
   const omittedLines = diff.lines.length - visibleLines.length;
   const rawPatch = useMemo(
@@ -153,6 +153,8 @@ export function ToolDiffPreview({ diff }: { diff: ToolDiff }) {
     </div>
   );
 }
+
+export const ToolDiffPreview = memo(ToolDiffPreviewInner);
 
 function ReadFileView({
   content,
@@ -408,7 +410,7 @@ function ToolOutputDisplay({
   );
 }
 
-export function ToolExpandedBody({
+function ToolExpandedBodyInner({
   item,
   diff,
   filePath,
@@ -527,11 +529,13 @@ export function ToolExpandedBody({
   );
 }
 
+export const ToolExpandedBody = memo(ToolExpandedBodyInner);
+
 function isGlobLikeSearch(name: string): boolean {
   return name === "glob" || name === "ls" || name === "list" || name === "list_dir";
 }
 
-export function ToolRow({ item, conciseBadge }: { item: Extract<TimelineItem, { kind: "tool" }>; conciseBadge?: boolean }) {
+function ToolRowInner({ item, conciseBadge }: { item: Extract<TimelineItem, { kind: "tool" }>; conciseBadge?: boolean }) {
   const { icon, title, subtitle, isPath } = getToolSummary(item);
   const diff = getToolDiff(item);
   const filePath = subtitle || (item.input && typeof item.input === "object" ? String((item.input as Record<string, unknown>).path ?? (item.input as Record<string, unknown>).filePath ?? "") : undefined);
@@ -582,3 +586,5 @@ export function ToolRow({ item, conciseBadge }: { item: Extract<TimelineItem, { 
     </details>
   );
 }
+
+export const ToolRow = memo(ToolRowInner);
