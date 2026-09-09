@@ -663,7 +663,7 @@ export function AgentPanel({ agent, history, capabilities, loading, error, api, 
                     <span
                       className="context-pie"
                       style={{
-                        background: `conic-gradient(${pieColor} ${contextPct}%, rgba(3, 105, 161, 0.18) 0)`,
+                        background: `conic-gradient(${pieColor} ${contextPct}%, var(--chip-blue-track, rgba(3, 105, 161, 0.18)) 0)`,
                       }}
                       aria-hidden="true"
                     />
