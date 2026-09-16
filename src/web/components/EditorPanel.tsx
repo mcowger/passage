@@ -18,9 +18,11 @@ type EditorProps = {
   api: WorkspaceApi;
   onClose: () => void;
   onOpenDiff?: (path: string) => void;
+  tabId?: string;
+  onDirtyChange?: (tabId: string, filePath: string, isDirty: boolean, save: () => Promise<boolean>) => void;
 };
 
-export function EditorPanel({ workspaceId, filePath, api, onClose, onOpenDiff }: EditorProps) {
+export function EditorPanel({ workspaceId, filePath, api, onClose, onOpenDiff, tabId, onDirtyChange }: EditorProps) {
   const editorContainerRef = useRef<HTMLDivElement | null>(null);
   const editorViewRef = useRef<EditorView | null>(null);
 
@@ -136,8 +138,8 @@ export function EditorPanel({ workspaceId, filePath, api, onClose, onOpenDiff }:
     };
   }, [workspaceId, filePath, loadFile]);
 
-  const handleSave = async () => {
-    if (!editorViewRef.current || !revision || saving) return;
+  const handleSave = async (): Promise<boolean> => {
+    if (!editorViewRef.current || !revision || saving) return false;
     const currentDoc = editorViewRef.current.state.doc.toString();
     setSaving(true);
     setSaveError("");
@@ -148,6 +150,7 @@ export function EditorPanel({ workspaceId, filePath, api, onClose, onOpenDiff }:
       setRevision(writeResult.revision);
       setInitialContent(currentDoc);
       setIsDirty(false);
+      return true;
     } catch (err) {
       const isConflict = err instanceof Error && (err.message.includes("conflict") || (err as { code?: string }).code === "conflict");
       if (isConflict) {
@@ -156,10 +159,25 @@ export function EditorPanel({ workspaceId, filePath, api, onClose, onOpenDiff }:
       } else {
         setSaveError(err instanceof Error ? err.message : "Failed to save file");
       }
+      return false;
     } finally {
       setSaving(false);
     }
   };
+
+  const saveRef = useRef(handleSave);
+  saveRef.current = handleSave;
+
+  useEffect(() => {
+    if (!tabId || !onDirtyChange) return;
+    onDirtyChange(tabId, filePath, isDirty, () => saveRef.current());
+  }, [tabId, filePath, isDirty, onDirtyChange]);
+
+  useEffect(() => {
+    return () => {
+      if (tabId && onDirtyChange) onDirtyChange(tabId, filePath, false, () => Promise.resolve(false));
+    };
+  }, [tabId, filePath, onDirtyChange]);
 
   return (
     <div className="editor-panel" aria-label={`Editor for ${filePath}`}>

@@ -15,7 +15,7 @@ export interface SplitCanvasProps {
   onLayoutChange: (layout: WorkspaceLayout) => void;
   renderTabContent: (tab: PaneTab) => React.ReactNode;
   onActivateTab?: (tab: PaneTab) => void;
-  onCloseTab?: (tabId: string) => void;
+  onCloseTab?: (tabId: string) => boolean | void;
   workspaceId: string;
 }
 
@@ -46,7 +46,11 @@ export function SplitCanvas({
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
-      onCloseTab?.(tabId);
+      const vetoed = onCloseTab?.(tabId);
+      if (vetoed === false) {
+        setContextMenu(null);
+        return;
+      }
       const nextRoot = removeTabFromTree(layout.root, tabId);
       if (nextRoot) {
         onLayoutChange({ ...layout, root: nextRoot });

@@ -33,6 +33,15 @@ import {
 } from "./components/ui/dialog.tsx";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
 import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./components/ui/alert-dialog.tsx";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -166,6 +175,10 @@ function App() {
   const [worktreeModalProjectId, setWorktreeModalProjectId] = useState<string>();
   const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
+  const [dirtyEditors, setDirtyEditors] = useState<Record<string, string>>({});
+  const [pendingDirtyClose, setPendingDirtyClose] = useState<{ tabId: string; path: string } | null>(null);
+  const [dirtySaveBusy, setDirtySaveBusy] = useState(false);
+  const editorSaveHandlers = useRef(new Map<string, () => Promise<boolean>>());
 
   const agentsLoadGeneration = useRef(0);
 
@@ -484,6 +497,20 @@ function App() {
     if (tabId.startsWith("diff-")) setOpenDiffPath(undefined);
   }, [layout, selectedWorkspaceId, handleLayoutChange]);
 
+  const handleEditorDirtyChange = useCallback((tabId: string, path: string, isDirty: boolean, save: () => Promise<boolean>) => {
+    editorSaveHandlers.current.set(tabId, save);
+    setDirtyEditors((prev) => {
+      if (isDirty) {
+        if (prev[tabId] === path) return prev;
+        return { ...prev, [tabId]: path };
+      }
+      if (!(tabId in prev)) return prev;
+      const next = { ...prev };
+      delete next[tabId];
+      return next;
+    });
+  }, []);
+
   const handleActivateTab = useCallback((tab: PaneTab) => {
     if (tab.kind === "agent" && tab.targetId) {
       setSelectedAgentId(tab.targetId);
@@ -628,8 +655,16 @@ function App() {
             workspaceId={workspace.id}
             filePath={filePath}
             api={api}
+            tabId={`editor-${filePath}`}
+            onDirtyChange={handleEditorDirtyChange}
             onClose={() => {
-              closeTabNow(`editor-${filePath}`);
+              const tid = `editor-${filePath}`;
+              const dirtyPath = dirtyEditors[tid];
+              if (dirtyPath !== undefined) {
+                setPendingDirtyClose({ tabId: tid, path: dirtyPath });
+                return;
+              }
+              closeTabNow(tid);
               setActiveTab("explorer");
             }}
             onOpenDiff={openFileDiff}
@@ -841,6 +876,11 @@ function App() {
                   renderTabContent={renderTabContent}
                   onActivateTab={handleActivateTab}
                   onCloseTab={(tabId) => {
+                    const dirtyPath = dirtyEditors[tabId];
+                    if (dirtyPath !== undefined) {
+                      setPendingDirtyClose({ tabId, path: dirtyPath });
+                      return false;
+                    }
                     void closeAgentTab(tabId);
                     if (tabId.startsWith("editor-")) setOpenEditorPath(undefined);
                     if (tabId.startsWith("diff-")) setOpenDiffPath(undefined);
@@ -917,6 +957,56 @@ function App() {
           onRefresh={async () => { await refreshWorkspaces(); }}
         />
       )}
+
+      {/* Unsaved editor changes confirmation */}
+      <AlertDialog open={pendingDirtyClose !== null} onOpenChange={(isOpen) => { if (!isOpen && !dirtySaveBusy) setPendingDirtyClose(null); }}>
+        <AlertDialogContent className="max-w-[440px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              Do you want to save the changes you made to {pendingDirtyClose?.path ?? "this file"}? Your changes will be lost if you don&apos;t save them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={dirtySaveBusy}>Cancel</AlertDialogCancel>
+            <Button
+              size="xs"
+              variant="secondary"
+              disabled={dirtySaveBusy}
+              onClick={() => {
+                if (!pendingDirtyClose) return;
+                closeTabNow(pendingDirtyClose.tabId);
+                if (pendingDirtyClose.tabId.startsWith("editor-")) setActiveTab("explorer");
+                setPendingDirtyClose(null);
+              }}
+            >
+              Discard
+            </Button>
+            <Button
+              size="xs"
+              disabled={dirtySaveBusy}
+              onClick={() => {
+                if (!pendingDirtyClose) return;
+                const save = editorSaveHandlers.current.get(pendingDirtyClose.tabId);
+                if (!save) {
+                  setPendingDirtyClose(null);
+                  return;
+                }
+                setDirtySaveBusy(true);
+                void save().then((ok) => {
+                  setDirtySaveBusy(false);
+                  if (!ok) return;
+                  closeTabNow(pendingDirtyClose.tabId);
+                  if (pendingDirtyClose.tabId.startsWith("editor-")) setActiveTab("explorer");
+                  setPendingDirtyClose(null);
+                });
+              }}
+            >
+              {dirtySaveBusy ? "Saving..." : "Save"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Workspace Creation Modals */}
       {form === "project" && (
