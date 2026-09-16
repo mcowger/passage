@@ -1,4 +1,7 @@
 import { memo, useMemo, useState } from "react";
+import { cn } from "../lib/utils.ts";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible.tsx";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group.tsx";
 import type { TimelineItem } from "../../shared/domain/agents.ts";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { HighlightedCode, getLanguageFromPath } from "./HighlightedCode.tsx";
@@ -265,6 +268,40 @@ function GlobResultView({ data }: { data: GlobParsedResult }) {
   );
 }
 
+function ViewToggle<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+}: {
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (next: T) => void;
+  label: string;
+}) {
+  return (
+    <ToggleGroup
+      type="single"
+      value={value}
+      onValueChange={(next) => { if (next) onChange(next as T); }}
+      aria-label={label}
+      size="sm"
+      className="gap-1"
+    >
+      {options.map((option) => (
+        <ToggleGroupItem
+          key={option.value}
+          value={option.value}
+          aria-label={`Show ${option.label.toLowerCase()} view`}
+          className={cn("tool-view-toggle-btn h-auto min-w-0", value === option.value && "active")}
+        >
+          {option.label}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+}
+
 function ToolOutputDisplay({
   item,
   filePath,
@@ -301,20 +338,15 @@ function ToolOutputDisplay({
         <div className="tool-section-header">
           <span className="tool-section-label">Matches</span>
           <div className="tool-section-actions">
-            <button
-              type="button"
-              className={`tool-view-toggle-btn ${viewMode === "structured" ? "active" : ""}`}
-              onClick={() => setViewMode("structured")}
-            >
-              Structured
-            </button>
-            <button
-              type="button"
-              className={`tool-view-toggle-btn ${viewMode === "raw" ? "active" : ""}`}
-              onClick={() => setViewMode("raw")}
-            >
-              Raw
-            </button>
+            <ViewToggle
+              value={viewMode}
+              onChange={setViewMode}
+              label="Grep result view"
+              options={[
+                { value: "structured", label: "Structured" },
+                { value: "raw", label: "Raw" },
+              ]}
+            />
             <CopyButton text={result} title="Copy matches" />
           </div>
         </div>
@@ -333,20 +365,15 @@ function ToolOutputDisplay({
         <div className="tool-section-header">
           <span className="tool-section-label">Files</span>
           <div className="tool-section-actions">
-            <button
-              type="button"
-              className={`tool-view-toggle-btn ${viewMode === "structured" ? "active" : ""}`}
-              onClick={() => setViewMode("structured")}
-            >
-              Grid
-            </button>
-            <button
-              type="button"
-              className={`tool-view-toggle-btn ${viewMode === "raw" ? "active" : ""}`}
-              onClick={() => setViewMode("raw")}
-            >
-              Raw
-            </button>
+            <ViewToggle
+              value={viewMode}
+              onChange={setViewMode}
+              label="File list view"
+              options={[
+                { value: "structured", label: "Grid" },
+                { value: "raw", label: "Raw" },
+              ]}
+            />
             <CopyButton text={result} title="Copy file list" />
           </div>
         </div>
@@ -366,20 +393,15 @@ function ToolOutputDisplay({
         <div className="tool-section-header">
           <span className="tool-section-label">Output (JSON)</span>
           <div className="tool-section-actions">
-            <button
-              type="button"
-              className={`tool-view-toggle-btn ${viewMode === "formatted" ? "active" : ""}`}
-              onClick={() => setViewMode("formatted")}
-            >
-              Formatted
-            </button>
-            <button
-              type="button"
-              className={`tool-view-toggle-btn ${viewMode === "raw" ? "active" : ""}`}
-              onClick={() => setViewMode("raw")}
-            >
-              Raw
-            </button>
+            <ViewToggle
+              value={viewMode}
+              onChange={setViewMode}
+              label="JSON output view"
+              options={[
+                { value: "formatted", label: "Formatted" },
+                { value: "raw", label: "Raw" },
+              ]}
+            />
             <CopyButton
               text={viewMode === "formatted" ? formattedJson : normalizedBash}
               title="Copy output"
@@ -542,8 +564,8 @@ function ToolRowInner({ item, conciseBadge }: { item: Extract<TimelineItem, { ki
 
   if (conciseBadge) {
     return (
-      <details className={`tool-row concise ${item.status}`}>
-        <summary className="timeline-concise-badge" title={`${title}${subtitle ? ` ${subtitle}` : ""} — expand for details`}>
+      <Collapsible className={`tool-row concise ${item.status}`}>
+        <CollapsibleTrigger className="timeline-concise-badge" title={`${title}${subtitle ? ` ${subtitle}` : ""} — expand for details`}>
           <span className="timeline-concise-title"><ToolIcon kind={icon} /> {title}</span>
           {subtitle && isPath ? renderPathWithIcon(subtitle) : subtitle ? <code title={subtitle}>{subtitle}</code> : null}
           {diff && (diff.additions > 0 || diff.deletions > 0) && (
@@ -553,15 +575,17 @@ function ToolRowInner({ item, conciseBadge }: { item: Extract<TimelineItem, { ki
               <span className="tool-diff-stat-del">-{diff.deletions}</span>
             </span>
           )}
-        </summary>
-        <ToolExpandedBody item={item} diff={diff} filePath={filePath} />
-      </details>
+        </CollapsibleTrigger>
+        <CollapsibleContent forceMount>
+          <ToolExpandedBody item={item} diff={diff} filePath={filePath} />
+        </CollapsibleContent>
+      </Collapsible>
     );
   }
 
   return (
-    <details className={`tool-row ${item.status}`} open={item.status === "error"}>
-      <summary className="tool-row-summary">
+    <Collapsible className={`tool-row ${item.status}`} defaultOpen={item.status === "error"}>
+      <CollapsibleTrigger className="tool-row-summary">
         <span className="tool-row-left">
           <span className="tool-row-icon"><ToolIcon kind={icon} /></span>
           <span className="tool-row-title">{title}</span>
@@ -581,9 +605,11 @@ function ToolRowInner({ item, conciseBadge }: { item: Extract<TimelineItem, { ki
         <span className="tool-row-right">
           <span className={`tool-badge ${item.status}`}>{item.status}</span>
         </span>
-      </summary>
-      <ToolExpandedBody item={item} diff={diff} filePath={filePath} />
-    </details>
+      </CollapsibleTrigger>
+      <CollapsibleContent forceMount>
+        <ToolExpandedBody item={item} diff={diff} filePath={filePath} />
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

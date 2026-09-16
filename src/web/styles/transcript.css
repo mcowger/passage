@@ -73,6 +73,15 @@
   list-style: none;
 }
 .tool-row-summary::-webkit-details-marker { display: none; }
+button.tool-row-summary,
+button.timeline-concise-badge {
+  background: none;
+  border: 0;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
 .tool-row-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
 .tool-row-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--muted); }
 .tool-row-title { font-weight: 500; color: var(--foreground); flex: none; }
