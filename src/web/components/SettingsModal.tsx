@@ -305,7 +305,7 @@ export function SettingsModal({
                     </select>
                   )}
                 </div>
-                <Button type="submit" size="sm" className="h-7 text-xs self-start" disabled={locationBusy}>
+                <Button type="submit" size="xs" className="self-start" disabled={locationBusy}>
                   {locationBusy ? "Adding..." : "Add location"}
                 </Button>
               </form>

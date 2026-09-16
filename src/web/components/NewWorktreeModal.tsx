@@ -197,17 +197,17 @@ export function NewWorktreeModal({
           <DialogTitle className="text-lg font-semibold">Git Worktrees</DialogTitle>
           <div className="flex gap-2 pt-2 border-b border-border/50 pb-2">
             <Button
-              size="sm"
+              size="xs"
               variant={activeTab === "create" ? "default" : "ghost"}
-              className="text-xs h-7 gap-1.5"
+              className="gap-1.5"
               onClick={() => { setActiveTab("create"); setError(""); }}
             >
               <PlusCircle className="w-3.5 h-3.5" /> Create New
             </Button>
             <Button
-              size="sm"
+              size="xs"
               variant={activeTab === "discover" ? "default" : "ghost"}
-              className="text-xs h-7 gap-1.5"
+              className="gap-1.5"
               onClick={() => { setActiveTab("discover"); setError(""); }}
             >
               <FolderDown className="w-3.5 h-3.5" /> Discover &amp; Import
@@ -263,8 +263,8 @@ export function NewWorktreeModal({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs self-start px-1"
+                  size="xs"
+                  className="self-start px-1"
                   onClick={() => setShowLocationForm(true)}
                 >
                   <PlusCircle className="w-3.5 h-3.5" /> New location
@@ -308,8 +308,7 @@ export function NewWorktreeModal({
                   <div className="flex gap-2">
                     <Button
                       type="button"
-                      size="sm"
-                      className="h-7 text-xs"
+                      size="xs"
                       disabled={savingLocation}
                       onClick={handleCreateLocation}
                     >
@@ -318,8 +317,7 @@ export function NewWorktreeModal({
                     <Button
                       type="button"
                       variant="ghost"
-                      size="sm"
-                      className="h-7 text-xs"
+                      size="xs"
                       onClick={() => setShowLocationForm(false)}
                     >
                       Cancel
@@ -343,7 +341,7 @@ export function NewWorktreeModal({
                   <Button
                     type="button"
                     variant="secondary"
-                    size="sm"
+                    size="xs"
                     onClick={handleSuggest}
                     disabled={!purpose.trim() || suggesting || !projectId}
                     title="Generate label, branch and folder suggestions using AI"
@@ -431,10 +429,10 @@ export function NewWorktreeModal({
             </label>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-border/40">
-              <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+              <Button type="button" variant="secondary" size="xs" onClick={onClose}>
                 Cancel
               </Button>
-              <Button type="submit" size="sm" disabled={creating}>
+              <Button type="submit" size="xs" disabled={creating}>
                 {creating ? "Creating..." : "Create Worktree"}
               </Button>
             </div>
@@ -457,8 +455,8 @@ export function NewWorktreeModal({
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
-                className="h-7 text-xs gap-1"
+                size="xs"
+                className="gap-1"
                 onClick={() => void loadDiscovered(projectId)}
                 disabled={discovering}
               >
@@ -505,9 +503,8 @@ export function NewWorktreeModal({
                         <span className="text-[11px] text-muted-foreground">Active</span>
                       ) : item.archived ? (
                         <Button
-                          size="sm"
+                          size="xs"
                           variant="secondary"
-                          className="h-7 text-xs"
                           disabled={importingPath === item.path}
                           onClick={() => void handleImport(item.path, item.branchRef)}
                         >
@@ -515,8 +512,7 @@ export function NewWorktreeModal({
                         </Button>
                       ) : (
                         <Button
-                          size="sm"
-                          className="h-7 text-xs"
+                          size="xs"
                           disabled={importingPath === item.path}
                           onClick={() => void handleImport(item.path, item.branchRef)}
                         >
@@ -548,7 +544,7 @@ export function NewWorktreeModal({
                   className="h-8 text-xs w-32"
                 />
                 <Button
-                  size="sm"
+                  size="xs"
                   variant="secondary"
                   className="h-8 text-xs shrink-0"
                   disabled={!manualPath.trim() || Boolean(importingPath)}
@@ -560,7 +556,7 @@ export function NewWorktreeModal({
             </div>
 
             <div className="flex justify-end pt-2 border-t border-border/40">
-              <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+              <Button type="button" variant="secondary" size="xs" onClick={onClose}>
                 Close
               </Button>
             </div>

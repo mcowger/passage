@@ -149,10 +149,10 @@ export function WorkspaceDetailsModal({
                   autoFocus
                   required
                 />
-                <Button size="sm" type="submit" disabled={busy || !label.trim()}>
+                <Button size="xs" type="submit" disabled={busy || !label.trim()}>
                   Save
                 </Button>
-                <Button size="sm" variant="ghost" type="button" onClick={() => setEditing(false)}>
+                <Button size="xs" variant="ghost" type="button" onClick={() => setEditing(false)}>
                   Cancel
                 </Button>
               </form>
@@ -161,7 +161,7 @@ export function WorkspaceDetailsModal({
                 <span className="text-xs text-muted-foreground">
                   {isWorktree ? "Worktree" : "Workspace"} label: <b>{workspace.displayLabel}</b>
                 </span>
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEditing(true)}>
+                <Button size="xs" variant="outline" onClick={() => setEditing(true)}>
                   Rename
                 </Button>
               </div>
@@ -171,24 +171,24 @@ export function WorkspaceDetailsModal({
           {/* Quick Actions */}
           <div className="flex items-center gap-2 py-1 flex-wrap">
             {workspace.archivedAt ? (
-              <Button size="sm" variant="default" onClick={handleToggleArchive} disabled={busy}>
+              <Button size="xs" variant="default" onClick={handleToggleArchive} disabled={busy}>
                 {isWorktree ? "Reopen Worktree" : "Reopen Workspace"}
               </Button>
             ) : (
-              <Button size="sm" variant="secondary" onClick={handleToggleArchive} disabled={busy}>
+              <Button size="xs" variant="secondary" onClick={handleToggleArchive} disabled={busy}>
                 {isWorktree ? "Archive Worktree" : "Archive Workspace"}
               </Button>
             )}
 
             {workspace.ownershipState === "repair" && (
-              <Button size="sm" variant="outline" onClick={handleRepair} disabled={busy}>
+              <Button size="xs" variant="outline" onClick={handleRepair} disabled={busy}>
                 Repair Worktree
               </Button>
             )}
 
             {isWorktree && (
               <Button
-                size="sm"
+                size="xs"
                 variant="destructive"
                 onClick={() => setConfirmRemove(true)}
                 disabled={busy}
@@ -253,8 +253,8 @@ export function WorkspaceDetailsModal({
               Force delete (discard any uncommitted or dirty changes)
             </label>
             <div className="flex justify-end gap-2 pt-2">
-              <Button size="sm" variant="secondary" onClick={() => setConfirmRemove(false)}>Cancel</Button>
-              <Button size="sm" variant="destructive" onClick={handleRemoveWorktree} disabled={busy}>
+              <Button size="xs" variant="secondary" onClick={() => setConfirmRemove(false)}>Cancel</Button>
+              <Button size="xs" variant="destructive" onClick={handleRemoveWorktree} disabled={busy}>
                 {busy ? "Deleting..." : "Delete Worktree"}
               </Button>
             </div>

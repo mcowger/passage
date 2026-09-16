@@ -436,7 +436,7 @@ function App() {
             <span className="empty-icon text-3xl mb-2 text-primary" aria-hidden="true">◈</span>
             <h1 className="text-lg font-semibold text-foreground mb-1">Workspace Overview</h1>
             <p className="text-xs text-muted-foreground mb-4">Start a new agent session to begin a conversation.</p>
-            {!workspace.archivedAt && <Button size="sm" onClick={() => void createAgent()}>+ Start Agent Session</Button>}
+            {!workspace.archivedAt && <Button size="xs" onClick={() => void createAgent()}>+ Start Agent Session</Button>}
           </div>
         ) : (
           <div className="empty flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto">
@@ -456,7 +456,7 @@ function App() {
                   This workspace is archived.
                 </span>
                 <Button
-                  size="sm"
+                  size="xs"
                   onClick={async () => {
                     setAgentError("");
                     await api.reopenWorkspace(workspace.id);
@@ -467,7 +467,7 @@ function App() {
                 </Button>
               </div>
             ) : (
-              <Button size="sm" onClick={() => void createAgent()}>
+              <Button size="xs" onClick={() => void createAgent()}>
                 + Start Agent Session
               </Button>
             )}

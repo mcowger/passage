@@ -499,7 +499,11 @@ function AgentComposerInner({
     }, 250);
   };
 
-  const run = async (action: () => Promise<unknown>, clearDraft = false, refreshAfter = true) => {
+  const run = async (
+    action: () => Promise<unknown>,
+    clearDraft = false,
+    refreshAfter = true,
+  ) => {
     setBusy(true);
     setComposerError("");
     try {
@@ -534,7 +538,7 @@ function AgentComposerInner({
         reservedImageCount.current = 0;
       },
       true,
-      false
+      false,
     );
   };
 
@@ -589,13 +593,20 @@ function AgentComposerInner({
 
   return (
     <footer className="composer-container">
-      {streamActive && (
-        <div className="composer-status-line" role="status" aria-live="polite">
-          <span className="pulse-dot" />
-          <span className="composer-status-duration">{formatDuration(elapsedSeconds)}</span>
-          <LiveStreamingStats tokens={streamingTokens} tokensPerSecond={streamingTokensPerSecond} />
-        </div>
-      )}
+      <div
+        className="composer-status-line"
+        role={streamActive ? "status" : undefined}
+        aria-live={streamActive ? "polite" : undefined}
+        aria-hidden={!streamActive}
+      >
+        {streamActive && (
+          <>
+            <span className="pulse-dot" />
+            <span className="composer-status-duration">{formatDuration(elapsedSeconds)}</span>
+            <LiveStreamingStats tokens={streamingTokens} tokensPerSecond={streamingTokensPerSecond} />
+          </>
+        )}
+      </div>
       {changeSummary && (
         <div
           className="agent-change-summary"
@@ -617,7 +628,7 @@ function AgentComposerInner({
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               if (running) send("steer");
-              else send("prompt");
+              else if (!busy) send("prompt");
             }
           }}
           placeholder={
@@ -763,7 +774,7 @@ function AgentComposerInner({
             {running ? (
               <>
                 <Button
-                  size="sm"
+                  size="xs"
                   className="composer-action-btn"
                   onClick={() => send("steer")}
                   disabled={busy}
@@ -774,7 +785,7 @@ function AgentComposerInner({
                 </Button>
                 <Button
                   variant="secondary"
-                  size="sm"
+                  size="xs"
                   className="composer-action-btn"
                   onClick={() => send("followUp")}
                   disabled={busy}
@@ -785,7 +796,7 @@ function AgentComposerInner({
                 </Button>
                 <Button
                   variant="destructive"
-                  size="sm"
+                  size="xs"
                   className="composer-action-btn"
                   onClick={() => void run(() => api.abort(agentId))}
                   disabled={busy}
@@ -797,7 +808,7 @@ function AgentComposerInner({
               </>
             ) : (
               <Button
-                size="sm"
+                size="xs"
                 className="send-btn"
                 onClick={() => send("prompt")}
                 disabled={busy || (!draft.trim() && images.length === 0)}

@@ -142,7 +142,7 @@ export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: Ex
         {dirState.nextCursor && (
           <Button
             variant="secondary"
-            size="sm"
+            size="xs"
             className="w-full mt-2"
             onClick={() => void loadDirectory(dirPath, dirState.nextCursor ?? undefined)}
             disabled={dirState.loading}

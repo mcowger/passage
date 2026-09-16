@@ -148,6 +148,15 @@ requirements.
   pane dimensions during status updates, or terminal text.
 - Respect `prefers-reduced-motion`; disable motion that conveys no state change.
 
+### Controls
+
+- Use the shadcn `Button` primitive for buttons and set `xs` as the standard size.
+- The standard button is 24px high. Keep padding, icon size, and line height from
+  the `xs` variant so controls align across toolbars, dialogs, sidebars, and the
+  composer.
+- Use a larger button size only for a deliberate primary action or an empty-state
+  destination, and document that exception in the component styling.
+
 ## Application shell
 
 ### Desktop breakpoints

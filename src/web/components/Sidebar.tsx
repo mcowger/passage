@@ -67,13 +67,13 @@ export function Sidebar({
       <div className="sidebar-actions flex flex-col gap-1.5">
         {onNewWorktree && (
           <div className="flex gap-1.5 w-full">
-            <Button variant="secondary" size="sm" className="flex-1 justify-start text-xs font-normal" onClick={onNewWorktree}>
+            <Button variant="secondary" size="xs" className="flex-1 justify-start text-xs font-normal" onClick={onNewWorktree}>
               ＋ New worktree
             </Button>
             {onDiscoverWorktrees && (
               <Button
                 variant="secondary"
-                size="sm"
+                size="xs"
                 className="px-2.5 text-xs font-normal"
                 onClick={() => onDiscoverWorktrees()}
                 title="Discover and import existing git worktrees"
@@ -83,10 +83,10 @@ export function Sidebar({
             )}
           </div>
         )}
-        <Button variant="secondary" size="sm" className="w-full justify-start text-xs font-normal" onClick={onNewWorkspace}>
+        <Button variant="secondary" size="xs" className="w-full justify-start text-xs font-normal" onClick={onNewWorkspace}>
           ＋ Directory workspace
         </Button>
-        <Button variant="secondary" size="sm" className="w-full justify-start text-xs font-normal" onClick={onNewProject}>
+        <Button variant="secondary" size="xs" className="w-full justify-start text-xs font-normal" onClick={onNewProject}>
           Register project
         </Button>
       </div>

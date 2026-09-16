@@ -436,7 +436,14 @@ code { font-family: var(--font-mono); }
 .composer-icon-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 
 /* Icon-only action buttons in the composer (steer / queue / stop) */
-.composer-action-btn { padding: 0 8px; }
+.composer-action-btn {
+  height: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  line-height: 1;
+}
 .composer-action-btn svg { flex: none; }
 
 .composer-mode-toggle {
@@ -1065,6 +1072,8 @@ code { font-family: var(--font-mono); }
   display: flex;
   align-items: center;
   gap: 8px;
+  box-sizing: border-box;
+  min-height: 19px;
   padding: 0 4px 6px;
   font-size: 11px;
   color: var(--muted);
