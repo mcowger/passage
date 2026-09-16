@@ -1,7 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { WorkspaceSnapshot } from "../../shared/domain/workspaces.ts";
 import type { AgentSummary } from "../../shared/domain/agents.ts";
 import type { TerminalSummary } from "../../shared/domain/terminals.ts";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem as CommandRow,
+  CommandList,
+  CommandSeparator,
+  CommandShortcut,
+} from "./ui/command.tsx";
 
 export interface CommandItem {
   id: string;
@@ -31,6 +41,8 @@ export interface CommandPaletteProps {
   onDiscoverWorktrees?: () => void;
 }
 
+const CATEGORY_ORDER: CommandItem["category"][] = ["Views", "Actions", "Navigation", "Theme"];
+
 export function CommandPalette({
   open,
   onClose,
@@ -49,16 +61,14 @@ export function CommandPalette({
   onDiscoverWorktrees,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) {
-      setQuery("");
-      setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 20);
-    }
-  }, [open]);
+    if (open) setQuery("");
+  }, [open ]);
+
+  // `selectedWorkspaceId` is accepted for API compatibility; cmdk filtering
+  // does not need it, but keep it referenced so intent stays explicit.
+  void selectedWorkspaceId;
 
   const items = useMemo<CommandItem[]>(() => {
     const list: CommandItem[] = [
@@ -189,95 +199,54 @@ export function CommandPalette({
     onSelectWorkspace,
   ]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(
-      (item) =>
-        item.title.toLowerCase().includes(q) ||
-        item.subtitle?.toLowerCase().includes(q) ||
-        item.category.toLowerCase().includes(q)
-    );
-  }, [items, query]);
+  const grouped = useMemo(() => {
+    return CATEGORY_ORDER.map((category) => ({
+      category,
+      rows: items.filter((item) => item.category === category),
+    })).filter((group) => group.rows.length > 0);
+  }, [items]);
 
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [query]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setSelectedIndex((idx) => (idx + 1) % Math.max(1, filtered.length));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSelectedIndex((idx) => (idx - 1 + filtered.length) % Math.max(1, filtered.length));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (filtered[selectedIndex]) {
-        filtered[selectedIndex].run();
-        onClose();
-      }
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      onClose();
-    }
+  const runItem = (item: CommandItem) => {
+    item.run();
+    onClose();
   };
 
-  if (!open) return null;
-
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="command-palette-modal"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command Palette"
-      >
-        <div className="palette-search-box">
-          <span className="palette-search-icon" aria-hidden="true">🔍</span>
-          <input
-            ref={inputRef}
-            type="text"
-            className="palette-input"
-            placeholder="Type a command, search views, agents, workspaces... (Esc to close)"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-          />
-        </div>
-
-        <div className="palette-results" role="listbox">
-          {filtered.length === 0 ? (
-            <div className="palette-empty">No matching commands or destinations</div>
-          ) : (
-            filtered.map((item, idx) => {
-              const isSelected = idx === selectedIndex;
-              return (
-                <div
+    <CommandDialog
+      open={open}
+      onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}
+      title="Command Palette"
+      description="Type a command, search views, agents, workspaces..."
+    >
+      <CommandInput
+        placeholder="Type a command, search views, agents, workspaces... (Esc to close)"
+        value={query}
+        onValueChange={setQuery}
+      />
+      <CommandList>
+        <CommandEmpty>No matching commands or destinations</CommandEmpty>
+        {grouped.map((group, groupIndex) => (
+          <div key={group.category}>
+            {groupIndex > 0 && <CommandSeparator />}
+            <CommandGroup heading={group.category}>
+              {group.rows.map((item) => (
+                <CommandRow
                   key={item.id}
-                  role="option"
-                  aria-selected={isSelected}
-                  className={`palette-item ${isSelected ? "selected" : ""}`}
-                  onClick={() => {
-                    item.run();
-                    onClose();
-                  }}
-                  onMouseEnter={() => setSelectedIndex(idx)}
+                  value={`${item.title} ${item.subtitle ?? ""} ${item.category}`}
+                  onSelect={() => runItem(item)}
                 >
-                  <span className="palette-item-icon">{item.icon}</span>
+                  <span className="palette-item-icon" aria-hidden="true">{item.icon}</span>
                   <div className="palette-item-text">
                     <span className="palette-item-title">{item.title}</span>
                     {item.subtitle && <span className="palette-item-subtitle">{item.subtitle}</span>}
                   </div>
-                  <span className="palette-item-category">{item.category}</span>
-                  {item.shortcut && <kbd className="palette-item-kbd">{item.shortcut}</kbd>}
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-    </div>
+                  {item.shortcut && <CommandShortcut>{item.shortcut}</CommandShortcut>}
+                </CommandRow>
+              ))}
+            </CommandGroup>
+          </div>
+        ))}
+      </CommandList>
+    </CommandDialog>
   );
 }
