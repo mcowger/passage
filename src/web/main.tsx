@@ -32,6 +32,13 @@ import {
   DialogTitle,
 } from "./components/ui/dialog.tsx";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./components/ui/select.tsx";
 import { Alert, AlertDescription } from "./components/ui/alert.tsx";
 import { Toaster } from "./components/ui/sonner.tsx";
 import "./styles.css";
@@ -146,6 +153,7 @@ function App() {
   const [previewHistory, setPreviewHistory] = useState<AgentHistory | null>(null);
   const [agentError, setAgentError] = useState("");
   const [form, setForm] = useState<FormKind>();
+  const [workspaceProjectId, setWorkspaceProjectId] = useState<string>();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [layout, setLayout] = useState<WorkspaceLayout>();
   const [settings, setSettings] = useState<WorkspaceSettings>(DEFAULT_WORKSPACE_SETTINGS);
@@ -295,6 +303,8 @@ function App() {
   const workspace = snapshot?.workspaces.find((item) => item.id === selectedWorkspaceId);
   const project = snapshot?.projects.find((item) => item.id === workspace?.projectId);
   const activeProject = project ?? snapshot?.projects.find((item) => !item.archivedAt);
+  const activeProjects = snapshot?.projects.filter((item) => !item.archivedAt) ?? [];
+  const workspaceProject = activeProjects.find((item) => item.id === workspaceProjectId) ?? activeProject;
   const selectedTerminal = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
   const isGitWorkspace = workspace?.mainRepositoryRoot != null;
 
@@ -669,7 +679,7 @@ function App() {
           onClose={() => setDrawerOpen(false)}
           onSelect={handleSelectWorkspace}
           onNewProject={() => { setFormError(""); setForm("project"); }}
-          onNewWorkspace={() => { setFormError(""); setForm("workspace"); }}
+          onNewWorkspace={() => { setFormError(""); setWorkspaceProjectId(activeProject?.id); setForm("workspace"); }}
           onNewWorktree={() => {
             setFormError("");
             setWorktreeModalTab("create");
@@ -926,12 +936,12 @@ function App() {
         </FormDialog>
       )}
 
-      {form === "workspace" && activeProject && (
+      {form === "workspace" && workspaceProject && (
         <FormDialog
-          title={`New directory workspace in ${activeProject.displayLabel}`}
+          title={`New directory workspace in ${workspaceProject.displayLabel}`}
           submitLabel="Create workspace"
           error={formError}
-          onCancel={() => { setFormError(""); setForm(undefined); }}
+          onCancel={() => { setFormError(""); setForm(undefined); setWorkspaceProjectId(undefined); }}
           onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
@@ -941,12 +951,25 @@ function App() {
               return;
             }
             const cwd = String(data.get("cwd") ?? "").trim();
-            void runWorkspaceMutation(() => api.createDirectoryWorkspace(activeProject.id, {
+            const targetProjectId = workspaceProjectId ?? workspaceProject.id;
+            void runWorkspaceMutation(() => api.createDirectoryWorkspace(targetProjectId, {
               displayLabel,
               ...(cwd ? { cwd } : {}),
             }));
           }}
         >
+          <label>Project
+            <Select value={workspaceProjectId ?? workspaceProject.id} onValueChange={setWorkspaceProjectId} required>
+              <SelectTrigger className="w-full" aria-label="Target project">
+                <SelectValue placeholder="Select project" />
+              </SelectTrigger>
+              <SelectContent>
+                {activeProjects.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>{item.displayLabel}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
           <label>Workspace label<input name="label" required placeholder="Invoice retries" /></label>
           <label>Subdirectory (optional)<input name="cwd" placeholder="services/importer" /></label>
           <p className="form-help">Paths are resolved by the daemon inside the registered project root.</p>
