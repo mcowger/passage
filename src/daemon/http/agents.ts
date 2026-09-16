@@ -130,6 +130,23 @@ export function createAgentRoutes(service: AgentService): Hono {
     try { await service.abort(id(context.req.param("agentId"))); return success(acceptedResponseSchema.parse({ accepted: true }), 202); }
     catch (error) { return errorResponse(error); }
   });
+  app.post("/api/agents/:agentId/compact", async (context) => {
+    try {
+      const agentId = id(context.req.param("agentId"));
+      let customInstructions: string | undefined;
+      try {
+        const body = await readJsonBody(context.req.raw, MAX_AGENT_SETTING_BODY_BYTES);
+        customInstructions = z.object({ customInstructions: z.string().trim().min(1).max(MAX_AGENT_SETTING_LENGTH).optional() }).strict().parse(body).customInstructions;
+      } catch (error) {
+        // Empty body means a plain compact; only reject real input errors.
+        if (error instanceof HttpInputError && error.code === "invalid-json") customInstructions = undefined;
+        else throw error;
+      }
+      await service.compact(agentId, customInstructions);
+      return success(acceptedResponseSchema.parse({ accepted: true }), 202);
+    }
+    catch (error) { return errorResponse(error); }
+  });
   app.post("/api/agents/:agentId/model", async (context) => {
     try { const input = modelInput.parse(await readJsonBody(context.req.raw, MAX_AGENT_SETTING_BODY_BYTES)); const agentId = id(context.req.param("agentId")); await service.model(agentId, input.provider, input.modelId); return success(publicSnapshot(service.snapshot(agentId))); }
     catch (error) { return errorResponse(error); }

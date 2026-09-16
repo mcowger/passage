@@ -5,7 +5,15 @@ Authority: `docs/DESIGN.md` (architecture) > `docs/UI.md` (interaction) >
 If this document conflicts with DESIGN.md, DESIGN.md wins and this document
 MUST be fixed.
 
-Status: plan only. No implementation yet.
+Status: implemented (`@` files + `/` commands, popover everywhere including
+mobile). Browsing/opening a workspace never executes project-controlled
+resources; all workspaces are treated as untrusted until an explicit
+persisted workspace-trust decision exists, so only Pi built-ins are listed.
+
+Note: `/compact` (action kind) is served by a new typed
+`POST /api/agents/:id/compact` route that maps to the existing typed Pi
+`compact` RPC call via `PiRpcManager` after explicit confirmation. It accepts
+no raw Pi JSON, consistent with the allowlist-only constraint.
 
 ## 1. Scope
 

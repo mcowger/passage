@@ -18,6 +18,14 @@ export const agentSummarySchema = z.object({
 }).strict();
 export type AgentSummary = z.infer<typeof agentSummarySchema>;
 
+export const slashCommandSchema = z.object({
+  name: z.string().min(1).max(64).regex(/^[a-z0-9-]+$/),
+  description: z.string().min(1).max(256),
+  hint: z.string().min(1).max(128),
+  kind: z.enum(["prompt-text", "action"]),
+}).strict();
+export type SlashCommand = z.infer<typeof slashCommandSchema>;
+
 export const agentCapabilitiesSchema = z.object({
   models: z.array(z.object({
     provider: z.string().min(1).max(256),
@@ -31,6 +39,8 @@ export const agentCapabilitiesSchema = z.object({
     maxTokens: z.number().int().positive().optional(),
   }).strict()).max(100),
   thinkingLevels: z.array(z.string().min(1).max(64)).max(16),
+  slashCommands: z.array(slashCommandSchema).max(50).default([]),
+  skillsAvailable: z.boolean().default(false),
 }).strict();
 export type AgentCapabilities = z.infer<typeof agentCapabilitiesSchema>;
 

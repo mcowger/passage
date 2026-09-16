@@ -1,5 +1,6 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentCapabilities, AgentHistory, AgentSummary, TimelineItem, ToolActivity } from "../../shared/domain/agents.ts";
+import type { ReactNode } from "react";
+import type { AgentCapabilities, AgentHistory, AgentSummary, SlashCommand, TimelineItem, ToolActivity } from "../../shared/domain/agents.ts";
 import { MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentImage } from "../../shared/protocol/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
@@ -7,6 +8,24 @@ import { Streamdown } from "streamdown";
 import { Button } from "./ui/button.tsx";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert.tsx";
 import { ToolRow } from "./ToolRow.tsx";
+import { FileTypeIcon } from "./FileTypeIcon.tsx";
+import { ComposerAutocomplete, COMPOSER_SUGGESTION_LIST_ID } from "./ComposerAutocomplete.tsx";
+import {
+  applyFileInsert,
+  applySlashInsert,
+  filterSlashCommands,
+  useComposerTrigger,
+} from "./useComposerTrigger.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog.tsx";
 import { QuestionCard, type QuestionRequest, type QuestionOption } from "./QuestionCard.tsx";
 import { getToolDiff } from "../lib/tool-diff.ts";
 import { estimateUpdatedTokens, getStreamingTokenText, type TokenEstimateCacheEntry } from "../lib/streaming-tokens.ts";
@@ -19,6 +38,8 @@ import {
   Shrink,
   Plus,
   Pencil,
+  AtSign,
+  Slash,
 } from "lucide-react";
 
 const STREAMING_STATS_INTERVAL_MS = 300;
@@ -357,6 +378,7 @@ export function AgentPanel({
 
       <AgentComposer
         agentId={agent.id}
+        workspaceId={agent.workspaceId}
         running={running}
         stopping={stopping}
         streamActive={streamActive}
@@ -417,6 +439,7 @@ const LiveStreamingStats = memo(function LiveStreamingStats({
 
 type AgentComposerProps = {
   agentId: string;
+  workspaceId: string;
   running: boolean;
   stopping: boolean;
   streamActive: boolean;
@@ -443,8 +466,49 @@ type AgentComposerProps = {
   changeSummary?: { fileCount: number; additions: number; deletions: number };
 };
 
+/** Middle-out truncation that preserves the filename suffix. */
+export function truncateFileRefPath(path: string, maxLength = 64): string {
+  if (path.length <= maxLength) return path;
+  const slash = path.lastIndexOf("/");
+  const name = slash >= 0 ? path.slice(slash + 1) : path;
+  if (name.length >= maxLength - 1) {
+    const keep = Math.max(8, maxLength - 2);
+    const head = Math.ceil(keep / 2);
+    return `${name.slice(0, head)}\u2026${name.slice(name.length - (keep - head))}`;
+  }
+  const dir = slash >= 0 ? path.slice(0, slash) : "";
+  const keepDir = Math.max(0, maxLength - name.length - 2);
+  return `\u2026${dir.slice(dir.length - keepDir)}/${name}`;
+}
+
+const FILE_REF_PATTERN = /@`([^`\n]{1,4096})`/g;
+
+/** Render backticked `@`path`` refs as inline file chips at display time. */
+export function renderFileRefs(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let last = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  FILE_REF_PATTERN.lastIndex = 0;
+  while ((match = FILE_REF_PATTERN.exec(text)) !== null) {
+    if (match.index > last) nodes.push(text.slice(last, match.index));
+    const refPath = match[1]!;
+    nodes.push(
+      <span key={`file-ref-${key++}`} className="file-ref-chip" title={refPath}>
+        <FileTypeIcon path={refPath} size={12} />
+        <code className="file-ref-path">{truncateFileRefPath(refPath)}</code>
+      </span>,
+    );
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  if (nodes.length === 0) nodes.push(text);
+  return nodes;
+}
+
 function AgentComposerInner({
   agentId,
+  workspaceId,
   running,
   stopping,
   streamActive,
@@ -479,6 +543,98 @@ function AgentComposerInner({
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const reservedImageCount = useRef(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [caret, setCaret] = useState<number | null>(null);
+  const [compactConfirmOpen, setCompactConfirmOpen] = useState(false);
+  const autocomplete = useComposerTrigger({ draft, caret, workspaceId, api });
+  const slashCommands = useMemo(
+    () => capabilities?.slashCommands ?? [],
+    [capabilities?.slashCommands],
+  );
+  const skillsAvailable = capabilities?.skillsAvailable ?? false;
+  const filteredCommands = useMemo(
+    () =>
+      autocomplete.trigger?.kind === "/"
+        ? filterSlashCommands(slashCommands, autocomplete.trigger.query)
+        : [],
+    [autocomplete.trigger, slashCommands],
+  );
+  const suggestionOpen = autocomplete.trigger !== null;
+  const suggestionCount =
+    autocomplete.trigger?.kind === "@" ? autocomplete.files.length : filteredCommands.length;
+  const activeValue = (() => {
+    if (!autocomplete.trigger) return "";
+    if (autocomplete.trigger.kind === "@") {
+      const entry = autocomplete.files[autocomplete.activeIndex];
+      return entry ? `file:${entry.path}` : "";
+    }
+    const command = filteredCommands[autocomplete.activeIndex];
+    return command ? `cmd:${command.name}` : "";
+  })();
+
+  const placeCaret = (position: number) => {
+    setCaret(position);
+    requestAnimationFrame(() => {
+      const input = composerInputRef.current;
+      if (!input) return;
+      input.focus();
+      try {
+        input.setSelectionRange(position, position);
+      } catch {}
+    });
+  };
+
+  const acceptFile = (path: string) => {
+    const trigger = autocomplete.trigger;
+    if (!trigger || trigger.kind !== "@") return;
+    const next = applyFileInsert(draft, trigger, path);
+    updateDraft(next.value);
+    placeCaret(next.caret);
+  };
+
+  const acceptCommand = (command: SlashCommand) => {
+    const trigger = autocomplete.trigger;
+    if (!trigger || trigger.kind !== "/") return;
+    if (command.kind === "action") {
+      // Action kinds never send raw Pi JSON: compact routes through the
+      // typed compact endpoint after explicit confirmation.
+      if (command.name === "compact") setCompactConfirmOpen(true);
+      return;
+    }
+    const next = applySlashInsert(draft, trigger, `/${command.name}`);
+    updateDraft(next.value);
+    placeCaret(next.caret);
+  };
+
+  const acceptActiveSuggestion = (): boolean => {
+    const trigger = autocomplete.trigger;
+    if (!trigger) return false;
+    if (trigger.kind === "@") {
+      const entry = autocomplete.files[autocomplete.activeIndex];
+      if (!entry) return false;
+      acceptFile(entry.path);
+      return true;
+    }
+    const command = filteredCommands[autocomplete.activeIndex];
+    if (!command) return false;
+    acceptCommand(command);
+    return true;
+  };
+
+  const syncCaret = (target: HTMLTextAreaElement) => {
+    try {
+      setCaret(target.selectionStart);
+    } catch {
+      setCaret(null);
+    }
+  };
+
+  const insertTriggerChar = (char: "@" | "/") => {
+    const input = composerInputRef.current;
+    const position = input?.selectionStart ?? draft.length;
+    const value = `${draft.slice(0, position)}${char}${draft.slice(position)}`;
+    updateDraft(value);
+    placeCaret(position + 1);
+  };
 
   useEffect(() => {
     setDraft(localStorage.getItem(draftKey) ?? "");
@@ -639,12 +795,65 @@ function AgentComposerInner({
           <span className="del-count">-{changeSummary.deletions}</span>
         </div>
       )}
-      <div className="composer-card">
+      <div className="composer-card composer-autocomplete-anchor">
+        <ComposerAutocomplete
+          open={suggestionOpen}
+          kind={autocomplete.trigger?.kind ?? "@"}
+          files={autocomplete.files}
+          filesLoading={autocomplete.filesLoading}
+          filesError={autocomplete.filesError}
+          commands={filteredCommands}
+          skillsAvailable={skillsAvailable}
+          activeIndex={autocomplete.activeIndex}
+          activeValue={activeValue}
+          onActiveValueChange={(value) => {
+            if (autocomplete.trigger?.kind === "@") {
+              const index = autocomplete.files.findIndex((entry) => `file:${entry.path}` === value);
+              if (index >= 0) autocomplete.setActiveIndex(index);
+            } else {
+              const index = filteredCommands.findIndex((command) => `cmd:${command.name}` === value);
+              if (index >= 0) autocomplete.setActiveIndex(index);
+            }
+          }}
+          onHoverIndex={autocomplete.setActiveIndex}
+          onSelectFile={acceptFile}
+          onSelectCommand={acceptCommand}
+          onEscape={() => autocomplete.dismiss()}
+          onInteractOutside={(insideComposer) => {
+            if (!insideComposer) autocomplete.dismiss();
+          }}
+        />
         <textarea
           ref={composerInputRef}
           value={draft}
-          onChange={(event) => updateDraft(event.target.value)}
+          onChange={(event) => {
+            updateDraft(event.target.value);
+            syncCaret(event.target);
+          }}
+          onSelect={(event) => syncCaret(event.currentTarget)}
+          onKeyUp={(event) => syncCaret(event.currentTarget)}
+          onClick={(event) => syncCaret(event.currentTarget)}
           onKeyDown={(event) => {
+            if (suggestionOpen && autocomplete.trigger) {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                autocomplete.moveSelection(event.key === "ArrowDown" ? 1 : -1, suggestionCount);
+                return;
+              }
+              if (event.key === "Escape") {
+                // Dismiss only: the draft keeps the raw trigger token and the
+                // caret stays where it was. Retyping re-opens.
+                event.preventDefault();
+                event.stopPropagation();
+                autocomplete.dismiss();
+                return;
+              }
+              if ((event.key === "Tab" || event.key === "Enter") && suggestionCount > 0 && !event.shiftKey) {
+                event.preventDefault();
+                acceptActiveSuggestion();
+                return;
+              }
+            }
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               if (stopping) return;
@@ -657,9 +866,13 @@ function AgentComposerInner({
               ? "Stopping agent execution…"
               : running
               ? "Steer now (Enter) or queue follow-up…"
-              : "@ for files/agents; / for commands and skills; ! for shell; # for snippets"
+              : "@ for files; / for commands"
           }
           aria-label="Agent message"
+          role="combobox"
+          aria-expanded={suggestionOpen}
+          aria-controls={suggestionOpen ? COMPOSER_SUGGESTION_LIST_ID : undefined}
+          aria-activedescendant={suggestionOpen && activeValue ? `composer-option-${activeValue}` : undefined}
           disabled={stopping}
           rows={2}
         />
@@ -708,6 +921,26 @@ function AgentComposerInner({
                 }}
               />
             </label>
+            <button
+              type="button"
+              className="composer-icon-btn"
+              onClick={() => insertTriggerChar("@")}
+              title="Mention a workspace file (@)"
+              aria-label="Mention a workspace file"
+              disabled={stopping}
+            >
+              <AtSign size={14} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="composer-icon-btn"
+              onClick={() => insertTriggerChar("/")}
+              title="Browse slash commands (/)"
+              aria-label="Browse slash commands"
+              disabled={stopping}
+            >
+              <Slash size={14} aria-hidden="true" />
+            </button>
             {totalTokens > 0 && (
               <div className="composer-ctx-wrapper" ref={ctxDetailsRef}>
                 <button
@@ -848,6 +1081,28 @@ function AgentComposerInner({
           </div>
         </div>
       </div>
+      <AlertDialog open={compactConfirmOpen} onOpenChange={setCompactConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Compact conversation context?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Pi will summarize the transcript to free context. The summary replaces earlier history in the
+              working session. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setCompactConfirmOpen(false);
+                void run(() => api.compact(agentId), false, true);
+              }}
+            >
+              Compact
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </footer>
   );
 }
@@ -923,7 +1178,7 @@ export const TimelineRow = memo(function TimelineRow({ item, concise }: { item: 
     return (
       <div className="user-message-container">
         <div className="user-message-card">
-          <p>{item.text}</p>
+          <p>{renderFileRefs(item.text)}</p>
         </div>
       </div>
     );

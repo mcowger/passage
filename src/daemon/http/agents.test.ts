@@ -164,4 +164,19 @@ describe("agent HTTP API", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
   });
+
+  test("compacts through the typed endpoint and exposes the slash allowlist", async () => {
+    const { app } = await fixture();
+    const created = await json(await app.fetch(request("/api/workspaces/workspace-1/agents", { method: "POST", body: "{}" })));
+    const agentId = String(created.id);
+    const compact = await app.fetch(request(`/api/agents/${agentId}/compact`, { method: "POST" }));
+    expect(compact.status).toBe(202);
+    expect(await compact.json()).toEqual({ accepted: true });
+    const capabilities = await json(await app.fetch(request(`/api/agents/${agentId}/capabilities`)));
+    expect((capabilities as { skillsAvailable: boolean }).skillsAvailable).toBe(false);
+    expect((capabilities as { slashCommands: Array<{ name: string; kind: string }> }).slashCommands[0]).toMatchObject({
+      name: "compact",
+      kind: "action",
+    });
+  });
 });

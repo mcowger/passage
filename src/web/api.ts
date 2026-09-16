@@ -16,6 +16,7 @@ import { workspaceSettingsSchema, type WorkspaceSettings } from "../shared/domai
 import { themePackSchema, fontPackSchema, toolRendererPackSchema, type ThemePack, type FontPack, type ToolRendererPack } from "../shared/domain/customization.ts";
 import type { AgentImage } from "../shared/protocol/agents.ts";
 import { z } from "zod";
+import { filesSearchResponseSchema } from "../shared/protocol/workspace.ts";
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
 import type { GitDiff, GitStatus } from "../shared/domain/git.ts";
 
@@ -187,6 +188,11 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     async steer(id: string, message: string, images?: AgentImage[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/steer`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}) }) })); },
     async followUp(id: string, message: string, images?: AgentImage[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/follow-up`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}) }) })); },
     async abort(id: string) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/abort`, { method: "POST" })); },
+    async compact(id: string, customInstructions?: string) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/compact`, { method: "POST", body: JSON.stringify(customInstructions ? { customInstructions } : {}) })); },
+    async searchFiles(workspaceId: string, q: string, limit = 20) {
+      const query = new URLSearchParams({ q, limit: String(Math.min(Math.max(limit, 1), 50)) });
+      return filesSearchResponseSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/search?${query}`));
+    },
     async respondUi(id: string, response: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) {
       okResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/ui-response`, {
         method: "POST",

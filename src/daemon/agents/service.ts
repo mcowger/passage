@@ -1,6 +1,7 @@
 import { mkdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { agentCapabilitiesSchema, type AgentHistory, type AgentStatus } from "../../shared/domain/agents.ts";
+import { getSlashCommands } from "./slash-commands.ts";
 import { agentImageSchema, type AgentImage } from "../../shared/protocol/agents.ts";
 import { pageHistory, readPiHistory, type HistoryPage } from "./history/index.ts";
 import {
@@ -292,7 +293,16 @@ export class AgentService {
     const thinkingLevels = (thinkingData?.levels ?? [])
       .filter((value): value is string => typeof value === "string")
       .slice(0, 16);
-    return agentCapabilitiesSchema.parse({ models, thinkingLevels });
+    // All workspaces are untrusted until an explicit persisted trust decision
+    // exists (see slash-commands.ts): Pi built-ins only, no skill entries.
+    return agentCapabilitiesSchema.parse({ models, thinkingLevels, slashCommands: getSlashCommands(), skillsAvailable: false });
+  }
+
+  async compact(agentId: string, customInstructions?: string): Promise<void> {
+    if (customInstructions !== undefined) this.validateShortValue(customInstructions, "instructions");
+    this.rejectWhileStopping(this.requireAgent(agentId));
+    const process = await this.ensureProcess(agentId);
+    await process.request(customInstructions ? { type: "compact", customInstructions } : { type: "compact" });
   }
 
   async model(agentId: string, provider: string, modelId: string): Promise<void> {

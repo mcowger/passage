@@ -25,6 +25,25 @@ export const filesChangedPayloadSchema = z.object({
 }).strict();
 export type FilesChangedPayload = z.infer<typeof filesChangedPayloadSchema>;
 
+export const filesSearchQuerySchema = z.object({
+  q: z.string().max(64).default(""),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+}).strict();
+export type FilesSearchQuery = z.infer<typeof filesSearchQuerySchema>;
+
+export const fileSearchEntrySchema = z.object({
+  path: z.string().min(1).max(MAX_FILE_PATH_LENGTH),
+  kind: z.enum(["file", "directory"]),
+}).strict();
+export type FileSearchEntry = z.infer<typeof fileSearchEntrySchema>;
+
+export const filesSearchResponseSchema = z.object({
+  query: z.string().max(64),
+  entries: z.array(fileSearchEntrySchema).max(50),
+  truncated: z.boolean(),
+}).strict();
+export type FilesSearchResponse = z.infer<typeof filesSearchResponseSchema>;
+
 export const gitStatusChangedReasonSchema = z.enum([
   "stage", "unstage", "stage-all", "unstage-all", "discard", "commit", "pull", "fetch",
 ]);

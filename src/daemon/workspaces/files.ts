@@ -61,6 +61,72 @@ export class FileService {
     return { path, entries, nextCursor: hasMore ? String(start + entries.length) : null };
   }
   async read(workspaceId: string, path: string): Promise<FileRead> { const absolute = await this.resolve(workspaceId, path); const s = await this.safeStat(absolute); if (!s.isFile()) throw new FileError("not-file", "Path is not a file"); if (s.size > this.maxBytes) throw new FileError("oversize", "File is too large"); const data = await readFile(absolute); if (data.includes(0)) throw new FileError("binary", "Binary files are not supported"); return { path, content: new TextDecoder().decode(data), revision: revision(s, hash(data)) }; }
+  /**
+   * Bounded case-insensitive substring/prefix match over a bounded walk from
+   * the workspace canonical root. Used by the composer `@` autocomplete.
+   * Never follows symlinks; rejects traversal via `resolve()`.
+   */
+  async search(workspaceId: string, query: string, limit = 20): Promise<{ entries: { path: string; kind: "file" | "directory" }[]; truncated: boolean }> {
+    const capped = Math.min(Math.max(Math.floor(limit) || 20, 1), 50);
+    const needle = query.slice(0, 64).toLowerCase();
+    const root = await this.resolve(workspaceId, ".");
+    const matches: { path: string; kind: "file" | "directory"; score: number }[] = [];
+    const queue: { absolute: string; relative: string }[] = [{ absolute: root, relative: "." }];
+    let visited = 0;
+    const MAX_VISITED = 5000;
+    while (queue.length > 0 && visited < MAX_VISITED && matches.length < capped * 4) {
+      const current = queue.shift()!;
+      let directory;
+      try {
+        directory = await opendir(current.absolute);
+      } catch {
+        continue;
+      }
+      try {
+        while (visited < MAX_VISITED) {
+          const item = await directory.read();
+          if (!item) break;
+          if (!item.isDirectory() && !item.isFile()) continue;
+          visited += 1;
+          const relativePath = current.relative === "." ? item.name : `${current.relative}/${item.name}`;
+          if (relativePath.length > 4096) continue;
+          const kind = item.isDirectory() ? "directory" : "file";
+          if (kind === "directory") {
+            // Never follow symlinked directories; opendir follows Dirent
+            // type only for real dirs, but double-check via lstat.
+            try {
+              const childAbsolute = join(current.absolute, item.name);
+              const linkCheck = await lstat(childAbsolute);
+              if (linkCheck.isSymbolicLink()) continue;
+              queue.push({ absolute: childAbsolute, relative: relativePath });
+            } catch {
+              continue;
+            }
+          } else {
+            try {
+              const childAbsolute = join(current.absolute, item.name);
+              if ((await lstat(childAbsolute)).isSymbolicLink()) continue;
+            } catch {
+              continue;
+            }
+          }
+          if (!needle) {
+            matches.push({ path: relativePath, kind, score: 1 });
+            continue;
+          }
+          const lowered = relativePath.toLowerCase();
+          const base = item.name.toLowerCase();
+          if (base.startsWith(needle)) matches.push({ path: relativePath, kind, score: 0 });
+          else if (lowered.includes(needle)) matches.push({ path: relativePath, kind, score: 1 });
+        }
+      } finally {
+        await directory.close();
+      }
+    }
+    matches.sort((a, b) => a.score - b.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    const truncated = matches.length > capped;
+    return { entries: matches.slice(0, capped).map(({ path, kind }) => ({ path, kind })), truncated };
+  }
   listDirectory(workspaceId: string, path = ".", cursor?: string) { return this.list(workspaceId, path, cursor); }
   readFile(workspaceId: string, path: string) { return this.read(workspaceId, path); }
   writeFile(workspaceId: string, path: string, content: string, expected: FileRevision) { return this.write(workspaceId, path, content, expected); }

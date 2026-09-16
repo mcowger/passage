@@ -54,6 +54,22 @@ test("client validates typed agent responses and serializes commands", async () 
   expect(await calls.at(-1)?.json()).toEqual({ id: "req-1", value: "Answer" });
 });
 
+test("client searches workspace files and compacts agents", async () => {
+  const calls: string[] = [];
+  const api = createWorkspaceApi(async (input, init) => {
+    calls.push(String(input));
+    if (String(input).includes("/files/search")) {
+      return Response.json({ query: "rea", entries: [{ path: "README.md", kind: "file" }], truncated: false });
+    }
+    return Response.json({ accepted: true });
+  });
+  const result = await api.searchFiles("workspace-1", "rea");
+  expect(result.entries).toEqual([{ path: "README.md", kind: "file" }]);
+  expect(calls[0]).toContain("/api/workspaces/workspace-1/files/search?q=rea");
+  await api.compact("agent-1");
+  expect(calls[1]).toContain("/api/agents/agent-1/compact");
+});
+
 test("client rejects malformed successful command responses", async () => {
   const api = createWorkspaceApi(async () => Response.json({ accepted: false }));
   await expect(api.prompt("agent-1", "Hello")).rejects.toThrow();
