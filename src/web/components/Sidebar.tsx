@@ -191,23 +191,23 @@ function ProjectRow({
   return (
     <section className="project">
       <div
-        className="project-title group/proj"
+        className="project-title group/proj min-w-0"
         onClick={() => setCollapsed(!collapsed)}
         role="button"
         tabIndex={0}
         aria-expanded={!collapsed}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setCollapsed(!collapsed); }}
       >
-        <span className="project-chevron" aria-hidden="true">
+        <span className="project-chevron shrink-0" aria-hidden="true">
           {collapsed ? <ChevronRight className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}
         </span>
         <Folder className="w-3.5 h-3.5 text-muted-foreground/80 shrink-0" />
-        <strong>{project.displayLabel}</strong>
+        <strong className="min-w-0 flex-1 truncate" title={project.displayLabel}>{project.displayLabel}</strong>
         <code title={project.canonicalRootPath}>{project.canonicalRootPath}</code>
         {onDiscoverWorktrees && (
           <button
             type="button"
-            className="opacity-0 group-hover/proj:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground transition-opacity ml-1"
+            className="opacity-0 group-hover/proj:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground transition-opacity ml-1 shrink-0"
             onClick={(e) => {
               e.stopPropagation();
               onDiscoverWorktrees(project.id);
@@ -220,7 +220,7 @@ function ProjectRow({
         {onRequestRemoveProject && (
           <button
             type="button"
-            className="opacity-0 group-hover/proj:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-danger transition-opacity ml-1"
+            className="opacity-0 group-hover/proj:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-danger transition-opacity ml-1 shrink-0"
             onClick={(e) => {
               e.stopPropagation();
               onRequestRemoveProject(project);
