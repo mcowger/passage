@@ -402,6 +402,89 @@ function App() {
     });
   }, [openPaneTab]);
 
+  const handleExplorerRenamed = useCallback((oldPath: string, newPath: string) => {
+    const wasOpenEditor = openEditorPath === oldPath;
+    setOpenEditorPath((current) => (current === oldPath ? newPath : current));
+    setOpenDiffPath((current) => (current === oldPath ? newPath : current));
+    setDirtyEditors((prev) => {
+      const oldKey = `editor-${oldPath}`;
+      if (!(oldKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[oldKey];
+      next[`editor-${newPath}`] = newPath;
+      return next;
+    });
+    if (layout) {
+      const renameInTree = (node: LayoutNode): LayoutNode => {
+        if (node.type === "tabs") {
+          const tabs = node.tabs.map((tab) => {
+            if (tab.targetId !== oldPath) return tab;
+            if (tab.kind === "editor") {
+              return { ...tab, id: `editor-${newPath}`, title: newPath.split("/").pop() ?? newPath, targetId: newPath };
+            }
+            if (tab.kind === "diff") {
+              return { ...tab, id: `diff-${newPath}`, title: `Diff: ${newPath.split("/").pop() ?? newPath}`, targetId: newPath };
+            }
+            return tab;
+          });
+          const oldTabId = node.tabs.find((t) => t.targetId === oldPath)?.id;
+          const renamedTab = tabs.find((t) => t.targetId === newPath);
+          return {
+            ...node,
+            tabs,
+            activeTabId: node.activeTabId === oldTabId && renamedTab ? renamedTab.id : node.activeTabId,
+          };
+        }
+        return { ...node, children: node.children.map(renameInTree) };
+      };
+      handleLayoutChange({ ...layout, root: renameInTree(layout.root) });
+    }
+    // The renamed tab already exists in place; just reveal it when it was open.
+    if (wasOpenEditor) setActiveTab("editor");
+  }, [layout, handleLayoutChange, openEditorPath]);
+
+  const handleExplorerDeleted = useCallback((path: string) => {
+    const affects = (target: string | undefined) =>
+      target === path || (target !== undefined && target.startsWith(`${path}/`));
+    setOpenEditorPath((current) => (affects(current) ? undefined : current));
+    setOpenDiffPath((current) => (affects(current) ? undefined : current));
+    setDirtyEditors((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const key of Object.keys(next)) {
+        if (key === `editor-${path}` || key.startsWith(`editor-${path}/`)) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    if (layout) {
+      const prune = (node: LayoutNode): LayoutNode | null => {
+        if (node.type === "tabs") {
+          const tabs = node.tabs.filter((tab) =>
+            (tab.kind === "editor" || tab.kind === "diff") ? !affects(tab.targetId) : true);
+          if (tabs.length === 0) return null;
+          return {
+            ...node,
+            tabs,
+            activeTabId: tabs.some((t) => t.id === node.activeTabId) ? node.activeTabId : tabs[0].id,
+          };
+        }
+        const children = node.children
+          .map((child) => prune(child))
+          .filter((child): child is LayoutNode => child !== null);
+        if (children.length === 0) return null;
+        if (children.length === 1) return children[0];
+        return { ...node, children };
+      };
+      const nextRoot = prune(layout.root);
+      if (nextRoot && selectedWorkspaceId) {
+        handleLayoutChange({ ...layout, root: nextRoot });
+      }
+    }
+  }, [layout, handleLayoutChange, selectedWorkspaceId]);
+
   useEffect(() => {
     if (!workspace || !layout) return;
     if (workspace.mainRepositoryRoot != null) return;
@@ -653,6 +736,9 @@ function App() {
             api={api}
             selectedFile={openEditorPath}
             onOpenFile={openEditorFile}
+            workspaceCwd={workspace.cwd}
+            onRenamed={handleExplorerRenamed}
+            onDeleted={handleExplorerDeleted}
           />
         );
 

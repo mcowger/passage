@@ -132,4 +132,41 @@ describe("files HTTP API", () => {
 
     f.store.close();
   });
+
+  test("creates, renames, duplicates, and deletes files and directories", async () => {
+    const f = await fixture();
+    const post = (suffix: string, body: unknown) => f.app.fetch(
+      request(`/api/workspaces/${f.workspace.id}/files/${suffix}`, { method: "POST", body: JSON.stringify(body) }),
+    );
+
+    const dirRes = await post("create", { path: "notes", kind: "directory" });
+    expect(dirRes.status).toBe(201);
+
+    const fileRes = await post("create", { path: "notes/todo.txt", kind: "file" });
+    expect(fileRes.status).toBe(201);
+
+    const conflictRes = await post("create", { path: "notes/todo.txt", kind: "file" });
+    expect(conflictRes.status).toBe(409);
+
+    const renameRes = await post("rename", { path: "notes/todo.txt", newPath: "notes/done.txt" });
+    expect(renameRes.status).toBe(200);
+    expect(((await renameRes.json()) as { path: string }).path).toBe("notes/done.txt");
+
+    await writeFile(join(f.root, "notes", "done.txt"), "hello");
+    const dupRes = await post("duplicate", { path: "notes/done.txt" });
+    expect(dupRes.status).toBe(201);
+    const dupPath = ((await dupRes.json()) as { path: string }).path;
+    expect(dupPath).toBe("notes/done copy.txt");
+
+    const deleteRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files?path=${encodeURIComponent(dupPath)}`, { method: "DELETE" }));
+    expect(deleteRes.status).toBe(200);
+
+    const rootDelete = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files?path=.`, { method: "DELETE" }));
+    expect(rootDelete.status).toBe(400);
+
+    const traversal = await post("create", { path: "../escape.txt", kind: "file" });
+    expect(traversal.status).toBe(400);
+
+    f.store.close();
+  });
 });

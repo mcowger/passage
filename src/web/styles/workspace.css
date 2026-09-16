@@ -66,9 +66,23 @@
 .explorer-tree { flex: 1; overflow: auto; padding: 4px 6px; }
 .explorer-subtree { display: flex; flex-direction: column; gap: 1px; }
 .explorer-node { display: flex; flex-direction: column; }
-.explorer-item { display: flex; align-items: center; gap: 5px; width: 100%; padding: 2px 5px; color: var(--foreground); text-align: left; background: transparent; border: 0; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
-.explorer-item:hover { background: var(--surface-hover); }
-.explorer-item.selected { background: var(--surface-selected); color: var(--accent); font-weight: 600; }
+.explorer-row { display: flex; align-items: center; gap: 2px; width: 100%; border-radius: 3px; }
+.explorer-row:hover { background: var(--surface-hover); }
+.explorer-row.selected { background: var(--surface-selected); }
+.explorer-row:focus-within { background: var(--surface-hover); }
+.explorer-item { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; padding: 2px 5px; color: var(--foreground); text-align: left; background: transparent; border: 0; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
+.explorer-row.selected .explorer-item { color: var(--accent); font-weight: 600; }
+.explorer-overflow { opacity: 0; flex: none; min-width: 32px; min-height: 32px; }
+.explorer-row:hover .explorer-overflow, .explorer-row:focus-within .explorer-overflow, .explorer-overflow[data-state="open"] { opacity: 1; }
+@media (pointer: coarse) {
+  .explorer-overflow { opacity: 1; }
+}
+/* Narrow panes and phone viewports may report a fine pointer (e.g. desktop
+   emulation) while still being touch-driven. Keep row actions visible there
+   so they are never a hover-only affordance. */
+@media (max-width: 640px) {
+  .explorer-overflow { opacity: 1; }
+}
 .tree-toggle { width: 10px; color: var(--muted); font-size: 8px; text-align: center; }
 .tree-indent { width: 10px; }
 .file-type-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; line-height: 0; }

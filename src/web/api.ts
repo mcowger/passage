@@ -157,6 +157,10 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     async listFiles(id: string, path = ".", cursor?: string): Promise<FileListing> { const q = new URLSearchParams({ path }); if (cursor) q.set("cursor", cursor); return await request(`/api/workspaces/${encodeURIComponent(id)}/files?${q}`) as FileListing; },
     async readFile(id: string, path: string): Promise<FileRead> { return await request(`/api/workspaces/${encodeURIComponent(id)}/files/read?path=${encodeURIComponent(path)}`) as FileRead; },
     async writeFile(id: string, path: string, content: string, expected: FileRevision): Promise<FileWrite> { return await request(`/api/workspaces/${encodeURIComponent(id)}/files`, { method: "PUT", body: JSON.stringify({ path, content, expected }) }) as FileWrite; },
+    async createPath(id: string, path: string, kind: "file" | "directory"): Promise<{ name: string; kind: string; path: string }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/files/create`, { method: "POST", body: JSON.stringify({ path, kind }) }) as { name: string; kind: string; path: string }; },
+    async renamePath(id: string, path: string, newPath: string): Promise<{ path: string }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/files/rename`, { method: "POST", body: JSON.stringify({ path, newPath }) }) as { path: string }; },
+    async duplicatePath(id: string, path: string): Promise<{ path: string }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/files/duplicate`, { method: "POST", body: JSON.stringify({ path }) }) as { path: string }; },
+    async deletePath(id: string, path: string): Promise<{ path: string }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/files?path=${encodeURIComponent(path)}`, { method: "DELETE" }) as { path: string }; },
     async listAgents(workspaceId: string): Promise<AgentSummary[]> {
       return agentSummarySchema.array().parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`));
     },

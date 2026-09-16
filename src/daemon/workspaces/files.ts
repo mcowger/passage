@@ -1,10 +1,35 @@
 import { createHash } from "node:crypto";
-import { lstat, opendir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { lstat, mkdir, opendir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES, type FileEntry, type FileListing, type FileRead, type FileRevision, type FileWrite } from "../../shared/domain/files.ts";
 import { WorkspaceService, WorkspaceError } from "./service.ts";
 
 export class FileError extends Error { constructor(public readonly code: "not-found" | "invalid-path" | "outside-root" | "archived" | "not-file" | "not-directory" | "binary" | "oversize" | "conflict" | "io", message: string) { super(message); this.name = "FileError"; } }
+
+const MAX_NAME_LENGTH = 255;
+function validateName(name: string): void {
+  if (!name || name.length > MAX_NAME_LENGTH || name === "." || name === ".." || name.includes("/") || name.includes("\\") || name.includes("\0")) {
+    throw new FileError("invalid-path", "Invalid file name");
+  }
+}
+
+function validateRelativePath(path: string): void {
+  if (!path || path === ".") throw new FileError("invalid-path", "Invalid path");
+  const parts = path.split("/");
+  for (const part of parts) {
+    if (!part || part === "." || part === "..") throw new FileError("invalid-path", "Invalid path");
+    validateName(part);
+  }
+}
+
+function duplicateName(name: string, attempt: number): string {
+  const dot = name.lastIndexOf(".");
+  const hasExt = dot > 0 && dot < name.length - 1;
+  const stem = hasExt ? name.slice(0, dot) : name;
+  const ext = hasExt ? name.slice(dot) : "";
+  const suffix = attempt === 0 ? " copy" : ` copy ${attempt + 1}`;
+  return `${stem}${suffix}${ext}`;
+}
 const hash = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
 const revision = (s: { mtimeMs: number; size: number }, h: string): FileRevision => ({ hash: h, modifiedAt: s.mtimeMs, size: s.size });
 
@@ -39,6 +64,105 @@ export class FileService {
   listDirectory(workspaceId: string, path = ".", cursor?: string) { return this.list(workspaceId, path, cursor); }
   readFile(workspaceId: string, path: string) { return this.read(workspaceId, path); }
   writeFile(workspaceId: string, path: string, content: string, expected: FileRevision) { return this.write(workspaceId, path, content, expected); }
+  async create(workspaceId: string, path: string, kind: "file" | "directory"): Promise<FileEntry> {
+    validateRelativePath(path);
+    const absolute = await this.resolveForCreate(workspaceId, path);
+    try {
+      await lstat(absolute);
+      throw new FileError("conflict", "A file or directory already exists at that path");
+    } catch (e) {
+      if (e instanceof FileError) throw e;
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw new FileError("io", "Failed to create path");
+    }
+    try {
+      if (kind === "directory") {
+        await mkdir(absolute, { recursive: false });
+        return { name: basename(path), kind: "directory", path, revision: null };
+      }
+      await writeFile(absolute, "", { flag: "wx" });
+      const s = await stat(absolute);
+      return { name: basename(path), kind: "file", path, revision: revision(s, hash(Buffer.from(""))) };
+    } catch (e) {
+      if (e instanceof FileError) throw e;
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new FileError("conflict", "A file or directory already exists at that path");
+      throw new FileError("io", "Failed to create path");
+    }
+  }
+  async rename(workspaceId: string, path: string, newPath: string): Promise<{ path: string }> {
+    validateRelativePath(path);
+    validateRelativePath(newPath);
+    if (path === newPath) throw new FileError("invalid-path", "Source and destination are the same");
+    const sourceAbsolute = await this.resolve(workspaceId, path);
+    await this.safeStat(sourceAbsolute);
+    // Prevent moving a directory into itself or one of its children.
+    if (newPath === path || newPath.startsWith(`${path}/`)) throw new FileError("invalid-path", "Cannot move a directory into itself");
+    const destAbsolute = await this.resolveForCreate(workspaceId, newPath);
+    try {
+      await lstat(destAbsolute);
+      throw new FileError("conflict", "A file or directory already exists at the destination");
+    } catch (e) {
+      if (e instanceof FileError) throw e;
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw new FileError("io", "Failed to rename path");
+    }
+    try {
+      await rename(sourceAbsolute, destAbsolute);
+    } catch {
+      throw new FileError("io", "Failed to rename path");
+    }
+    return { path: newPath };
+  }
+  async remove(workspaceId: string, path: string): Promise<{ path: string }> {
+    validateRelativePath(path);
+    const absolute = await this.resolve(workspaceId, path);
+    await this.safeStat(absolute);
+    try {
+      await rm(absolute, { recursive: true, force: false });
+    } catch {
+      throw new FileError("io", "Failed to delete path");
+    }
+    return { path };
+  }
+  async duplicate(workspaceId: string, path: string): Promise<{ path: string }> {
+    validateRelativePath(path);
+    const sourceAbsolute = await this.resolve(workspaceId, path);
+    const sourceStat = await this.safeStat(sourceAbsolute);
+    if (!sourceStat.isFile()) throw new FileError("not-file", "Only files can be duplicated");
+    if (sourceStat.size > this.maxBytes) throw new FileError("oversize", "File is too large to duplicate");
+    const parentRequestPath = dirname(path);
+    const parentAbsolute = await this.resolve(workspaceId, parentRequestPath);
+    const sourceName = basename(path);
+    let destName = "";
+    let destAbsolute = "";
+    let found = false;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const candidate = duplicateName(sourceName, attempt);
+      validateName(candidate);
+      const candidateAbsolute = join(parentAbsolute, candidate);
+      try {
+        await lstat(candidateAbsolute);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+          destName = candidate;
+          destAbsolute = candidateAbsolute;
+          found = true;
+          break;
+        }
+        throw new FileError("io", "Failed to duplicate file");
+      }
+    }
+    if (!found) throw new FileError("conflict", "Could not find an available duplicate name");
+    try {
+      const data = await readFile(sourceAbsolute);
+      if (data.includes(0)) throw new FileError("binary", "Binary files are not supported");
+      await writeFile(destAbsolute, data, { flag: "wx" });
+    } catch (e) {
+      if (e instanceof FileError) throw e;
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new FileError("conflict", "A file or directory already exists at the destination");
+      throw new FileError("io", "Failed to duplicate file");
+    }
+    const destRequestPath = parentRequestPath === "." ? destName : `${parentRequestPath}/${destName}`;
+    return { path: destRequestPath };
+  }
   async write(workspaceId: string, path: string, content: string, expected: FileRevision): Promise<FileWrite> {
     if (Buffer.byteLength(content) > this.maxBytes || content.includes("\0")) throw new FileError(content.includes("\0") ? "binary" : "oversize", "Content is not supported");
     const absolute = await this.resolveForWrite(workspaceId, path); let before: FileRevision | null = null;
@@ -49,6 +173,7 @@ export class FileService {
   }
   private async resolve(id: string, path: string) { try { return await this.workspaces.resolvePath(id, path); } catch (e) { if (e instanceof WorkspaceError) throw new FileError(e.code === "archived" ? "archived" : e.code === "outside-root" ? "outside-root" : e.code === "not-found" ? "not-found" : "invalid-path", e.message); throw e; } }
   private async resolveForWrite(id: string, path: string) { const parent = await this.resolve(id, dirname(path)); const absolute = join(parent, path.split(/[\\/]/).pop()!); try { const s = await lstat(absolute); if (s.isSymbolicLink()) throw new FileError("outside-root", "Symlinks are not writable"); } catch (e) { if (e instanceof FileError || (e as NodeJS.ErrnoException).code !== "ENOENT") throw e; } return absolute; }
+  private async resolveForCreate(id: string, path: string) { const parent = await this.resolve(id, dirname(path)); const name = basename(path); validateName(name); const absolute = join(parent, name); try { const s = await lstat(absolute); if (s.isSymbolicLink()) throw new FileError("outside-root", "Symlinks are not writable"); } catch (e) { if (e instanceof FileError || (e as NodeJS.ErrnoException).code !== "ENOENT") throw e; } return absolute; }
   private async safeStat(path: string) { try { const s = await lstat(path); if (s.isSymbolicLink()) throw new FileError("outside-root", "Symlinks are not allowed"); return s; } catch (e) { if (e instanceof FileError) throw e; throw new FileError("not-found", "Path does not exist"); } }
   private async current(path: string): Promise<FileRevision | null> { try { const s = await stat(path); const data = await readFile(path); return revision(s, hash(data)); } catch { return null; } }
 }
