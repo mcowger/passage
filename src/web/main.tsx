@@ -324,14 +324,17 @@ function App() {
 
   const openPaneTab = useCallback(
     (tab: PaneTab) => {
-      if (!layout) return;
       if ((tab.kind === "changes" || tab.kind === "diff") && workspace?.mainRepositoryRoot == null) return;
+      if (!layout) {
+        handleLayoutChange(createDefaultLayout(workspace?.id ?? "default", tab));
+        return;
+      }
       const firstGroup = getFirstTabGroup(layout.root);
       if (!firstGroup) return;
       const nextRoot = addTabToGroup(layout.root, firstGroup.id, tab);
       handleLayoutChange({ ...layout, root: nextRoot });
     },
-    [layout, handleLayoutChange, workspace?.mainRepositoryRoot]
+    [layout, handleLayoutChange, workspace?.mainRepositoryRoot, workspace?.id]
   );
 
   useEffect(() => {
@@ -773,9 +776,14 @@ function App() {
                 <button
                   className={`nav-tab ${activeTab === "terminal" ? "active" : ""}`}
                   onClick={() => {
-                    if (!selectedTerminalId && terminals[0]) setSelectedTerminalId(terminals[0].id);
-                    setActiveTab("terminal");
-                    if (terminals[0]) handleSelectTerminal(terminals[0].id);
+                    const target = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
+                    if (target) {
+                      setSelectedTerminalId(target.id);
+                      setActiveTab("terminal");
+                      handleSelectTerminal(target.id);
+                    } else {
+                      void createTerminal();
+                    }
                   }}
                 >
                   &gt;_ Terminal {terminals.length > 0 && <span className="tab-badge">{terminals.length}</span>}
