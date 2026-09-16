@@ -16,6 +16,17 @@ import {
   Trash2,
 } from "lucide-react";
 import { cn } from "../lib/utils.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog.tsx";
+import { buttonVariants } from "./ui/button.tsx";
 
 export type SidebarProps = {
   data: WorkspaceSnapshot;
@@ -57,6 +68,7 @@ export function Sidebar({
   onArchiveProject,
 }: SidebarProps) {
   const activeProjects = data.projects.filter((project) => !project.archivedAt);
+  const [pendingRemove, setPendingRemove] = useState<Project | null>(null);
   return (
     <aside className={`sidebar ${open ? "drawer-open" : ""}`} aria-label="Projects and workspaces">
       <div className="brand">
@@ -107,7 +119,7 @@ export function Sidebar({
             onSelectTerminal={onSelectTerminal}
             onManageWorkspace={onManageWorkspace}
             onDiscoverWorktrees={onDiscoverWorktrees}
-            onArchiveProject={onArchiveProject}
+            onRequestRemoveProject={onArchiveProject ? setPendingRemove : undefined}
           />
         ))}
       </div>
@@ -116,6 +128,28 @@ export function Sidebar({
         <span className="footer-status"><span className="connected-dot" aria-hidden="true" /> Connected</span>
         <span className="muted">v1.4.0</span>
       </footer>
+      <AlertDialog open={pendingRemove !== null} onOpenChange={(isOpen) => { if (!isOpen) setPendingRemove(null); }}>
+        <AlertDialogContent className="max-w-[440px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove &ldquo;{pendingRemove?.displayLabel}&rdquo;? This will not delete any files on disk.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: "destructive" })}
+              onClick={() => {
+                if (pendingRemove && onArchiveProject) onArchiveProject(pendingRemove.id);
+                setPendingRemove(null);
+              }}
+            >
+              Remove project
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </aside>
   );
 }
@@ -133,7 +167,7 @@ function ProjectRow({
   onSelectTerminal,
   onManageWorkspace,
   onDiscoverWorktrees,
-  onArchiveProject,
+  onRequestRemoveProject,
 }: {
   project: Project;
   workspaces: Workspace[];
@@ -147,7 +181,7 @@ function ProjectRow({
   onSelectTerminal: (id: string) => void;
   onManageWorkspace?: (workspace: Workspace) => void;
   onDiscoverWorktrees?: (projectId?: string) => void;
-  onArchiveProject?: (id: string) => void;
+  onRequestRemoveProject?: (project: Project) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const activeRows = workspaces.filter((workspace) => workspace.projectId === project.id && !workspace.archivedAt);
@@ -183,15 +217,13 @@ function ProjectRow({
             <FolderDown className="w-3 h-3" />
           </button>
         )}
-        {onArchiveProject && (
+        {onRequestRemoveProject && (
           <button
             type="button"
             className="opacity-0 group-hover/proj:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-danger transition-opacity ml-1"
             onClick={(e) => {
               e.stopPropagation();
-              if (confirm("Are you sure you want to remove this project? This will not delete any files on disk.")) {
-                onArchiveProject(project.id);
-              }
+              onRequestRemoveProject(project);
             }}
             title="Remove project"
           >
