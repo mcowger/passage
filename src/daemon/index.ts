@@ -13,6 +13,7 @@ import { createTerminalRoutes } from "./http/terminals.ts";
 import { MetadataRepositories, MetadataStore } from "./metadata/index.ts";
 import { IdempotencyCache } from "./replay/index.ts";
 import { WorkspaceService } from "./workspaces/service.ts";
+import { WorkspaceEventHub } from "./workspaces/events.ts";
 import { GitService } from "./workspaces/git.ts";
 import { FileService } from "./workspaces/files.ts";
 import { WorktreeService } from "./workspaces/worktrees.ts";
@@ -29,6 +30,8 @@ import {
   commandEnvelopeSchema,
   decodeBinaryFrame,
   opaqueIdSchema,
+  workspaceSubscriptionPayloadSchema,
+  workspaceTargetPayloadSchema,
   type Acknowledgement,
   type CommandEnvelope,
   type ProtocolError,
@@ -42,6 +45,7 @@ import swScript from "../web/sw.js" with { type: "text" };
 const DEFAULT_PORT = 3333;
 const MAX_WEBSOCKET_COMMAND_BYTES = 64 * 1024;
 const MAX_AGENT_SUBSCRIPTIONS_PER_SOCKET = 32;
+const MAX_WORKSPACE_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_INFLIGHT_COMMANDS = 256;
 const UNKNOWN_REQUEST_ID = "unknown";
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
@@ -60,6 +64,7 @@ const agentService = new AgentService(repositories, {
   sessionsRoot: process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(metadataPath), "sessions"),
 });
 const agentEvents = new AgentEventHub(agentService);
+const workspaceEvents = new WorkspaceEventHub();
 const responses = new IdempotencyCache<{ fingerprint: string; response: string }>();
 const inflightResponses = new Map<string, { fingerprint: string; response: Promise<string> }>();
 const app = new Hono();
@@ -70,7 +75,7 @@ app.get("/api/daemon/snapshot", (context) => context.json({
 }));
 app.route("/", createWorkspaceRoutes(workspaceService));
 app.route("/", createGitRoutes(workspaceService, gitService));
-app.route("/", createFileRoutes(fileService));
+app.route("/", createFileRoutes(fileService, workspaceEvents));
 app.route("/", createWorktreeRoutes(worktreeService));
 app.route("/", createTerminalRoutes(terminalManager));
 app.route("/", createAgentRoutes(agentService));
@@ -81,17 +86,63 @@ function protocolError(requestId: string, code: string, message: string): Protoc
 }
 
 type SocketData =
-  | { kind: "agent"; subscriptions: Map<string, () => boolean> }
+  | { kind: "agent"; subscriptions: Map<string, () => boolean>; workspaceSubscriptions: Map<string, () => boolean> }
   | { kind: "terminal"; terminalId: string; clientId: string };
 
 function sendSocketJson(socket: Bun.ServerWebSocket<SocketData>, value: unknown): void {
   if (socket.sendText(JSON.stringify(value)) <= 0) socket.close(1013, "client cannot receive events");
 }
 
+async function handleWorkspaceCommand(command: CommandEnvelope, socket: Bun.ServerWebSocket<SocketData>): Promise<ProtocolResponse> {
+  try {
+    if (command.type === "subscribe") {
+      const input = workspaceSubscriptionPayloadSchema.parse(command.payload);
+      socket.data.workspaceSubscriptions.get(input.workspaceId)?.();
+      if (!socket.data.workspaceSubscriptions.has(input.workspaceId) && socket.data.workspaceSubscriptions.size >= MAX_WORKSPACE_SUBSCRIPTIONS_PER_SOCKET) {
+        return protocolError(command.requestId, "subscription-limit", "Maximum workspace subscriptions reached");
+      }
+      const subscription = workspaceEvents.subscribe(input.workspaceId, input.afterSequence, (event) => sendSocketJson(socket, event));
+      socket.data.workspaceSubscriptions.set(input.workspaceId, subscription.unsubscribe);
+      if (subscription.replay.kind === "replay") {
+        for (const event of subscription.replay.events) sendSocketJson(socket, event);
+      } else {
+        sendSocketJson(socket, {
+          version: PROTOCOL_VERSION,
+          stream: "workspace",
+          subjectId: input.workspaceId,
+          kind: "snapshot-required",
+          metadata: {
+            snapshotUrl: `/api/workspaces/${input.workspaceId}/files?path=.`,
+            sequence: String(workspaceEvents.currentSequence(input.workspaceId)),
+          },
+        });
+      }
+      subscription.activate();
+    } else if (command.type === "unsubscribe") {
+      const input = workspaceTargetPayloadSchema.parse(command.payload);
+      socket.data.workspaceSubscriptions.get(input.workspaceId)?.();
+      socket.data.workspaceSubscriptions.delete(input.workspaceId);
+    } else {
+      return protocolError(command.requestId, "unsupported-command", "Command is not implemented");
+    }
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message.slice(0, 512) : "Workspace command failed";
+    return protocolError(command.requestId, "workspace-command-failed", message);
+  }
+  return {
+    version: PROTOCOL_VERSION,
+    requestId: command.requestId,
+    ok: true,
+  } satisfies Acknowledgement;
+}
+
 async function handleCommand(command: CommandEnvelope, socket: Bun.ServerWebSocket<SocketData>): Promise<ProtocolResponse> {
   if (socket.data.kind !== "agent") return protocolError(command.requestId, "invalid-channel", "Terminal sockets do not accept agent commands");
   if (command.channel === "daemon" && command.type === "ping") {
     return { version: PROTOCOL_VERSION, requestId: command.requestId, ok: true } satisfies Acknowledgement;
+  }
+  if (command.channel === "workspace") {
+    return handleWorkspaceCommand(command, socket);
   }
   if (command.channel !== "pi") {
     return protocolError(command.requestId, "unsupported-command", "Command is not implemented");
@@ -191,7 +242,7 @@ export const server = Bun.serve<SocketData>({
   fetch(request, server) {
     const url = new URL(request.url);
     if (url.pathname === "/ws") {
-      return server.upgrade(request, { data: { kind: "agent", subscriptions: new Map() } })
+      return server.upgrade(request, { data: { kind: "agent", subscriptions: new Map(), workspaceSubscriptions: new Map() } })
         ? undefined
         : new Response("WebSocket upgrade failed", { status: 400 });
     }
@@ -310,6 +361,8 @@ export const server = Bun.serve<SocketData>({
       } else {
         for (const unsubscribe of socket.data.subscriptions.values()) unsubscribe();
         socket.data.subscriptions.clear();
+        for (const unsubscribe of socket.data.workspaceSubscriptions.values()) unsubscribe();
+        socket.data.workspaceSubscriptions.clear();
       }
     },
   },
@@ -323,6 +376,7 @@ async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   agentEvents.dispose();
+  workspaceEvents.dispose();
   await agentService.shutdown();
   await server.stop(true);
   metadata.close();

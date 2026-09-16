@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { FileEntry, FileListing } from "../../shared/domain/files.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { friendlyApiError } from "../api.ts";
+import { subscribeWorkspace } from "../workspaceSocket.ts";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { Button } from "./ui/button.tsx";
 import { Input } from "./ui/input.tsx";
@@ -190,6 +191,40 @@ export function ExplorerPanel({
     setPendingDelete(null);
     void loadDirectory(".");
   }, [workspaceId, loadDirectory]);
+
+  // Live invalidation from other clients: the mutating caller already
+  // reloaded inline, so WS echoes (own or remote) are debounced into a
+  // single refresh of the currently expanded directories. Reconnects,
+  // missed sequences, and mobile suspension reconcile immediately.
+  const loadDirectoryRef = useRef(loadDirectory);
+  loadDirectoryRef.current = loadDirectory;
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+  useEffect(() => {
+    let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
+    const reloadExpanded = () => {
+      for (const dir of Array.from(expandedRef.current)) {
+        void loadDirectoryRef.current(dir);
+      }
+    };
+    const subscription = subscribeWorkspace(
+      workspaceId,
+      () => {
+        if (invalidateTimer) clearTimeout(invalidateTimer);
+        invalidateTimer = setTimeout(() => {
+          invalidateTimer = undefined;
+          reloadExpanded();
+        }, 750);
+      },
+      async () => {
+        reloadExpanded();
+      },
+    );
+    return () => {
+      if (invalidateTimer) clearTimeout(invalidateTimer);
+      subscription.close();
+    };
+  }, [workspaceId]);
 
   const toggleExpand = (dirPath: string) => {
     setExpanded((prev) => {

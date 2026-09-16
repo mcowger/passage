@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { MetadataRepositories, MetadataStore } from "../metadata/index.ts";
 import { WorkspaceService } from "../workspaces/service.ts";
 import { FileService } from "../workspaces/files.ts";
+import { WorkspaceEventHub } from "../workspaces/events.ts";
+import type { EventEnvelope } from "../../shared/protocol/index.ts";
 import { createFileRoutes } from "./files.ts";
 import { projectSchema, workspaceSchema } from "../../shared/domain/workspaces.ts";
 
@@ -20,7 +22,9 @@ async function fixture() {
   const repos = new MetadataRepositories(store.db);
   const workspaces = new WorkspaceService(repos);
   const files = new FileService(workspaces);
-  const app = createFileRoutes(files);
+  const events = new WorkspaceEventHub();
+  const received: EventEnvelope[] = [];
+  const app = createFileRoutes(files, events);
 
   const project = projectSchema.parse({
     id: "prj_files",
@@ -49,7 +53,10 @@ async function fixture() {
   });
   repos.workspaces.save(workspace);
 
-  return { root, store, repos, app, workspace };
+  const subscription = events.subscribe("wsp_files", 0, (e) => received.push(e));
+  subscription.activate();
+
+  return { root, store, repos, app, workspace, events, received };
 }
 
 const request = (path: string, init?: RequestInit) => new Request(`http://localhost${path}`, init);
@@ -166,6 +173,38 @@ describe("files HTTP API", () => {
 
     const traversal = await post("create", { path: "../escape.txt", kind: "file" });
     expect(traversal.status).toBe(400);
+
+    f.store.close();
+  });
+
+  test("emits files-changed invalidations on every mutation", async () => {
+    const f = await fixture();
+    const post = (suffix: string, body: unknown) => f.app.fetch(
+      request(`/api/workspaces/${f.workspace.id}/files/${suffix}`, { method: "POST", body: JSON.stringify(body) }),
+    );
+    const reasons = () => f.received.map((e) => (e.payload as { reason: string }).reason);
+
+    await post("create", { path: "a.txt", kind: "file" });
+    await writeFile(join(f.root, "a.txt"), "v1");
+    const read = await (await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files/read?path=a.txt`))).json() as {
+      revision: { hash: string; modifiedAt: number; size: number };
+    };
+    await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files`, {
+      method: "PUT",
+      body: JSON.stringify({ path: "a.txt", content: "v2", expected: read.revision }),
+    }));
+    await post("duplicate", { path: "a.txt" });
+    await post("rename", { path: "a.txt", newPath: "b.txt" });
+    await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files?path=b.txt`, { method: "DELETE" }));
+    // Reads and failed mutations emit nothing.
+    await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files?path=.`));
+    await post("create", { path: "../escape.txt", kind: "file" });
+
+    expect(reasons()).toEqual(["create", "write", "duplicate", "rename", "delete"]);
+    expect(f.received.every((e) => e.stream === "workspace" && e.subjectId === f.workspace.id && e.type === "files-changed")).toBe(true);
+    expect(f.received.map((e) => e.sequence)).toEqual([1, 2, 3, 4, 5]);
+    const rename = f.received[3].payload as { path?: string; previousPath?: string };
+    expect(rename).toMatchObject({ path: "b.txt", previousPath: "a.txt" });
 
     f.store.close();
   });
