@@ -37,6 +37,7 @@ export function WorkspaceDetailsModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removeError, setRemoveError] = useState("");
   const [forceRemove, setForceRemove] = useState(false);
 
   const handleRename = async (e: React.FormEvent) => {
@@ -90,13 +91,13 @@ export function WorkspaceDetailsModal({
   const handleRemoveWorktree = async () => {
     try {
       setBusy(true);
-      setError("");
+      setRemoveError("");
       await api.removeWorktree(workspace.id, forceRemove);
       setConfirmRemove(false);
       await onRefresh();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove worktree");
+      setRemoveError(err instanceof Error ? err.message : "Failed to remove worktree");
     } finally {
       setBusy(false);
     }
@@ -193,7 +194,7 @@ export function WorkspaceDetailsModal({
               <Button
                 size="xs"
                 variant="destructive"
-                onClick={() => setConfirmRemove(true)}
+                onClick={() => { setRemoveError(""); setConfirmRemove(true); }}}
                 disabled={busy}
               >
                 Delete Worktree
@@ -246,6 +247,11 @@ export function WorkspaceDetailsModal({
             <p className="text-xs text-muted-foreground my-2">
               Are you sure you want to permanently delete the worktree at <code className="font-mono text-xs">{workspace.cwd}</code> from disk?
             </p>
+            {removeError && (
+              <Alert variant="destructive" className="my-2">
+                <AlertDescription className="text-xs">{removeError}</AlertDescription>
+              </Alert>
+            )}
             <div className="flex items-center gap-2 my-2">
               <Checkbox
                 id="force-remove-worktree"
