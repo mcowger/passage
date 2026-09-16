@@ -1,6 +1,27 @@
 import { describe, expect, test } from "bun:test";
-import { formatDuration, resolveActiveQuestionRequest } from "./AgentPanel.tsx";
-import type { AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
+import { formatDuration, resolveActiveQuestionRequest, resolveCurrentModel } from "./AgentPanel.tsx";
+import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
+
+const modelOptions: AgentCapabilities["models"] = [
+  {
+    provider: "test",
+    id: "old-model",
+    name: "Old model",
+    api: "test",
+    input: ["text"],
+    authenticated: true,
+    supportedThinkingLevels: [],
+  },
+  {
+    provider: "test",
+    id: "new-model",
+    name: "New model",
+    api: "test",
+    input: ["text"],
+    authenticated: true,
+    supportedThinkingLevels: [],
+  },
+];
 
 describe("formatDuration", () => {
   test("formats sub-minute durations in seconds with one decimal", () => {
@@ -15,6 +36,22 @@ describe("formatDuration", () => {
     expect(formatDuration(65)).toBe("1m 05s");
     expect(formatDuration(125)).toBe("2m 05s");
     expect(formatDuration(365)).toBe("6m 05s");
+  });
+});
+
+describe("resolveCurrentModel", () => {
+  test("prefers the persisted preference over stale history", () => {
+    expect(resolveCurrentModel("test/new-model", { provider: "test", modelId: "old-model" }, modelOptions)).toMatchObject({
+      provider: "test",
+      id: "new-model",
+    });
+  });
+
+  test("uses history when no model preference has been persisted", () => {
+    expect(resolveCurrentModel(null, { provider: "test", modelId: "old-model" }, modelOptions)).toMatchObject({
+      provider: "test",
+      id: "old-model",
+    });
   });
 });
 

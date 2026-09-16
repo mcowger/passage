@@ -29,6 +29,7 @@ export type AgentPanelProps = {
   error?: string;
   api: WorkspaceApi;
   onRefresh: () => Promise<void>;
+  onModelChanged?: (agent: AgentSummary) => void;
   onArchive: () => Promise<void>;
   onOptimisticMessage?: (message: string) => void;
   /** Offline transcript override for rendering verification (never live state). */
@@ -162,6 +163,30 @@ export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: Tim
   return null;
 }
 
+export function resolveCurrentModel(
+  modelPreference: string | null,
+  historyModel: AgentHistory["currentModel"],
+  modelOptions: AgentCapabilities["models"],
+) {
+  const findModel = (provider: string, modelId: string) =>
+    modelOptions.find((option) => option.provider === provider && option.id === modelId) ?? {
+      name: modelId,
+      id: modelId,
+      provider,
+    };
+
+  if (modelPreference) {
+    const separator = modelPreference.indexOf("/");
+    if (separator >= 0) {
+      return findModel(modelPreference.slice(0, separator), modelPreference.slice(separator + 1));
+    }
+    const preferred = modelOptions.find((option) => option.id === modelPreference);
+    if (preferred) return preferred;
+  }
+
+  return historyModel ? findModel(historyModel.provider, historyModel.modelId) : undefined;
+}
+
 export function AgentPanel({
   agent,
   history,
@@ -170,6 +195,7 @@ export function AgentPanel({
   error,
   api,
   onRefresh,
+  onModelChanged,
   onArchive: _onArchive,
   onOptimisticMessage,
   previewHistory,
@@ -257,29 +283,8 @@ export function AgentPanel({
     [capabilities?.models]
   );
   const currentModel = useMemo(
-    () =>
-      effectiveHistory?.currentModel
-        ? (modelOptions.find(
-            (option) =>
-              option.provider === effectiveHistory.currentModel!.provider &&
-              option.id === effectiveHistory.currentModel!.modelId
-          ) ?? {
-            name: effectiveHistory.currentModel.modelId,
-            id: effectiveHistory.currentModel.modelId,
-            provider: effectiveHistory.currentModel.provider,
-          })
-        : modelOptions.find(
-            (option) =>
-              `${option.provider}/${option.id}` === agent.modelPreference ||
-              option.id === agent.modelPreference
-          )
-        ? modelOptions.find(
-            (option) =>
-              `${option.provider}/${option.id}` === agent.modelPreference ||
-              option.id === agent.modelPreference
-          )!
-        : undefined,
-    [effectiveHistory?.currentModel, modelOptions, agent.modelPreference]
+    () => resolveCurrentModel(agent.modelPreference, effectiveHistory?.currentModel, modelOptions),
+    [agent.modelPreference, effectiveHistory?.currentModel, modelOptions]
   );
   const currentModelDisplayName = currentModel?.name ?? (model.includes("/") ? model.split("/")[1] : model);
 
@@ -353,6 +358,7 @@ export function AgentPanel({
         concise={concise}
         toggleConcise={toggleConcise}
         onRefresh={onRefresh}
+        onModelChanged={onModelChanged}
         onOptimisticMessage={onOptimisticMessage}
         currentModel={currentModel}
         currentModelDisplayName={currentModelDisplayName}
@@ -411,6 +417,7 @@ type AgentComposerProps = {
   concise: boolean;
   toggleConcise: () => void;
   onRefresh: () => Promise<void>;
+  onModelChanged?: (agent: AgentSummary) => void;
   onOptimisticMessage?: (message: string) => void;
   currentModel?: AgentCapabilities["models"][number] | { name: string; id: string; provider: string; contextWindow?: number };
   currentModelDisplayName: string;
@@ -437,6 +444,7 @@ function AgentComposerInner({
   concise,
   toggleConcise,
   onRefresh,
+  onModelChanged,
   onOptimisticMessage,
   currentModel,
   currentModelDisplayName,
@@ -742,7 +750,10 @@ function AgentComposerInner({
               currentThinking={thinking}
               capabilities={capabilities}
               onSelectModel={async (provider, modelId) => {
-                await run(() => api.setModel(agentId, provider, modelId));
+                await run(async () => {
+                  const updatedAgent = await api.setModel(agentId, provider, modelId);
+                  onModelChanged?.(updatedAgent);
+                }, false, false);
               }}
               onSelectThinking={async (level) => {
                 await run(() => api.setThinking(agentId, level));

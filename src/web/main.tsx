@@ -529,6 +529,9 @@ function App() {
             error={agentError}
             api={api}
             onRefresh={() => loadAgent(currentAgent.id)}
+            onModelChanged={(updatedAgent) => {
+              setAgents((current) => current.map((agent) => agent.id === updatedAgent.id ? updatedAgent : agent));
+            }}
             onArchive={archiveSelectedAgent}
             previewHistory={previewEnabled ? previewHistory ?? undefined : undefined}
             onOptimisticMessage={(message) => {

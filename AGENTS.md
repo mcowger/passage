@@ -10,8 +10,8 @@
 
 Passage is a single-user, trusted-LAN coding environment. A persistent Bun daemon owns filesystem and Git access, worktrees, SQLite metadata, PTYs, Pi processes, HTTP, and WebSockets. The React PWA is an attachable view; closing or suspending a browser must not stop daemon-owned work.
 
-- Use Bun end-to-end. Bun is pinned to `1.4.0`; initial host support is Linux x64.
-- Pi is the only agent runtime. Pin behavior and fixtures to the verified Pi CLI (`0.84.3`); never rely on `latest` wire documentation without checking the pinned release.
+- Use Bun end-to-end. Initial host support is Linux x64.
+- Pi is the only agent runtime. Pin behavior and fixtures to the verified Pi CLI (`0.85.1`); never rely on `latest` wire documentation without checking the pinned release.
 - Do not add Node, a Node fallback/sidecar, Vite, a direct Pi SDK integration, ACP, a provider abstraction, or multi-provider support.
 - Keep one Bun package and the shallow `src/daemon`, `src/shared`, and `src/web` ownership model. Do not introduce premature packages or broad framework layers.
 
@@ -41,9 +41,7 @@ Passage is a single-user, trusted-LAN coding environment. A persistent Bun daemo
 - Theme tokens and color variables are defined in `src/web/styles.css` under `@theme inline`. Prefer shadcn components and Tailwind utility classes for interactive controls and modals (buttons, inputs, dialogs, badges, menus), while retaining custom container styling for CodeMirror, Xterm, and split pane layouts.
 - Keep tool grouping presentation-only: it cannot alter Pi history, cross user messages, hide errors, or remove tool boundaries. Unknown tools retain a safe generic renderer.
 - Mobile is a focused single-panel experience, not a compressed desktop split layout. Preserve desktop layouts while presenting drawers and full-screen artifact destinations on narrow screens.
-- Meet the UI specification's accessibility requirements: WCAG AA contrast, text/icon alternatives to color-only state, visible focus, deliberate focus order, and keyboard/context-menu alternatives for every drag-based pane action.
 - **Use `agent-browser` for interactive UI verification whenever changing browser-facing behavior.** Run the development server, exercise the affected user flow in `agent-browser`, and verify the relevant desktop layout plus mobile behavior when responsive code is affected. Check loading/error/reconnect states as applicable and verify keyboard-accessible controls for interaction changes. Do not consider a UI change complete based solely on unit tests, typechecks, or static inspection.
-- Playwright coverage is a design requirement for mature browser tests, but is not currently configured. Do not invent a Playwright command; add it only when the supporting tooling and test scope are introduced.
 
 ## Validation commands
 
@@ -58,3 +56,8 @@ Run focused checks first, then the relevant integration gate. `bun run test:gate
 
 - Never run live tests against real AI APIs or external model providers unless the user gives explicit permission in the current turn.
 - Always use the local NullModel test double for test runs. Do not set `PASSAGE_PI_LIVE=real` or `PASSAGE_PI_USE_REAL=1` without explicit turn-by-turn permission.
+- Run Cora reviews only when the user explicitly requests one.
+
+## Dev Server
+
+The dev server (bun run dev) restarts on its own when code changes, and performs an automated reload in the browser.  You do not need to manually restart a dev server.  If one is already running, there is no need to kill it  yourself.
