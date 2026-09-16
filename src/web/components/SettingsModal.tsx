@@ -61,10 +61,12 @@ export function SettingsModal({
   const [newPath, setNewPath] = useState("");
   const [newScope, setNewScope] = useState<"global" | "project">("global");
   const [newProjectId, setNewProjectId] = useState("");
+  const [saveError, setSaveError] = useState("");
 
   React.useEffect(() => {
     setCurrentSettings(settings);
     setNotificationStatus(getNotificationPermission());
+    setSaveError("");
   }, [settings, open]);
 
   React.useEffect(() => {
@@ -91,9 +93,12 @@ export function SettingsModal({
 
   const handleSave = async () => {
     setBusy(true);
+    setSaveError("");
     try {
       await onSaveSettings(currentSettings);
       onClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
       setBusy(false);
     }
@@ -248,6 +253,12 @@ export function SettingsModal({
               }
             />
           </label>
+
+          {saveError && (
+            <Alert variant="destructive">
+              <AlertDescription className="text-xs">{saveError}</AlertDescription>
+            </Alert>
+          )}
 
           {api && (
             <section className="flex flex-col gap-2 border-t border-border/50 pt-3" aria-label="Worktree locations">
