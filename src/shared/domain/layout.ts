@@ -64,6 +64,25 @@ export const workspaceLayoutSchema = z.object({
 });
 export type WorkspaceLayout = z.infer<typeof workspaceLayoutSchema>;
 
+function shortId(): string {
+  try {
+    const c = (globalThis as unknown as { crypto?: Crypto }).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return c.randomUUID().slice(0, 8);
+    }
+    if (c && typeof c.getRandomValues === "function") {
+      const bytes = new Uint8Array(8);
+      c.getRandomValues(bytes);
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
+    }
+  } catch {}
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`.slice(0, 8);
+}
+
+function newNodeId(prefix: "group" | "split"): string {
+  return `${prefix}-${shortId()}`;
+}
+
 export function createDefaultLayout(workspaceId: string, initialTab?: PaneTab): WorkspaceLayout {
   const defaultTab: PaneTab = initialTab ?? {
     id: `overview-${workspaceId}`,
@@ -74,7 +93,7 @@ export function createDefaultLayout(workspaceId: string, initialTab?: PaneTab): 
     version: CURRENT_LAYOUT_SCHEMA_VERSION,
     root: {
       type: "tabs",
-      id: `group-${crypto.randomUUID().slice(0, 8)}`,
+      id: newNodeId("group"),
       tabs: [defaultTab],
       activeTabId: defaultTab.id,
     },
@@ -269,7 +288,7 @@ export function splitTabGroup(
 
   const newGroup: TabGroupNode = {
     type: "tabs",
-    id: `group-${crypto.randomUUID().slice(0, 8)}`,
+    id: newNodeId("group"),
     tabs: [newTab],
     activeTabId: newTab.id,
   };
@@ -280,7 +299,7 @@ export function splitTabGroup(
         const children = position === "before" ? [newGroup, node] : [node, newGroup];
         const newSplit: SplitNode = {
           type: "split",
-          id: `split-${crypto.randomUUID().slice(0, 8)}`,
+          id: newNodeId("split"),
           direction,
           sizes: [0.5, 0.5],
           children,
