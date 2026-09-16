@@ -194,7 +194,7 @@ export function WorkspaceDetailsModal({
               <Button
                 size="xs"
                 variant="destructive"
-                onClick={() => { setRemoveError(""); setConfirmRemove(true); }}}
+                onClick={() => { setRemoveError(""); setConfirmRemove(true); }}
                 disabled={busy}
               >
                 Delete Worktree
