@@ -1083,9 +1083,9 @@ function App() {
               <SelectTrigger className="w-full" aria-label="Target project">
                 <SelectValue placeholder="Select project" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" align="start" className="w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
                 {activeProjects.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>{item.displayLabel}</SelectItem>
+                  <SelectItem key={item.id} value={item.id}><span className="min-w-0 flex-1 truncate">{item.displayLabel}</span></SelectItem>
                 ))}
               </SelectContent>
             </Select>
