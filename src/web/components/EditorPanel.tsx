@@ -4,9 +4,7 @@ import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSp
 import { defaultHighlightStyle, syntaxHighlighting, bracketMatching, foldGutter } from "@codemirror/language";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { javascript } from "@codemirror/lang-javascript";
-import { json } from "@codemirror/lang-json";
-import { markdown } from "@codemirror/lang-markdown";
+import { getLanguageExtensionForPath } from "./editorLanguages.ts";
 import type { FileRead, FileRevision } from "../../shared/domain/files.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
@@ -35,25 +33,6 @@ export function EditorPanel({ workspaceId, filePath, api, onClose, onOpenDiff, t
   const [conflict, setConflict] = useState(false);
   const [saveError, setSaveError] = useState("");
 
-  const getLanguageExtension = (path: string) => {
-    const ext = path.split(".").pop()?.toLowerCase();
-    switch (ext) {
-      case "ts":
-      case "tsx":
-        return javascript({ typescript: true, jsx: true });
-      case "js":
-      case "jsx":
-        return javascript({ jsx: true });
-      case "json":
-      case "jsonc":
-        return json();
-      case "md":
-      case "markdown":
-        return markdown();
-      default:
-        return [];
-    }
-  };
 
   const loadFile = useCallback(async () => {
     setLoading(true);
@@ -81,7 +60,7 @@ export function EditorPanel({ workspaceId, filePath, api, onClose, onOpenDiff, t
             bracketMatching(),
             highlightActiveLine(),
             oneDark,
-            getLanguageExtension(filePath),
+            getLanguageExtensionForPath(filePath),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
                 const currentText = update.state.doc.toString();
