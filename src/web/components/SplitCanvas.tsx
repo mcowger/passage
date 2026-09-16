@@ -85,6 +85,8 @@ export function SplitCanvas({
     setContextMenu(null);
   }, [onLayoutChange, workspaceId]);
 
+  const canCloseTab = countTabs(layout.root) > 1;
+
   return (
     <div
       className="split-canvas-container"
@@ -100,6 +102,7 @@ export function SplitCanvas({
         onActivateTab={onActivateTab}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
+        canCloseTab={canCloseTab}
         onSplitRight={handleSplitRight}
         onSplitDown={handleSplitDown}
         onOpenContextMenu={(x, y, tabId, groupId) => setContextMenu({ x, y, tabId, groupId })}
@@ -131,13 +134,15 @@ export function SplitCanvas({
           >
             ⬒ Split Down (Ctrl+Alt+D)
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => handleCloseTab(contextMenu.tabId)}
-          >
-            ✕ Close Tab (Ctrl+Alt+W)
-          </button>
+          {canCloseTab && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => handleCloseTab(contextMenu.tabId)}
+            >
+              ✕ Close Tab (Ctrl+Alt+W)
+            </button>
+          )}
           <div className="menu-divider" />
           <button type="button" role="menuitem" onClick={handleResetLayout}>
             ↺ Reset Canvas Layout
@@ -146,6 +151,11 @@ export function SplitCanvas({
       )}
     </div>
   );
+}
+
+function countTabs(node: LayoutNode): number {
+  if (node.type === "tabs") return node.tabs.length;
+  return node.children.reduce((sum, child) => sum + countTabs(child), 0);
 }
 
 function findTabInNode(node: LayoutNode, tabId: string): PaneTab | null {
@@ -167,6 +177,7 @@ interface NodeRendererProps {
   onActivateTab?: (tab: PaneTab) => void;
   onSelectTab: (groupId: string, tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  canCloseTab: boolean;
   onSplitRight: (groupId: string, tab: PaneTab) => void;
   onSplitDown: (groupId: string, tab: PaneTab) => void;
   onOpenContextMenu: (x: number, y: number, tabId: string, groupId: string) => void;
@@ -293,6 +304,7 @@ function TabGroupRenderer({
   onSplitRight,
   onSplitDown,
   onOpenContextMenu,
+  canCloseTab,
 }: TabGroupRendererProps) {
   const activeTab =
     group.tabs.find((t) => t.id === group.activeTabId) ?? group.tabs[0];
@@ -339,7 +351,8 @@ function TabGroupRenderer({
               >
                 <span className="canvas-tab-icon">{getTabIcon(tab.kind)}</span>
                 <span className="canvas-tab-title">{tab.title}</span>
-                <button
+                {canCloseTab && (
+                  <button
                     type="button"
                     className="canvas-tab-close"
                     title="Close tab"
@@ -351,6 +364,7 @@ function TabGroupRenderer({
                   >
                     ×
                   </button>
+                )}
               </div>
             );
           })}
