@@ -13,6 +13,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog.tsx";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select.tsx";
+import { Switch } from "./ui/switch.tsx";
+import { RadioGroup, RadioGroupItem } from "./ui/radio-group.tsx";
+import { Label } from "./ui/label.tsx";
+import { Alert, AlertDescription } from "./ui/alert.tsx";
 
 export interface SettingsModalProps {
   open: boolean;
@@ -145,63 +156,76 @@ export function SettingsModal({
         </DialogHeader>
 
         <div className="flex flex-col gap-4 py-2">
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            <span>Color Theme</span>
-            <select
-              className="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="settings-theme">Color Theme</Label>
+            <Select
               value={currentSettings.themeId}
-              onChange={(e) => setCurrentSettings({ ...currentSettings, themeId: e.target.value })}
+              onValueChange={(value) => setCurrentSettings({ ...currentSettings, themeId: value })}
             >
-              {themes.map((theme) => (
-                <option key={theme.id} value={theme.id}>
-                  {theme.name} ({theme.mode})
-                </option>
-              ))}
-            </select>
-          </label>
+              <SelectTrigger id="settings-theme" className="w-full">
+                <SelectValue placeholder="Select a theme" />
+              </SelectTrigger>
+              <SelectContent>
+                {themes.map((theme) => (
+                  <SelectItem key={theme.id} value={theme.id}>
+                    {theme.name} ({theme.mode})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            <span>Font Family</span>
-            <select
-              className="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="settings-font">Font Family</Label>
+            <Select
               value={currentSettings.fontId}
-              onChange={(e) => setCurrentSettings({ ...currentSettings, fontId: e.target.value })}
+              onValueChange={(value) => setCurrentSettings({ ...currentSettings, fontId: value })}
             >
-              {fonts.map((font) => (
-                <option key={font.id} value={font.id}>
-                  {font.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              <SelectTrigger id="settings-font" className="w-full">
+                <SelectValue placeholder="Select a font" />
+              </SelectTrigger>
+              <SelectContent>
+                {fonts.map((font) => (
+                  <SelectItem key={font.id} value={font.id}>
+                    {font.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            <span>Agent Activity Detail</span>
-            <select
-              className="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="settings-activity">Agent Activity Detail</Label>
+            <Select
               value={currentSettings.agentActivityDetail}
-              onChange={(e) =>
+              onValueChange={(value) =>
                 setCurrentSettings({
                   ...currentSettings,
-                  agentActivityDetail: e.target.value as "concise" | "detailed",
+                  agentActivityDetail: value as "concise" | "detailed",
                 })
               }
             >
-              <option value="concise">Concise (Compact activity badges)</option>
-              <option value="detailed">Detailed (Full tool inputs and outputs)</option>
-            </select>
-          </label>
+              <SelectTrigger id="settings-activity" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="concise">Concise (Compact activity badges)</SelectItem>
+                <SelectItem value="detailed">Detailed (Full tool inputs and outputs)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
           <div className="flex flex-col gap-1">
-            <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-              <input
-                type="checkbox"
-                className="rounded border-input text-primary focus:ring-ring"
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="settings-notifications" className="text-sm font-medium">
+                Browser Notifications on Agent Completion
+              </Label>
+              <Switch
+                id="settings-notifications"
                 checked={currentSettings.notificationsEnabled}
-                onChange={(e) => void handleToggleNotifications(e.target.checked)}
+                onCheckedChange={(checked) => void handleToggleNotifications(checked)}
               />
-              <span>Browser Notifications on Agent Completion</span>
-            </label>
+            </div>
             <small className="text-xs text-muted-foreground">
               Permission state: <code className="font-mono">{notificationStatus}</code>. Notifications only fire when tab is inactive.
             </small>
@@ -230,9 +254,9 @@ export function SettingsModal({
                 Named directories where new Git worktrees are created. Global locations work for every project.
               </p>
               {locationError && (
-                <div className="p-2 text-xs bg-destructive/10 border border-destructive/20 text-destructive rounded" role="alert">
-                  {locationError}
-                </div>
+                <Alert variant="destructive">
+                  <AlertDescription className="text-xs">{locationError}</AlertDescription>
+                </Alert>
               )}
               {locations.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No locations configured yet.</p>
@@ -254,16 +278,19 @@ export function SettingsModal({
                           {location.configuredRootPath}
                         </code>
                       </div>
-                      <label className="flex items-center gap-1.5 shrink-0 cursor-pointer text-muted-foreground">
-                        <input
-                          type="checkbox"
+                      <div className="flex items-center gap-1.5 shrink-0 text-muted-foreground">
+                        <Switch
+                          id={`location-enabled-${location.id}`}
                           checked={location.enabled}
                           disabled={locationBusy}
-                          onChange={() => void handleToggleLocation(location)}
+                          onCheckedChange={() => void handleToggleLocation(location)}
                           aria-label={`${location.enabled ? "Disable" : "Enable"} ${location.displayLabel}`}
+                          size="sm"
                         />
-                        Enabled
-                      </label>
+                        <Label htmlFor={`location-enabled-${location.id}`} className="text-xs font-normal">
+                          Enabled
+                        </Label>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -284,25 +311,32 @@ export function SettingsModal({
                   onChange={(e) => setNewPath(e.target.value)}
                 />
                 <div className="flex items-center gap-3 text-xs">
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="radio" name="settings-location-scope" checked={newScope === "global"} onChange={() => setNewScope("global")} />
-                    Global
-                  </label>
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="radio" name="settings-location-scope" checked={newScope === "project"} onChange={() => setNewScope("project")} />
-                    Project
-                  </label>
+                  <RadioGroup
+                    value={newScope}
+                    onValueChange={(value) => setNewScope(value as "global" | "project")}
+                    className="flex items-center gap-3"
+                    aria-label="Location scope"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <RadioGroupItem id="settings-scope-global" value="global" />
+                      <Label htmlFor="settings-scope-global" className="text-xs font-normal cursor-pointer">Global</Label>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <RadioGroupItem id="settings-scope-project" value="project" />
+                      <Label htmlFor="settings-scope-project" className="text-xs font-normal cursor-pointer">Project</Label>
+                    </div>
+                  </RadioGroup>
                   {newScope === "project" && (
-                    <select
-                      className="rounded-md border border-input bg-background px-2 py-1 text-xs flex-1"
-                      value={newProjectId}
-                      onChange={(e) => setNewProjectId(e.target.value)}
-                      aria-label="Project for location"
-                    >
-                      {projects.filter((p) => !p.archivedAt).map((p) => (
-                        <option key={p.id} value={p.id}>{p.displayLabel}</option>
-                      ))}
-                    </select>
+                    <Select value={newProjectId} onValueChange={setNewProjectId}>
+                      <SelectTrigger className="flex-1 h-8 text-xs" aria-label="Project for location">
+                        <SelectValue placeholder="Select project" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {projects.filter((p) => !p.archivedAt).map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{p.displayLabel}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   )}
                 </div>
                 <Button type="submit" size="xs" className="self-start" disabled={locationBusy}>
