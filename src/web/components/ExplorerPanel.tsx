@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import fuzzysort from "fuzzysort";
 import { toast } from "sonner";
 import type { FileEntry, FileListing } from "../../shared/domain/files.ts";
@@ -513,10 +513,16 @@ export function ExplorerPanel({
 
   const renderTree = (dirPath: string, level = 0) => {
     const dirState = dirMap.get(dirPath);
-    if (!dirState && expanded.has(dirPath)) {
+    if (!dirState) {
+      if (expanded.has(dirPath)) {
+        return (
+          <div className="explorer-subtree" style={{ paddingLeft: level > 0 ? 14 : 0 }}>
+            <div className="muted empty-inline">Loading...</div>
+          </div>
+        );
+      }
       return null;
     }
-    if (!dirState) return null;
 
     let entries = dirState.entries;
     const trimmedFilter = filter.trim();
@@ -529,6 +535,12 @@ export function ExplorerPanel({
 
     return (
       <div className="explorer-subtree" style={{ paddingLeft: level > 0 ? 14 : 0 }}>
+        {level > 0 && entries.length === 0 && dirState.loading && (
+          <div className="muted empty-inline">Loading...</div>
+        )}
+        {level > 0 && entries.length === 0 && !dirState.loading && !filter && (
+          <div className="muted empty-inline">Empty folder.</div>
+        )}
         {visibleEntries.map((entry) => {
           const isDir = entry.kind === "directory";
           const isExpanded = expanded.has(entry.path);
@@ -537,7 +549,8 @@ export function ExplorerPanel({
 
           if (isDir) {
             return (
-              <ContextMenu key={entry.path}>
+              <Fragment key={entry.path}>
+              <ContextMenu>
                 <ContextMenuTrigger asChild>
                   <div className={`explorer-row group ${isSelected ? "selected" : ""}`}>
                     <button
@@ -557,6 +570,8 @@ export function ExplorerPanel({
                   {renderRowMenuItems(entry)}
                 </ContextMenuContent>
               </ContextMenu>
+              {isExpanded && renderTree(entry.path, level + 1)}
+              </Fragment>
             );
           }
 
