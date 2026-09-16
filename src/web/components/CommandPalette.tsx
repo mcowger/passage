@@ -226,7 +226,7 @@ export function CommandPalette({
       description="Type a command, search views, agents, workspaces..."
     >
       <CommandInput
-        placeholder="Type a command, search views, agents, workspaces... (Esc to close)"
+        placeholder="Search commands, views, agents..."
         value={query}
         onValueChange={setQuery}
       />
