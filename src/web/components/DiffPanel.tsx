@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { DiffHunk, GitDiff } from "../../shared/domain/git.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
+import { Alert, AlertDescription } from "./ui/alert.tsx";
 
 type DiffProps = {
   workspaceId: string;
@@ -129,7 +130,7 @@ export function DiffPanel({ workspaceId, initialPath, api, onOpenFile, onClose }
         </div>
       )}
 
-      {error && <div className="alert panel-alert">{error}</div>}
+      {error && <Alert variant="destructive" className="panel-alert"><AlertDescription>{error}</AlertDescription></Alert>}
 
       <div className="diff-content-list">
         {loading && diffs.length === 0 && <div className="muted empty-inline">Computing diff...</div>}

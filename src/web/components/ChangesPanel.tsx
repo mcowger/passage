@@ -4,6 +4,7 @@ import type { WorkspaceApi } from "../api.ts";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { Button } from "./ui/button.tsx";
 import { Badge } from "./ui/badge.tsx";
+import { Alert, AlertDescription } from "./ui/alert.tsx";
 
 type ChangesProps = {
   workspaceId: string;
@@ -113,7 +114,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
         </button>
       </div>
 
-      {error && <div className="alert panel-alert">{error}</div>}
+      {error && <Alert variant="destructive" className="panel-alert"><AlertDescription>{error}</AlertDescription></Alert>}
 
       <div className="changes-list">
         {loading && !status && <div className="muted empty-inline">Checking status...</div>}

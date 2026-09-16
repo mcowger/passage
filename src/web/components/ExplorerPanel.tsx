@@ -4,6 +4,7 @@ import type { WorkspaceApi } from "../api.ts";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { Button } from "./ui/button.tsx";
 import { Input } from "./ui/input.tsx";
+import { Alert, AlertDescription } from "./ui/alert.tsx";
 
 type ExplorerProps = {
   workspaceId: string;
@@ -195,7 +196,7 @@ export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: Ex
         )}
       </div>
 
-      {error && <div className="alert panel-alert">{error}</div>}
+      {error && <Alert variant="destructive" className="panel-alert"><AlertDescription>{error}</AlertDescription></Alert>}
 
       <div className="explorer-tree">
         {renderTree(".")}

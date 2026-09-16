@@ -10,6 +10,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import type { FileRead, FileRevision } from "../../shared/domain/files.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert.tsx";
 
 type EditorProps = {
   workspaceId: string;
@@ -204,9 +205,10 @@ export function EditorPanel({ workspaceId, filePath, api, onClose, onOpenDiff }:
       </div>
 
       {conflict && (
-        <div className="alert conflict-banner">
+        <Alert variant="destructive" className="conflict-banner">
           <div className="conflict-copy">
-            <strong>⚠️ Conflict detected:</strong> File on disk has newer changes than this editor buffer.
+            <AlertTitle>⚠️ Conflict detected:</AlertTitle>
+            <AlertDescription>File on disk has newer changes than this editor buffer.</AlertDescription>
           </div>
           <div className="conflict-actions">
             <button className="danger-button small" onClick={loadFile}>
@@ -218,11 +220,11 @@ export function EditorPanel({ workspaceId, filePath, api, onClose, onOpenDiff }:
               </button>
             )}
           </div>
-        </div>
+        </Alert>
       )}
 
-      {saveError && !conflict && <div className="alert panel-alert">{saveError}</div>}
-      {error && <div className="alert panel-alert">{error}</div>}
+      {saveError && !conflict && <Alert variant="destructive" className="panel-alert"><AlertDescription>{saveError}</AlertDescription></Alert>}
+      {error && <Alert variant="destructive" className="panel-alert"><AlertDescription>{error}</AlertDescription></Alert>}
 
       <div className="editor-container" ref={editorContainerRef} />
     </div>
