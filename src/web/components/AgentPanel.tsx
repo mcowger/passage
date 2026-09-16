@@ -476,6 +476,7 @@ function AgentComposerInner({
   const [images, setImages] = useState<Array<AgentImage & { name: string }>>([]);
   const [ctxDetailsOpen, setCtxDetailsOpen] = useState(false);
   const ctxDetailsRef = useRef<HTMLDivElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const reservedImageCount = useRef(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -485,6 +486,10 @@ function AgentComposerInner({
     setCtxDetailsOpen(false);
     reservedImageCount.current = 0;
   }, [draftKey]);
+
+  useEffect(() => {
+    composerInputRef.current?.focus();
+  }, [agentId]);
 
   useEffect(() => {
     return () => {
@@ -636,6 +641,7 @@ function AgentComposerInner({
       )}
       <div className="composer-card">
         <textarea
+          ref={composerInputRef}
           value={draft}
           onChange={(event) => updateDraft(event.target.value)}
           onKeyDown={(event) => {
