@@ -146,6 +146,16 @@ function NonGitPane({ title }: { title: string }) {
   );
 }
 
+const LAST_WORKSPACE_KEY = "passage.lastWorkspaceId";
+
+function readLastWorkspaceId(): string | undefined {
+  try {
+    return localStorage.getItem(LAST_WORKSPACE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function App() {
   const api = useMemo(() => createWorkspaceApi(), []);
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
@@ -235,8 +245,11 @@ function App() {
       const next = await api.snapshot();
       setSnapshot(next);
       setSelectedWorkspaceId((current) => {
-        if (current && next.workspaces.some((workspace) => workspace.id === current && !workspace.archivedAt)) return current;
-        return next.workspaces.find((workspace) => !workspace.archivedAt)?.id ?? next.workspaces[0]?.id;
+        const candidates = next.workspaces.filter((workspace) => !workspace.archivedAt);
+        if (current && candidates.some((workspace) => workspace.id === current)) return current;
+        const last = readLastWorkspaceId();
+        if (last && candidates.some((workspace) => workspace.id === last)) return last;
+        return candidates[0]?.id ?? next.workspaces[0]?.id;
       });
       return true;
     } catch (cause) {
@@ -296,6 +309,13 @@ function App() {
   }, [api]);
 
   useEffect(() => { void refreshWorkspaces(); }, [refreshWorkspaces]);
+
+  useEffect(() => {
+    if (!selectedWorkspaceId) return;
+    try {
+      localStorage.setItem(LAST_WORKSPACE_KEY, selectedWorkspaceId);
+    } catch {}
+  }, [selectedWorkspaceId]);
 
   useEffect(() => {
     agentsLoadGeneration.current += 1;
