@@ -11,6 +11,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog.tsx";
+import { Checkbox } from "./ui/checkbox.tsx";
+import { Label } from "./ui/label.tsx";
+import { Alert, AlertDescription } from "./ui/alert.tsx";
 
 export interface WorkspaceDetailsModalProps {
   open: boolean;
@@ -132,9 +135,9 @@ export function WorkspaceDetailsModal({
           </DialogHeader>
 
           {error && (
-            <div className="p-2 text-xs bg-destructive/10 border border-destructive/20 text-destructive rounded my-2">
-              {error}
-            </div>
+            <Alert variant="destructive" className="my-2">
+              <AlertDescription className="text-xs">{error}</AlertDescription>
+            </Alert>
           )}
 
           {/* Rename section */}
@@ -243,15 +246,17 @@ export function WorkspaceDetailsModal({
             <p className="text-xs text-muted-foreground my-2">
               Are you sure you want to permanently delete the worktree at <code className="font-mono text-xs">{workspace.cwd}</code> from disk?
             </p>
-            <label className="flex items-center gap-2 text-xs text-destructive font-medium my-2 cursor-pointer">
-              <input
-                type="checkbox"
+            <div className="flex items-center gap-2 my-2">
+              <Checkbox
+                id="force-remove-worktree"
                 checked={forceRemove}
-                onChange={(e) => setForceRemove(e.target.checked)}
-                className="rounded border-input text-destructive focus:ring-destructive"
+                onCheckedChange={(checked) => setForceRemove(checked === true)}
+                aria-label="Force delete worktree"
               />
-              Force delete (discard any uncommitted or dirty changes)
-            </label>
+              <Label htmlFor="force-remove-worktree" className="text-xs text-destructive font-medium cursor-pointer">
+                Force delete (discard any uncommitted or dirty changes)
+              </Label>
+            </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button size="xs" variant="secondary" onClick={() => setConfirmRemove(false)}>Cancel</Button>
               <Button size="xs" variant="destructive" onClick={handleRemoveWorktree} disabled={busy}>
