@@ -8,6 +8,10 @@
       "type": "service",
       "command": "bun run dev"
     },
+    "tunnel": {
+      "type": "service",
+      "command": "bun scripts/run-frpc.ts"
+    },
     "typecheck": {
       "command": "bun run typecheck"
     },
