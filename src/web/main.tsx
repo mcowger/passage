@@ -31,6 +31,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./components/ui/dialog.tsx";
+import { TooltipProvider } from "./components/ui/tooltip.tsx";
+import { Alert, AlertDescription } from "./components/ui/alert.tsx";
 import "./styles.css";
 
 function applyThemeTokens(theme?: ThemePack) {
@@ -78,7 +80,7 @@ function FormDialog({ title, submitLabel, error, onCancel, onSubmit, children }:
             <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Workspace setup</p>
             <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>
           </DialogHeader>
-          {error && <div className="text-sm text-destructive font-medium" role="alert">{error}</div>}
+          {error && <Alert variant="destructive"><AlertDescription className="text-sm font-medium">{error}</AlertDescription></Alert>}
           {children}
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
@@ -446,9 +448,9 @@ function App() {
               Autonomous coding agent attached to this workspace.
             </p>
             {agentError && (
-              <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded p-2.5 mb-4 text-left w-full">
-                {agentError}
-              </div>
+              <Alert variant="destructive" className="mb-4 w-full text-left">
+                <AlertDescription className="text-xs">{agentError}</AlertDescription>
+              </Alert>
             )}
             {workspace.archivedAt ? (
               <div className="flex flex-col items-center gap-2">
@@ -921,4 +923,4 @@ function App() {
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Passage root element is missing");
-createRoot(root).render(<StrictMode><App /></StrictMode>);
+createRoot(root).render(<StrictMode><TooltipProvider><App /></TooltipProvider></StrictMode>);

@@ -1,5 +1,8 @@
 import { useState, type MouseEvent } from "react";
 import { Copy, Check } from "lucide-react";
+import { Button } from "./ui/button.tsx";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip.tsx";
+import { cn } from "../lib/utils.ts";
 
 export type CopyButtonProps = {
   text: string;
@@ -42,18 +45,26 @@ export function CopyButton({
   };
 
   return (
-    <button
-      type="button"
-      className={`tool-copy-btn ${className ?? ""}`.trim()}
-      onClick={handleCopy}
-      title={copied ? "Copied!" : title}
-      aria-label={copied ? "Copied!" : title}
-    >
-      {copied ? (
-        <Check size={size} className="text-emerald-500" aria-hidden="true" />
-      ) : (
-        <Copy size={size} aria-hidden="true" />
-      )}
-    </button>
+    <TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className={cn("tool-copy-btn", className)}
+          onClick={handleCopy}
+          aria-label={copied ? "Copied!" : title}
+        >
+          {copied ? (
+            <Check size={size} className="text-emerald-500" aria-hidden="true" />
+          ) : (
+            <Copy size={size} aria-hidden="true" />
+          )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{copied ? "Copied!" : title}</TooltipContent>
+    </Tooltip>
+    </TooltipProvider>
   );
 }
