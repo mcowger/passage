@@ -10,6 +10,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog.tsx";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs.tsx";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select.tsx";
+import { RadioGroup, RadioGroupItem } from "./ui/radio-group.tsx";
+import { Label } from "./ui/label.tsx";
+import { Alert, AlertDescription } from "./ui/alert.tsx";
 import { GitBranch, RefreshCw, FolderDown, PlusCircle } from "lucide-react";
 
 type Props = {
@@ -195,65 +206,65 @@ export function NewWorktreeModal({
       <DialogContent className="max-w-[560px]">
         <DialogHeader>
           <DialogTitle className="text-lg font-semibold">Git Worktrees</DialogTitle>
-          <div className="flex gap-2 pt-2 border-b border-border/50 pb-2">
-            <Button
-              size="xs"
-              variant={activeTab === "create" ? "default" : "ghost"}
-              className="gap-1.5"
-              onClick={() => { setActiveTab("create"); setError(""); }}
-            >
-              <PlusCircle className="w-3.5 h-3.5" /> Create New
-            </Button>
-            <Button
-              size="xs"
-              variant={activeTab === "discover" ? "default" : "ghost"}
-              className="gap-1.5"
-              onClick={() => { setActiveTab("discover"); setError(""); }}
-            >
-              <FolderDown className="w-3.5 h-3.5" /> Discover &amp; Import
-            </Button>
-          </div>
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => { setActiveTab(value as "create" | "discover"); setError(""); }}
+            className="pt-2 pb-2 border-b border-border/50 gap-0"
+          >
+            <TabsList>
+              <TabsTrigger value="create" className="gap-1.5 text-xs">
+                <PlusCircle className="w-3.5 h-3.5" /> Create New
+              </TabsTrigger>
+              <TabsTrigger value="discover" className="gap-1.5 text-xs">
+                <FolderDown className="w-3.5 h-3.5" /> Discover &amp; Import
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </DialogHeader>
 
-        {error && <div className="p-2 text-xs bg-destructive/10 border border-destructive/20 text-destructive rounded my-1">{error}</div>}
+        {error && <Alert variant="destructive" className="my-1"><AlertDescription className="text-xs">{error}</AlertDescription></Alert>}
 
         {activeTab === "create" ? (
           <form onSubmit={handleCreate} className="flex flex-col gap-3 pt-1">
-            <label className="flex flex-col gap-1 text-xs font-medium">
-              Project
-              <select
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            <div className="flex flex-col gap-1 text-xs font-medium">
+              <Label htmlFor="worktree-project" className="text-xs">Project</Label>
+              <Select
                 value={projectId}
-                onChange={(e) => {
-                  setProjectId(e.target.value);
+                onValueChange={(value) => {
+                  setProjectId(value);
                   const locs = locations.filter(
-                    (l) => l.enabled && (!l.projectId || l.projectId === e.target.value)
+                    (l) => l.enabled && (!l.projectId || l.projectId === value)
                   );
                   if (locs[0]) setLocationId(locs[0].id);
                 }}
                 required
               >
-                {activeProjects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.displayLabel} ({p.canonicalRootPath})</option>
-                ))}
-              </select>
-            </label>
+                <SelectTrigger id="worktree-project" className="w-full h-8 text-xs">
+                  <SelectValue placeholder="Select project" />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeProjects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{p.displayLabel} ({p.canonicalRootPath})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
             <div className="flex flex-col gap-1 text-xs font-medium">
               <span>Worktree Location</span>
               {availableLocations.length > 0 ? (
-                <select
-                  className="rounded-md border border-input bg-background px-3 py-1.5 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  value={locationId}
-                  onChange={(e) => setLocationId(e.target.value)}
-                  required
-                >
-                  {availableLocations.map((loc) => (
-                    <option key={loc.id} value={loc.id}>
-                      {loc.displayLabel} ({loc.configuredRootPath})
-                    </option>
-                  ))}
-                </select>
+                <Select value={locationId} onValueChange={setLocationId} required>
+                  <SelectTrigger className="w-full h-8 text-xs" aria-label="Worktree location">
+                    <SelectValue placeholder="Select location" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableLocations.map((loc) => (
+                      <SelectItem key={loc.id} value={loc.id}>
+                        {loc.displayLabel} ({loc.configuredRootPath})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               ) : (
                 <p className="text-xs text-muted-foreground mt-1">
                   No configured locations found. Add a global or project location below to continue.
@@ -285,26 +296,21 @@ export function NewWorktreeModal({
                     value={newLocationPath}
                     onChange={(e) => setNewLocationPath(e.target.value)}
                   />
-                  <div className="flex items-center gap-3 text-xs font-normal">
-                    <label className="flex items-center gap-1 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="location-scope"
-                        checked={newLocationScope === "global"}
-                        onChange={() => setNewLocationScope("global")}
-                      />
-                      Global
-                    </label>
-                    <label className="flex items-center gap-1 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="location-scope"
-                        checked={newLocationScope === "project"}
-                        onChange={() => setNewLocationScope("project")}
-                      />
-                      This project only
-                    </label>
-                  </div>
+                  <RadioGroup
+                    value={newLocationScope}
+                    onValueChange={(value) => setNewLocationScope(value as "global" | "project")}
+                    className="flex items-center gap-3"
+                    aria-label="Location scope"
+                  >
+                    <div className="flex items-center gap-1.5 text-xs font-normal">
+                      <RadioGroupItem id="worktree-scope-global" value="global" />
+                      <Label htmlFor="worktree-scope-global" className="text-xs font-normal cursor-pointer">Global</Label>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs font-normal">
+                      <RadioGroupItem id="worktree-scope-project" value="project" />
+                      <Label htmlFor="worktree-scope-project" className="text-xs font-normal cursor-pointer">This project only</Label>
+                    </div>
+                  </RadioGroup>
                   <div className="flex gap-2">
                     <Button
                       type="button"
@@ -368,26 +374,21 @@ export function NewWorktreeModal({
 
             <div className="flex flex-col gap-1 text-xs font-medium">
               <span>Git Branch</span>
-              <div className="flex items-center gap-3 text-xs font-normal" role="radiogroup" aria-label="Branch mode">
-                <label className="flex items-center gap-1 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="branch-mode"
-                    checked={branchMode === "new"}
-                    onChange={() => setBranchMode("new")}
-                  />
-                  Create new branch
-                </label>
-                <label className="flex items-center gap-1 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="branch-mode"
-                    checked={branchMode === "existing"}
-                    onChange={() => setBranchMode("existing")}
-                  />
-                  Use existing branch / ref
-                </label>
-              </div>
+              <RadioGroup
+                value={branchMode}
+                onValueChange={(value) => setBranchMode(value as "existing" | "new")}
+                className="flex items-center gap-3"
+                aria-label="Branch mode"
+              >
+                <div className="flex items-center gap-1.5 text-xs font-normal">
+                  <RadioGroupItem id="branch-mode-new" value="new" />
+                  <Label htmlFor="branch-mode-new" className="text-xs font-normal cursor-pointer">Create new branch</Label>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs font-normal">
+                  <RadioGroupItem id="branch-mode-existing" value="existing" />
+                  <Label htmlFor="branch-mode-existing" className="text-xs font-normal cursor-pointer">Use existing branch / ref</Label>
+                </div>
+              </RadioGroup>
               <Input
                 type="text"
                 className="h-8 text-xs font-mono"
@@ -440,18 +441,19 @@ export function NewWorktreeModal({
         ) : (
           <div className="flex flex-col gap-3 pt-1">
             <div className="flex items-center justify-between gap-2">
-              <label className="flex items-center gap-2 text-xs font-medium flex-1">
-                Project:
-                <select
-                  className="rounded-md border border-input bg-background px-2.5 py-1 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring flex-1"
-                  value={projectId}
-                  onChange={(e) => setProjectId(e.target.value)}
-                >
-                  {activeProjects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.displayLabel}</option>
-                  ))}
-                </select>
-              </label>
+              <div className="flex items-center gap-2 text-xs font-medium flex-1">
+                <Label htmlFor="discover-project" className="text-xs shrink-0">Project:</Label>
+                <Select value={projectId} onValueChange={setProjectId}>
+                  <SelectTrigger id="discover-project" className="flex-1 h-8 text-xs">
+                    <SelectValue placeholder="Select project" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeProjects.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.displayLabel}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 type="button"
                 variant="outline"
