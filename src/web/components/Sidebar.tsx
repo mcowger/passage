@@ -39,8 +39,7 @@ export type SidebarProps = {
   onClose: () => void;
   onSelect: (id: string) => void;
   onNewProject: () => void;
-  onNewWorkspace: () => void;
-  onNewWorktree?: () => void;
+  onNewWorktree?: (projectId: string) => void;
   agents: AgentSummary[];
   onSelectAgent: (id: string) => void;
   terminals: TerminalSummary[];
@@ -59,7 +58,6 @@ export function Sidebar({
   onClose,
   onSelect,
   onNewProject,
-  onNewWorkspace,
   onNewWorktree,
   agents,
   onSelectAgent,
@@ -78,29 +76,6 @@ export function Sidebar({
         <strong>Passage</strong>
         <button className="icon-button mobile-only" onClick={onClose} aria-label="Close navigation">×</button>
       </div>
-      <div className="sidebar-actions flex flex-col gap-1.5">
-        {onNewWorktree && (
-          <div className="flex gap-1.5 w-full">
-            <Button variant="secondary" size="xs" className="flex-1 justify-start text-xs font-normal" onClick={onNewWorktree}>
-              ＋ New worktree
-            </Button>
-            {onDiscoverWorktrees && (
-              <Button
-                variant="secondary"
-                size="xs"
-                className="px-2.5 text-xs font-normal"
-                onClick={() => onDiscoverWorktrees()}
-                title="Discover and import existing git worktrees"
-              >
-                <FolderDown className="w-3.5 h-3.5" />
-              </Button>
-            )}
-          </div>
-        )}
-        <Button variant="secondary" size="xs" className="w-full justify-start text-xs font-normal" onClick={onNewWorkspace}>
-          ＋ Directory workspace
-        </Button>
-      </div>
       <div className="side-label">Projects &amp; Worktrees</div>
       <div className="project-list">
         {activeProjects.map((project) => (
@@ -117,6 +92,7 @@ export function Sidebar({
             terminals={selected ? terminals : []}
             onSelectTerminal={onSelectTerminal}
             onManageWorkspace={onManageWorkspace}
+            onNewWorktree={onNewWorktree}
             onDiscoverWorktrees={onDiscoverWorktrees}
             onRequestRemoveProject={onArchiveProject ? setPendingRemove : undefined}
           />
@@ -175,6 +151,7 @@ function ProjectRow({
   terminals,
   onSelectTerminal,
   onManageWorkspace,
+  onNewWorktree,
   onDiscoverWorktrees,
   onRequestRemoveProject,
 }: {
@@ -189,12 +166,24 @@ function ProjectRow({
   terminals: TerminalSummary[];
   onSelectTerminal: (id: string) => void;
   onManageWorkspace?: (workspace: Workspace) => void;
+  onNewWorktree?: (projectId: string) => void;
   onDiscoverWorktrees?: (projectId?: string) => void;
   onRequestRemoveProject?: (project: Project) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const activeRows = workspaces.filter((workspace) => workspace.projectId === project.id && !workspace.archivedAt);
-  const archivedRows = workspaces.filter((workspace) => workspace.projectId === project.id && workspace.archivedAt);
+  const isDefaultWorkspace = (workspace: Workspace) =>
+    workspace.kind !== "worktree" && workspace.cwd === project.canonicalRootPath;
+  const byLabel = (a: Workspace, b: Workspace) => {
+    const defaultDelta = Number(isDefaultWorkspace(b)) - Number(isDefaultWorkspace(a));
+    if (defaultDelta !== 0) return defaultDelta;
+    return a.displayLabel.localeCompare(b.displayLabel);
+  };
+  const activeRows = workspaces
+    .filter((workspace) => workspace.projectId === project.id && !workspace.archivedAt)
+    .sort(byLabel);
+  const archivedRows = workspaces
+    .filter((workspace) => workspace.projectId === project.id && workspace.archivedAt)
+    .sort(byLabel);
   const [showArchived, setShowArchived] = useState(false);
   const rows = showArchived ? [...activeRows, ...archivedRows] : activeRows;
   return (
@@ -275,6 +264,10 @@ function ProjectRow({
                         {workspace.kind === "worktree" ? (
                           <span className="text-[9px] px-1 py-0.2 rounded bg-muted text-muted-foreground font-mono shrink-0">
                             worktree
+                          </span>
+                        ) : isDefaultWorkspace(workspace) ? (
+                          <span className="text-[9px] px-1 py-0.2 rounded bg-primary/10 text-primary font-medium shrink-0">
+                            default
                           </span>
                         ) : (
                           <span className="text-[9px] px-1 py-0.2 rounded bg-muted/50 text-muted-foreground shrink-0">
@@ -364,7 +357,19 @@ function ProjectRow({
               <span>{showArchived ? "▾ Hide archived" : `▸ Archived (${archivedRows.length})`}</span>
             </button>
           )}
-          {rows.length === 0 && <p className="muted project-empty">No active workspaces</p>}
+          {rows.length === 0 && <p className="muted project-empty">No worktrees yet</p>}
+          {onNewWorktree && (
+            <button
+              type="button"
+              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors px-2 py-1 mt-0.5 text-left flex items-center gap-1 cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNewWorktree(project.id);
+              }}
+            >
+              <Plus className="w-3 h-3" /> New worktree
+            </button>
+          )}
         </div>
       )}
     </section>

@@ -23,7 +23,50 @@ export class WorkspaceService {
   async registerProject(configuredRootPath: string, displayLabel: string): Promise<Project> {
     const canonical = await this.directory(configuredRootPath, "invalid-root");
     const project = projectSchema.parse({ id: id("prj"), configuredRootPath, canonicalRootPath: canonical, displayLabel, archivedAt: null });
-    this.repositories.projects.save(project); return project;
+    this.repositories.projects.save(project);
+    await this.ensureDefaultWorkspace(project.id);
+    return project;
+  }
+
+  /** The Default workspace is the virtual worktree for the project root itself:
+   *  not a linked git worktree, just the repository directory. Every project
+   *  has exactly one active Default workspace; it hosts agents, terminals,
+   *  files, and diffs like any other worktree. */
+  async ensureDefaultWorkspace(projectId: string): Promise<Workspace> {
+    const project = this.requireProject(projectId);
+    if (project.archivedAt) throw new WorkspaceError("archived", "Project is archived");
+    const active = this.repositories.workspaces.listForProject(projectId, this.listLimit, false);
+    const existing = active.find((candidate) => candidate.kind !== "worktree" && candidate.cwd === project.canonicalRootPath);
+    if (existing) return workspaceSchema.parse(existing);
+    const git = await this.discoverGit(project.canonicalRootPath);
+    const workspace = workspaceSchema.parse({
+      id: id("wsp"),
+      projectId,
+      kind: "main-checkout",
+      cwd: project.canonicalRootPath,
+      checkoutRoot: git?.checkoutRoot ?? project.canonicalRootPath,
+      mainRepositoryRoot: git?.mainRepositoryRoot ?? null,
+      branchRef: git?.branchRef ?? null,
+      displayLabel: "Default",
+      locationId: null,
+      ownershipState: "main-checkout",
+      markerId: null,
+      markerPath: null,
+      repairDetail: null,
+      archivedAt: null,
+    });
+    this.repositories.workspaces.save(workspace);
+    return workspace;
+  }
+
+  async ensureAllDefaults(): Promise<void> {
+    for (const project of this.repositories.projects.list(this.listLimit, false)) {
+      try {
+        await this.ensureDefaultWorkspace(project.id);
+      } catch {
+        // Leave legacy/unreachable project roots alone; snapshot still returns.
+      }
+    }
   }
 
   async configureLocation(input: { projectId?: string; displayLabel: string; configuredRootPath: string; enabled?: boolean }): Promise<WorktreeLocation> {

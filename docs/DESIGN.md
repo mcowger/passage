@@ -147,9 +147,8 @@ Useful references examined include:
 
 ```text
 Project
-├── Main-checkout workspace (optional)
-├── Worktree workspace(s)
-└── Directory workspace(s)
+├── Default workspace (the project root itself; a virtual worktree, not a linked worktree)
+└── Worktree workspace(s)
     ├── Agent(s)          ── each maps to one Pi session
     ├── Terminal(s)       ── live PTYs, scoped to the workspace
     ├── Files and editors
@@ -160,8 +159,11 @@ Project
 Definitions:
 
 - **Project** — a logical codebase rooted at a registered filesystem location.
-- **Workspace** — a specific directory/environment where work happens. It is
-  not synonymous with a branch or a terminal.
+- **Workspace** — a specific directory/environment where work happens: either
+  the project's Default workspace (the repository root itself) or one linked
+  Git worktree. It is not synonymous with a branch or a terminal. Every
+  workspace — Default included — hosts its own agents, terminals, files,
+  and diffs.
 - **Agent** — a durable Passage record that points to exactly one Pi session.
   It owns the Passage title, workspace membership, and UI lifecycle; Pi owns
   the transcript.
@@ -757,7 +759,7 @@ rich UI behavior.
 - Bootstrap React, Tailwind, shadcn/ui, theme tokens, project/workspace sidebar,
   and basic responsive shell.
 
-**Exit criteria:** a user can register a project and directory workspace, name
+**Exit criteria:** a user can register a project and get its Default workspace, name
 it, reopen it after daemon restart, and access it only through its registered
 canonical root from the responsive web UI.
 

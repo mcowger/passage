@@ -41,13 +41,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "./components/ui/alert-dialog.tsx";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./components/ui/select.tsx";
 import { Alert, AlertDescription } from "./components/ui/alert.tsx";
 import { Toaster } from "./components/ui/sonner.tsx";
 import "./styles.css";
@@ -76,7 +69,7 @@ function applyFontTokens(font?: FontPack) {
   root.style.setProperty("--font-mono", font.monoFontFamily);
 }
 
-type FormKind = "project" | "workspace" | "worktree";
+type FormKind = "project" | "worktree";
 type TabKind = "overview" | "agent" | "terminal" | "explorer" | "changes" | "editor" | "diff";
 
 type FormDialogProps = {
@@ -172,7 +165,6 @@ function App() {
   const [previewHistory, setPreviewHistory] = useState<AgentHistory | null>(null);
   const [agentError, setAgentError] = useState("");
   const [form, setForm] = useState<FormKind>();
-  const [workspaceProjectId, setWorkspaceProjectId] = useState<string>();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [layout, setLayout] = useState<WorkspaceLayout>();
   const [settings, setSettings] = useState<WorkspaceSettings>(DEFAULT_WORKSPACE_SETTINGS);
@@ -336,8 +328,6 @@ function App() {
   const workspace = snapshot?.workspaces.find((item) => item.id === selectedWorkspaceId);
   const project = snapshot?.projects.find((item) => item.id === workspace?.projectId);
   const activeProject = project ?? snapshot?.projects.find((item) => !item.archivedAt);
-  const activeProjects = snapshot?.projects.filter((item) => !item.archivedAt) ?? [];
-  const workspaceProject = activeProjects.find((item) => item.id === workspaceProjectId) ?? activeProject;
   const selectedTerminal = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
   const isGitWorkspace = workspace?.mainRepositoryRoot != null;
 
@@ -837,11 +827,10 @@ function App() {
           onClose={() => setDrawerOpen(false)}
           onSelect={handleSelectWorkspace}
           onNewProject={() => { setFormError(""); setForm("project"); }}
-          onNewWorkspace={() => { setFormError(""); setWorkspaceProjectId(activeProject?.id); setForm("workspace"); }}
-          onNewWorktree={() => {
+          onNewWorktree={(projectId) => {
             setFormError("");
             setWorktreeModalTab("create");
-            setWorktreeModalProjectId(undefined);
+            setWorktreeModalProjectId(projectId);
             setForm("worktree");
           }}
           onDiscoverWorktrees={(projId) => {
@@ -1149,51 +1138,12 @@ function App() {
         </FormDialog>
       )}
 
-      {form === "workspace" && workspaceProject && (
-        <FormDialog
-          title={`New directory workspace in ${workspaceProject.displayLabel}`}
-          submitLabel="Create workspace"
-          error={formError}
-          onCancel={() => { setFormError(""); setForm(undefined); setWorkspaceProjectId(undefined); }}
-          onSubmit={(event) => {
-            event.preventDefault();
-            const data = new FormData(event.currentTarget);
-            const displayLabel = String(data.get("label") ?? "").trim();
-            if (!displayLabel) {
-              setFormError("Workspace label cannot be empty.");
-              return;
-            }
-            const cwd = String(data.get("cwd") ?? "").trim();
-            const targetProjectId = workspaceProjectId ?? workspaceProject.id;
-            void runWorkspaceMutation(() => api.createDirectoryWorkspace(targetProjectId, {
-              displayLabel,
-              ...(cwd ? { cwd } : {}),
-            }));
-          }}
-        >
-          <label>Project
-            <Select value={workspaceProjectId ?? workspaceProject.id} onValueChange={setWorkspaceProjectId} required>
-              <SelectTrigger className="w-full" aria-label="Target project">
-                <SelectValue placeholder="Select project" />
-              </SelectTrigger>
-              <SelectContent position="popper" align="start" className="w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
-                {activeProjects.map((item) => (
-                  <SelectItem key={item.id} value={item.id}><span className="min-w-0 flex-1 truncate">{item.displayLabel}</span></SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </label>
-          <label>Workspace label<input name="label" required placeholder="Invoice retries" /></label>
-          <label>Subdirectory (optional)<input name="cwd" placeholder="services/importer" /></label>
-          <p className="form-help">Paths are resolved by the daemon inside the registered project root.</p>
-        </FormDialog>
-      )}
-
       {form === "worktree" && snapshot && (
         <NewWorktreeModal
           projects={snapshot.projects}
           locations={snapshot.locations}
           defaultProjectId={worktreeModalProjectId ?? activeProject?.id}
+          lockedProjectId={worktreeModalProjectId}
           initialTab={worktreeModalTab}
           api={api}
           onClose={() => {

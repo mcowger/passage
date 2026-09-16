@@ -236,14 +236,14 @@ while retaining the overview as a reopenable panel.
 
 ```text
 Passage
-├── New workspace
 ├── Search / Command palette
 ├── Pinned / recent projects
 │   └── Project
-│       ├── Workspace
-│       │   ├── Agent          ← children only for active workspace
-│       │   └── Terminal
-│       └── Quiet workspace    ← metadata summary, child rows collapsed
+│       ├── ＋ New worktree (pre-scoped to the project)
+│       ├── Default worktree (the project root itself)
+│       └── Linked worktree(s)
+│           ├── Agent          ← children only for active workspace
+│           └── Terminal
 └── Footer: connection state · settings
 ```
 
