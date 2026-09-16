@@ -771,19 +771,19 @@ function App() {
           <div className="workspace-container">
             {/* Top Command & Settings Bar */}
             <nav className="workspace-nav-bar" aria-label="Workspace views">
-              <div className="workspace-nav-brand flex items-center gap-1.5">
+              <div className="workspace-nav-brand min-w-0 max-w-[30vw] flex items-center gap-1.5">
                 <button
                   type="button"
-                  className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-surface-hover text-left transition-colors cursor-pointer border border-transparent hover:border-border"
+                  className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-surface-hover text-left transition-colors cursor-pointer border border-transparent hover:border-border min-w-0 max-w-full overflow-hidden"
                   onClick={() => setWorkspaceDetailsOpen(true)}
                   title="View workspace details & management options"
                 >
-                  <span className="workspace-crumb-title">
-                    <b className="font-semibold text-xs text-foreground truncate max-w-[220px]" title={project?.displayLabel}>{project?.displayLabel}</b>
-                    <span className="text-muted-foreground mx-1">/</span>
-                    <span className="text-xs text-foreground font-medium truncate max-w-[280px]" title={workspace.displayLabel}>{workspace.displayLabel}</span>
+                  <span className="workspace-crumb-title min-w-0">
+                    <b className="font-semibold text-xs text-foreground truncate max-w-[12vw]" title={project?.displayLabel}>{project?.displayLabel}</b>
+                    <span className="text-muted-foreground mx-1 shrink-0">/</span>
+                    <span className="text-xs text-foreground font-medium truncate max-w-[14vw]" title={workspace.displayLabel}>{workspace.displayLabel}</span>
                   </span>
-                  {workspace.branchRef && <code className="branch-pill truncate max-w-[200px]" title={workspace.branchRef}>⎇ {workspace.branchRef}</code>}
+                  {workspace.branchRef && <code className="branch-pill truncate max-w-[10vw] shrink-0" title={workspace.branchRef}>⎇ {workspace.branchRef}</code>}
                   {workspace.archivedAt && (
                     <span className="text-[10px] px-1 py-0.2 rounded bg-amber-500/15 text-amber-600 font-medium">
                       archived
@@ -792,7 +792,7 @@ function App() {
                   <MoreHorizontal className="w-3.5 h-3.5 text-muted-foreground ml-0.5" />
                 </button>
               </div>
-              <div className="nav-tabs">
+              <div className="nav-tabs shrink-0">
                 <button
                   type="button"
                   className={`nav-tab ${activeTab === "agent" ? "active" : ""}`}
@@ -840,7 +840,7 @@ function App() {
                 )}
               </div>
 
-              <div className="workspace-nav-actions">
+              <div className="workspace-nav-actions shrink-0">
                 <button
                   type="button"
                   className="nav-action-btn"

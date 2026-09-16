@@ -162,11 +162,11 @@
   border-bottom: 1px solid var(--border);
   flex: none;
 }
-.workspace-nav-brand { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
-.workspace-crumb-title { font-size: 13.5px; display: flex; align-items: center; gap: 6px; color: var(--foreground); min-width: 0; }
+.workspace-nav-brand { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 30vw; overflow: hidden; flex: 1; }
+.workspace-crumb-title { font-size: 13.5px; display: flex; align-items: center; gap: 6px; color: var(--foreground); min-width: 0; overflow: hidden; }
 .workspace-crumb-title b { font-weight: 600; }
-.branch-pill { padding: 1px 6px; background: var(--surface-subtle); border-radius: 4px; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
-.nav-tabs { display: flex; align-items: center; gap: 4px; }
+.branch-pill { padding: 1px 6px; background: var(--surface-subtle); border-radius: 4px; font-size: 11px; color: var(--muted); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 8px; flex: none; }
+.nav-tabs { display: flex; align-items: center; gap: 4px; flex: none; min-width: 0; }
 .nav-tab {
   display: inline-flex;
   align-items: center;
