@@ -337,6 +337,28 @@ function App() {
     [layout, handleLayoutChange, workspace?.mainRepositoryRoot, workspace?.id]
   );
 
+  const openEditorFile = useCallback((path: string) => {
+    setOpenEditorPath(path);
+    setActiveTab("editor");
+    openPaneTab({
+      id: `editor-${path}`,
+      kind: "editor",
+      title: path.split("/").pop() ?? path,
+      targetId: path,
+    });
+  }, [openPaneTab]);
+
+  const openDiffFile = useCallback((path: string) => {
+    setOpenDiffPath(path);
+    setActiveTab("diff");
+    openPaneTab({
+      id: `diff-${path}`,
+      kind: "diff",
+      title: `Diff: ${path.split("/").pop() ?? path}`,
+      targetId: path,
+    });
+  }, [openPaneTab]);
+
   useEffect(() => {
     if (!workspace || !layout) return;
     if (workspace.mainRepositoryRoot != null) return;
@@ -563,16 +585,7 @@ function App() {
             workspaceId={workspace.id}
             api={api}
             selectedFile={openEditorPath}
-            onOpenFile={(path) => {
-              setOpenEditorPath(path);
-              setActiveTab("editor");
-              openPaneTab({
-                id: `editor-${path}`,
-                kind: "editor",
-                title: path.split("/").pop() ?? path,
-                targetId: path,
-              });
-            }}
+            onOpenFile={openEditorFile}
           />
         );
 
@@ -582,43 +595,14 @@ function App() {
           <ChangesPanel
             workspaceId={workspace.id}
             api={api}
-            onOpenFile={(path) => {
-              setOpenEditorPath(path);
-              setActiveTab("editor");
-              openPaneTab({
-                id: `editor-${path}`,
-                kind: "editor",
-                title: path.split("/").pop() ?? path,
-                targetId: path,
-              });
-            }}
-            onOpenDiff={(path) => {
-              setOpenDiffPath(path);
-              setActiveTab("diff");
-              openPaneTab({
-                id: `diff-${path}`,
-                kind: "diff",
-                title: `Diff: ${path.split("/").pop() ?? path}`,
-                targetId: path,
-              });
-            }}
+            onOpenFile={openEditorFile}
+            onOpenDiff={openDiffFile}
           />
         );
 
       case "editor": {
         const filePath = tab.targetId ?? openEditorPath;
-        const openFileDiff = isGitWorkspace
-          ? (path: string) => {
-              setOpenDiffPath(path);
-              setActiveTab("diff");
-              openPaneTab({
-                id: `diff-${path}`,
-                kind: "diff",
-                title: `Diff: ${path.split("/").pop() ?? path}`,
-                targetId: path,
-              });
-            }
-          : undefined;
+        const openFileDiff = isGitWorkspace ? openDiffFile : undefined;
         return filePath ? (
           <EditorPanel
             workspaceId={workspace.id}
@@ -646,16 +630,7 @@ function App() {
             workspaceId={workspace.id}
             initialPath={diffPath}
             api={api}
-            onOpenFile={(path) => {
-              setOpenEditorPath(path);
-              setActiveTab("editor");
-              openPaneTab({
-                id: `editor-${path}`,
-                kind: "editor",
-                title: path.split("/").pop() ?? path,
-                targetId: path,
-              });
-            }}
+            onOpenFile={openEditorFile}
             onClose={() => {
               setOpenDiffPath(undefined);
               setActiveTab("changes");
