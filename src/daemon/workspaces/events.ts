@@ -2,10 +2,12 @@ import { ReplayBuffer, type ReplayResult } from "../replay/index.ts";
 import {
   eventEnvelopeSchema,
   filesChangedPayloadSchema,
+  gitStatusChangedPayloadSchema,
   opaqueIdSchema,
   PROTOCOL_VERSION,
   type EventEnvelope,
   type FilesChangedPayload,
+  type GitStatusChangedPayload,
 } from "../../shared/protocol/index.ts";
 
 const DEFAULT_MAX_SUBJECTS = 256;
@@ -50,10 +52,21 @@ export class WorkspaceEventHub {
   /** Publish a `files-changed` invalidation for a workspace. Never throws;
    *  invalid payloads are dropped so HTTP mutations always succeed. */
   emit(payload: FilesChangedPayload): EventEnvelope | null {
-    if (this.disposed) return null;
     const parsed = filesChangedPayloadSchema.safeParse(payload);
     if (!parsed.success) return null;
-    const workspaceId = parsed.data.workspaceId;
+    return this.publish(parsed.data.workspaceId, "files-changed", parsed.data);
+  }
+
+  /** Publish a `git-status-changed` invalidation for a workspace. Never
+   *  throws; invalid payloads are dropped so HTTP mutations always succeed. */
+  emitGitStatus(payload: GitStatusChangedPayload): EventEnvelope | null {
+    const parsed = gitStatusChangedPayloadSchema.safeParse(payload);
+    if (!parsed.success) return null;
+    return this.publish(parsed.data.workspaceId, "git-status-changed", parsed.data);
+  }
+
+  private publish(workspaceId: string, type: string, payload: unknown): EventEnvelope | null {
+    if (this.disposed) return null;
     if (!this.sequences.has(workspaceId) && this.sequences.size >= this.maxSubjects) return null;
     const sequence = (this.sequences.get(workspaceId) ?? 0) + 1;
     this.sequences.set(workspaceId, sequence);
@@ -62,8 +75,8 @@ export class WorkspaceEventHub {
       stream: "workspace",
       subjectId: workspaceId,
       sequence,
-      type: "files-changed",
-      payload: parsed.data,
+      type,
+      payload,
     });
     if (!envelope.success) return null;
     this.replay.append(envelope.data);

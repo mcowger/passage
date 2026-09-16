@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { MetadataRepositories, MetadataStore } from "../metadata/index.ts";
 import { WorkspaceService } from "../workspaces/service.ts";
 import { GitService } from "../workspaces/git.ts";
+import { WorkspaceEventHub } from "../workspaces/events.ts";
+import type { EventEnvelope } from "../../shared/protocol/index.ts";
 import { createGitRoutes } from "./git.ts";
 import { projectSchema, workspaceSchema } from "../../shared/domain/workspaces.ts";
 
@@ -34,7 +36,11 @@ async function fixture() {
   const repos = new MetadataRepositories(store.db);
   const workspaces = new WorkspaceService(repos);
   const git = new GitService();
-  const app = createGitRoutes(workspaces, git);
+  const events = new WorkspaceEventHub();
+  const received: EventEnvelope[] = [];
+  const subscription = events.subscribe("wsp_git", 0, (e) => received.push(e));
+  subscription.activate();
+  const app = createGitRoutes(workspaces, git, events);
 
   const project = projectSchema.parse({
     id: "prj_git",
@@ -63,7 +69,7 @@ async function fixture() {
   });
   repos.workspaces.save(workspace);
 
-  return { root, store, repos, app, workspace };
+  return { root, store, repos, app, workspace, events, received };
 }
 
 const request = (path: string, init?: RequestInit) => new Request(`http://localhost${path}`, init);
@@ -87,6 +93,54 @@ describe("git HTTP API", () => {
     expect(diffRes.status).toBe(200);
     const diffs = await diffRes.json() as Array<{ path: string; additions: number; hunks: Array<{ lines: Array<{ kind: string; text: string }> }> }>;
     expect(diffs.some((d) => d.path === "README.md" && d.additions > 0)).toBe(true);
+
+    f.store.close();
+  });
+
+  test("mutates git state and emits git-status-changed invalidations", async () => {
+    const f = await fixture();
+    const post = (suffix: string, body: unknown) => f.app.fetch(
+      request(`/api/workspaces/${f.workspace.id}/git/${suffix}`, { method: "POST", body: JSON.stringify(body) }),
+    );
+    const reasons = () => f.received.map((e) => (e.payload as { reason: string }).reason);
+
+    await writeFile(join(f.root, "README.md"), "# Init\nUpdated line");
+    await writeFile(join(f.root, "new-file.txt"), "New file content");
+
+    const stageRes = await post("stage", { paths: ["README.md"] });
+    expect(stageRes.status).toBe(200);
+    const staged = await stageRes.json() as { files: Array<{ path: string; staged: boolean }> };
+    expect(staged.files.find((file) => file.path === "README.md")?.staged).toBe(true);
+
+    const unstageRes = await post("unstage", { paths: ["README.md"] });
+    expect(unstageRes.status).toBe(200);
+    expect(((await unstageRes.json()) as typeof staged).files.find((file) => file.path === "README.md")?.staged).toBe(false);
+
+    expect((await post("stage-all", {})).status).toBe(200);
+    const commitRes = await post("commit", { message: "second" });
+    expect(commitRes.status).toBe(200);
+    const commit = await commitRes.json() as { head: string; status: { dirty: boolean } };
+    expect(commit.head).toMatch(/^[0-9a-f]{40}$/);
+    expect(commit.status.dirty).toBe(false);
+
+    await writeFile(join(f.root, "README.md"), "# Init\nAnother line");
+    expect((await post("discard", { path: "README.md" })).status).toBe(200);
+    await writeFile(join(f.root, "scratch.txt"), "tmp");
+    expect((await post("discard", { path: "scratch.txt" })).status).toBe(200);
+    expect((await post("unstage-all", {})).status).toBe(200);
+
+    // Reads, invalid bodies, and failed mutations emit nothing.
+    await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/status`));
+    await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/diff`));
+    expect((await post("stage", { paths: [] })).status).toBe(400);
+    expect((await post("stage", { paths: ["../escape.txt"] })).status).toBe(400);
+    expect((await post("commit", { message: "   " })).status).toBe(400);
+    expect((await post("commit", { message: "nothing staged" })).status).toBe(422);
+    expect((await post("discard", { path: "missing.txt" })).status).toBe(422);
+
+    expect(reasons()).toEqual(["stage", "unstage", "stage-all", "commit", "discard", "discard", "unstage-all"]);
+    expect(f.received.every((e) => e.stream === "workspace" && e.subjectId === f.workspace.id && e.type === "git-status-changed")).toBe(true);
+    expect(f.received.map((e) => e.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7]);
 
     f.store.close();
   });

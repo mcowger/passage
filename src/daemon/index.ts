@@ -74,7 +74,7 @@ app.get("/api/daemon/snapshot", (context) => context.json({
   metadataSchemaVersion: metadata.schemaVersion,
 }));
 app.route("/", createWorkspaceRoutes(workspaceService));
-app.route("/", createGitRoutes(workspaceService, gitService));
+app.route("/", createGitRoutes(workspaceService, gitService, workspaceEvents));
 app.route("/", createFileRoutes(fileService, workspaceEvents));
 app.route("/", createWorktreeRoutes(worktreeService));
 app.route("/", createTerminalRoutes(terminalManager));
@@ -94,6 +94,7 @@ function sendSocketJson(socket: Bun.ServerWebSocket<SocketData>, value: unknown)
 }
 
 async function handleWorkspaceCommand(command: CommandEnvelope, socket: Bun.ServerWebSocket<SocketData>): Promise<ProtocolResponse> {
+  if (socket.data.kind !== "agent") return protocolError(command.requestId, "invalid-channel", "Terminal sockets do not accept workspace commands");
   try {
     if (command.type === "subscribe") {
       const input = workspaceSubscriptionPayloadSchema.parse(command.payload);

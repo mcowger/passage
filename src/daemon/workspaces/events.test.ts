@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { WorkspaceEventHub } from "./events.ts";
-import type { FilesChangedPayload } from "../../shared/protocol/index.ts";
+import type { FilesChangedPayload, GitStatusChangedPayload } from "../../shared/protocol/index.ts";
 
 const payload = (workspaceId: string, extra: Partial<FilesChangedPayload> = {}): FilesChangedPayload => ({
   workspaceId,
@@ -51,6 +51,27 @@ describe("WorkspaceEventHub", () => {
     for (const item of subscription.replay.events) received.push(item.sequence);
     subscription.activate();
     expect(received).toEqual([1, 2]);
+  });
+  test("emits git-status-changed invalidations on a shared per-workspace sequence", () => {
+    const h = new WorkspaceEventHub();
+    const got: Array<{ sequence: number; type: string; payload: unknown }> = [];
+    const sub = h.subscribe("wsp_a", 0, (e) => got.push({ sequence: e.sequence, type: e.type, payload: e.payload }));
+    sub.activate();
+    const git = (reason: GitStatusChangedPayload["reason"]): GitStatusChangedPayload => ({ workspaceId: "wsp_a", reason });
+    h.emit(payload("wsp_a"));
+    h.emitGitStatus(git("stage"));
+    h.emitGitStatus(git("commit"));
+    expect(got.map((e) => e.sequence)).toEqual([1, 2, 3]);
+    expect(got[1].type).toBe("git-status-changed");
+    expect(got[1].payload).toMatchObject({ workspaceId: "wsp_a", reason: "stage" });
+    expect(h.currentSequence("wsp_a")).toBe(3);
+  });
+  test("drops invalid git payloads without throwing", () => {
+    const h = new WorkspaceEventHub();
+    expect(h.emitGitStatus({ workspaceId: "", reason: "stage" })).toBeNull();
+    expect(h.emitGitStatus({ workspaceId: "wsp_a", reason: "explode" as never })).toBeNull();
+    expect(h.currentSequence("wsp_a")).toBe(0);
+    expect(h.emitGitStatus({ workspaceId: "wsp_a", reason: "fetch" })?.sequence).toBe(1);
   });
   test("drops invalid payloads without throwing and never breaks mutations", () => {
     const h = new WorkspaceEventHub();

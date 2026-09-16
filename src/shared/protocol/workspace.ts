@@ -24,3 +24,17 @@ export const filesChangedPayloadSchema = z.object({
   previousPath: z.string().min(1).max(MAX_FILE_PATH_LENGTH).optional(),
 }).strict();
 export type FilesChangedPayload = z.infer<typeof filesChangedPayloadSchema>;
+
+export const gitStatusChangedReasonSchema = z.enum([
+  "stage", "unstage", "stage-all", "unstage-all", "discard", "commit", "pull", "fetch",
+]);
+export type GitStatusChangedReason = z.infer<typeof gitStatusChangedReasonSchema>;
+
+/** Invalidation-only payload for `git-status-changed` workspace events.
+ *  Receivers refetch the authoritative HTTP status snapshot; `GitStatus`
+ *  never rides the wire. */
+export const gitStatusChangedPayloadSchema = z.object({
+  workspaceId: workspaceIdSchema,
+  reason: gitStatusChangedReasonSchema,
+}).strict();
+export type GitStatusChangedPayload = z.infer<typeof gitStatusChangedPayloadSchema>;

@@ -32,7 +32,54 @@ export class GitService {
     const checkoutRoot = await realpath(lines[0]); const gitDir = resolve(cwd, lines[1]); const common = resolve(cwd, lines[2]); const commonPath = await realpath(common); const repositoryRoot = commonPath.endsWith("/.git") ? dirname(commonPath) : commonPath;
     const branchRef = lines[3] === "HEAD" ? null : lines[3]; const mainCheckoutRoot = gitDir === common ? checkoutRoot : commonPath.replace(/\/\.git$/, ""); return { checkoutRoot, mainCheckoutRoot, repositoryRoot, branchRef, detached: branchRef === null };
   }
-  async status(cwd: string, options?: Options): Promise<GitStatus> { const d = await this.discover(cwd, options); const r = await this.run(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], options); const files: GitFileStatus[] = []; const parts = r.stdout.split("\0"); for (let i = 0; i < parts.length; i++) { const s = parts[i]; if (!s) continue; const xy = s.slice(0, 2); let path = s.slice(3), oldPath: string | undefined; if (xy[0] === "R" || xy[1] === "R") { oldPath = parts[++i]; } const conflict = xy === "UU" || xy.includes("U") || xy === "AA" || xy === "DD"; const kind: GitChangeKind = conflict ? "conflict" : xy.includes("R") ? "renamed" : xy.includes("D") ? "deleted" : xy.includes("A") || xy === "??" ? (xy === "??" ? "untracked" : "added") : "modified"; files.push({ path, oldPath, kind, staged: xy[0] !== " " && xy !== "??", workingTree: xy[1] !== " ", binary: false, submodule: xy[0] === "S" || xy[1] === "S" }); } let ahead = 0, behind = 0; try { const b = await this.run(cwd, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], options); [behind, ahead] = b.stdout.trim().split(/\s+/).map(Number); } catch {} return { ...d, ahead: ahead || 0, behind: behind || 0, dirty: files.length > 0, conflicted: files.some((f) => f.kind === "conflict"), truncated: r.truncated, files }; }
+  async status(cwd: string, options?: Options): Promise<GitStatus> { const d = await this.discover(cwd, options); const r = await this.run(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], options); const files: GitFileStatus[] = []; const parts = r.stdout.split("\0"); for (let i = 0; i < parts.length; i++) { const s = parts[i]; if (!s) continue; const xy = s.slice(0, 2); let path = s.slice(3), oldPath: string | undefined; if (xy[0] === "R" || xy[1] === "R") { oldPath = parts[++i]; } const conflict = xy === "UU" || xy.includes("U") || xy === "AA" || xy === "DD"; const kind: GitChangeKind = conflict ? "conflict" : xy.includes("R") ? "renamed" : xy.includes("D") ? "deleted" : xy.includes("A") || xy === "??" ? (xy === "??" ? "untracked" : "added") : "modified"; files.push({ path, oldPath, kind, staged: xy[0] !== " " && xy !== "??", workingTree: xy[1] !== " ", binary: false, submodule: xy[0] === "S" || xy[1] === "S" }); } let ahead = 0, behind = 0; try { const b = await this.run(cwd, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], options); [ahead, behind] = b.stdout.trim().split(/\s+/).map(Number); } catch {} return { ...d, ahead: ahead || 0, behind: behind || 0, dirty: files.length > 0, conflicted: files.some((f) => f.kind === "conflict"), truncated: r.truncated, files }; }
+  /** Stage paths (repo-relative, pre-validated by the caller). */
+  async stage(cwd: string, paths: string[], options?: Options): Promise<void> {
+    if (paths.length === 0) throw new GitError("No paths to stage");
+    await this.run(cwd, ["add", "--", ...paths], options);
+  }
+  /** Unstage paths (repo-relative, pre-validated by the caller). */
+  async unstage(cwd: string, paths: string[], options?: Options): Promise<void> {
+    if (paths.length === 0) throw new GitError("No paths to unstage");
+    await this.run(cwd, ["reset", "HEAD", "--", ...paths], options);
+  }
+  async stageAll(cwd: string, options?: Options): Promise<void> {
+    await this.run(cwd, ["add", "-A"], options);
+  }
+  async unstageAll(cwd: string, options?: Options): Promise<void> {
+    await this.run(cwd, ["reset", "HEAD"], options);
+  }
+  /** Discard all changes to one repo-relative path: tracked files are
+   *  restored from HEAD (index and worktree); untracked files are removed
+   *  (`git clean -f`, never `-d`, so directories are refused by Git itself).
+   *  Unmerged conflict paths are refused. */
+  async discard(cwd: string, path: string, options?: Options): Promise<"restored" | "removed"> {
+    if (!path) throw new GitError("No path to discard");
+    const unmerged = await this.run(cwd, ["ls-files", "-u", "--", path], options);
+    if (unmerged.stdout.trim() !== "") throw new GitError(`Cannot discard unmerged path: ${path}`);
+    const tracked = await this.run(cwd, ["ls-files", "--", path], options);
+    if (tracked.stdout.trim() !== "") {
+      await this.run(cwd, ["restore", "--source=HEAD", "--staged", "--worktree", "--", path], options);
+      return "restored";
+    }
+    const candidate = await stat(join(cwd, path)).catch(() => undefined);
+    if (!candidate?.isFile()) throw new GitError(`Cannot discard: ${path}`);
+    await this.run(cwd, ["clean", "-f", "--", path], options);
+    return "removed";
+  }
+  /** Commit staged changes; returns the new HEAD. Empty messages and
+   *  empty indexes fail via validation or Git itself. */
+  async commit(cwd: string, message: string, options?: Options): Promise<string> {
+    if (message.trim() === "") throw new GitError("Commit message is empty");
+    await this.run(cwd, ["commit", "-m", message], options);
+    return (await this.run(cwd, ["rev-parse", "HEAD"], options)).stdout.trim();
+  }
+  async pull(cwd: string, options?: Options): Promise<void> {
+    await this.run(cwd, ["pull", "--ff-only"], { timeoutMs: 30_000, ...options });
+  }
+  async fetch(cwd: string, options?: Options): Promise<void> {
+    await this.run(cwd, ["fetch", "--prune"], { timeoutMs: 30_000, ...options });
+  }
   async diff(cwd: string, target: "staged" | "working-tree" = "working-tree", options?: Options): Promise<GitDiff[]> { const args = ["diff", "--no-ext-diff", "--no-color", "--unified=3", "--binary", ...(target === "staged" ? ["--cached"] : [])]; const r = await this.run(cwd, args, options); if (r.truncated) return [{ path: "", binary: false, oversized: true, truncated: true, additions: 0, deletions: 0, hunks: [] }]; const result: GitDiff[] = []; let current: GitDiff | undefined; let hunk: DiffHunk | undefined; for (const line of r.stdout.split("\n")) { if (line.startsWith("diff --git ")) { const m = /^diff --git a\/(.*) b\/(.*)$/.exec(line); current = { path: m?.[2] ?? "", oldPath: m?.[1], binary: false, oversized: false, truncated: false, additions: 0, deletions: 0, hunks: [] }; result.push(current); hunk = undefined; } else if (line.startsWith("Binary files") || line.startsWith("GIT binary patch")) { if (current) current.binary = true; } else if (line.startsWith("@@ ") && current) { const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)/.exec(line); if (m) { hunk = { oldStart: +m[1], oldLines: +(m[2] ?? 1), newStart: +m[3], newLines: +(m[4] ?? 1), header: m[5], lines: [] }; current.hunks.push(hunk); } } else if (hunk && /^[ +\-]/.test(line)) { const kind: DiffLine["kind"] = line[0] === "+" ? "added" : line[0] === "-" ? "removed" : "context"; hunk.lines.push({ kind, text: line.slice(1) }); if (current) { if (kind === "added") current.additions++; if (kind === "removed") current.deletions++; } } }
     if (target === "working-tree" && !r.truncated) {
       try {
