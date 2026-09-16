@@ -65,10 +65,10 @@ afterEach(async () => {
 describe("metadata persistence", () => {
   test("migrates an empty database and reopens idempotently", async () => {
     const { path, store } = await open();
-    expect(store.schemaVersion).toBe(2);
+    expect(store.schemaVersion).toBe(3);
     store.close();
     const reopened = new MetadataStore(path);
-    expect(reopened.schemaVersion).toBe(2);
+    expect(reopened.schemaVersion).toBe(3);
     reopened.close();
   });
 
@@ -79,6 +79,9 @@ describe("metadata persistence", () => {
     repositories.workspaceSettings.save({ workspaceId: "workspace-1", settingsSchemaVersion: 1, preferences: { wrap: true }, modifiedAt: "2026-08-28T00:00:00Z" });
     repositories.metadataJobs.save({ id: "job-1", targetType: "workspace", targetId: "workspace-1", promptFingerprint: "fingerprint", candidate: { label: "Suggested" }, acceptedAt: null });
     repositories.sessionIndex.save({ piSessionPath: "/sessions/one.jsonl", mtime: 1, size: 2, indexVersion: 1, workspaceId: "workspace-1", agentId: "agent-1" });
+    repositories.webPreviews.save({ id: "preview-1", workspaceId: "workspace-1", displayLabel: "Preview", targetUrl: "http://localhost:3000/", viewport: { width: 1280, height: 800, deviceScaleFactor: 1 }, createdAt: "2026-09-16T00:00:00Z", updatedAt: "2026-09-16T00:00:00Z" });
+    expect(repositories.webPreviews.get("preview-1")?.targetUrl).toBe("http://localhost:3000/");
+    expect(repositories.webPreviews.listForWorkspace("workspace-1", 10).length).toBe(1);
 
     expect(repositories.projects.get("project-1")?.displayLabel).toBe("App");
     expect(repositories.worktreeLocations.get("location-1")?.enabled).toBe(true);

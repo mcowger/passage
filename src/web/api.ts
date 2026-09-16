@@ -19,6 +19,7 @@ import { z } from "zod";
 import { filesSearchResponseSchema } from "../shared/protocol/workspace.ts";
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
 import type { GitDiff, GitStatus } from "../shared/domain/git.ts";
+import { webPreviewSchema, type WebPreview } from "../shared/domain/previews.ts";
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 const acceptedResponseSchema = z.object({ accepted: z.literal(true) }).strict();
@@ -48,6 +49,7 @@ const FRIENDLY_API_ERRORS: Record<string, string> = {
   "conflict": "That conflicts with the current state. Refresh and try again.",
   "force-required": "That would discard uncommitted changes. Confirm a force delete to proceed.",
   "git-failed": "The git operation failed. Check the repository state and try again.",
+  "preview-not-running": "The preview is not running. Start it and try again.",
 };
 
 /** Convert API/validation failures into human-readable UI messages. Raw
@@ -243,6 +245,57 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     },
     async deleteTerminal(terminalId: string): Promise<void> {
       okResponseSchema.parse(await request(`/api/terminals/${encodeURIComponent(terminalId)}`, { method: "DELETE" }));
+    },
+    async listPreviews(workspaceId: string): Promise<WebPreview[]> {
+      return webPreviewSchema.array().parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/previews`));
+    },
+    async createPreview(workspaceId: string, input: { label?: string; targetUrl: string }): Promise<WebPreview> {
+      return webPreviewSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/previews`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }));
+    },
+    async previewCandidates(workspaceId: string): Promise<{ port: number; confidence: string; processName: string | null; pid: number | null }[]> {
+      return (await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/previews/candidates`)) as { port: number; confidence: string; processName: string | null; pid: number | null }[];
+    },
+    async getPreview(previewId: string): Promise<WebPreview> {
+      return webPreviewSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}`));
+    },
+    async openPreview(previewId: string): Promise<WebPreview> {
+      return webPreviewSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}/open`, { method: "POST" }));
+    },
+    async stopPreview(previewId: string): Promise<WebPreview> {
+      return webPreviewSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}/stop`, { method: "POST" }));
+    },
+    async deletePreview(previewId: string): Promise<void> {
+      okResponseSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}`, { method: "DELETE" }));
+    },
+    async navigatePreview(previewId: string, url: string): Promise<WebPreview> {
+      return webPreviewSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}/navigate`, {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      }));
+    },
+    async previewBack(previewId: string): Promise<WebPreview> {
+      return webPreviewSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}/back`, { method: "POST" }));
+    },
+    async previewForward(previewId: string): Promise<WebPreview> {
+      return webPreviewSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}/forward`, { method: "POST" }));
+    },
+    async previewReload(previewId: string): Promise<WebPreview> {
+      return webPreviewSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}/reload`, { method: "POST" }));
+    },
+    async setPreviewViewport(previewId: string, viewport: { width?: number; height?: number }): Promise<WebPreview> {
+      return webPreviewSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}/viewport`, {
+        method: "POST",
+        body: JSON.stringify(viewport),
+      }));
+    },
+    async takePreviewLease(previewId: string, clientId: string): Promise<WebPreview> {
+      return webPreviewSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}/lease`, {
+        method: "POST",
+        body: JSON.stringify({ clientId }),
+      }));
     },
     async transcriptPreview(): Promise<AgentHistory> {
       const json = (await request("/api/dev/transcript-preview?mode=transcript")) as { history: unknown };

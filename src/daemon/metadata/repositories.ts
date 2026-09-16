@@ -8,6 +8,7 @@ export type Layout<T = unknown> = { workspaceId: string; layoutSchemaVersion: nu
 export type WorkspaceSettings<T = unknown> = { workspaceId: string; settingsSchemaVersion: number; preferences: T; modifiedAt: string };
 export type MetadataJob<T = unknown> = { id: string; targetType: string; targetId: string; promptFingerprint: string; candidate: T | null; acceptedAt: string | null };
 export type SessionIndex = { piSessionPath: string; mtime: number; size: number; indexVersion: number; workspaceId: string | null; agentId: string | null };
+export type WebPreviewRow = { id: string; workspaceId: string; displayLabel: string; targetUrl: string; viewport: unknown; createdAt: string; updatedAt: string };
 
 const encode = (value: unknown) => JSON.stringify(value);
 const decode = <T>(value: string): T => JSON.parse(value) as T;
@@ -74,7 +75,22 @@ export class WorkspaceSettingsRepository { constructor(private readonly db: Data
 export class MetadataJobRepository { constructor(private readonly db: Database) {} save<T>(v: MetadataJob<T>): void { this.db.query("INSERT INTO metadata_jobs VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET target_type=excluded.target_type, target_id=excluded.target_id, prompt_fingerprint=excluded.prompt_fingerprint, candidate_json=excluded.candidate_json, accepted_at=excluded.accepted_at").run(v.id, v.targetType, v.targetId, v.promptFingerprint, v.candidate === null ? null : encode(v.candidate), v.acceptedAt); } get<T>(id: string): MetadataJob<T> | undefined { return jobFromRow(this.db.query<JobRow, [string]>("SELECT * FROM metadata_jobs WHERE id=?").get(id)); } }
 export class SessionIndexRepository { constructor(private readonly db: Database) {} save(v: SessionIndex): void { this.db.query("INSERT INTO session_index VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(pi_session_path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size, index_version=excluded.index_version, workspace_id=excluded.workspace_id, agent_id=excluded.agent_id").run(v.piSessionPath, v.mtime, v.size, v.indexVersion, v.workspaceId, v.agentId); } get(path: string): SessionIndex | undefined { return sessionFromRow(this.db.query<SessionRow, [string]>("SELECT * FROM session_index WHERE pi_session_path=?").get(path)); } }
 
+export class WebPreviewRepository {
+  constructor(private readonly db: Database) {}
+  save(value: WebPreviewRow): void {
+    this.db.query("INSERT INTO web_previews VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET workspace_id=excluded.workspace_id, display_label=excluded.display_label, target_url=excluded.target_url, viewport_json=excluded.viewport_json, created_at=excluded.created_at, updated_at=excluded.updated_at").run(value.id, value.workspaceId, value.displayLabel, value.targetUrl, JSON.stringify(value.viewport), value.createdAt, value.updatedAt);
+  }
+  get(id: string): WebPreviewRow | undefined {
+    const row = this.db.query<{ id: string; workspace_id: string; display_label: string; target_url: string; viewport_json: string; created_at: string; updated_at: string }, [string]>("SELECT * FROM web_previews WHERE id=?").get(id);
+    return row ? { id: row.id, workspaceId: row.workspace_id, displayLabel: row.display_label, targetUrl: row.target_url, viewport: JSON.parse(row.viewport_json) as unknown, createdAt: row.created_at, updatedAt: row.updated_at } : undefined;
+  }
+  listForWorkspace(workspaceId: string, limit: number): WebPreviewRow[] {
+    return this.db.query<{ id: string; workspace_id: string; display_label: string; target_url: string; viewport_json: string; created_at: string; updated_at: string }, [string, number]>("SELECT * FROM web_previews WHERE workspace_id=? ORDER BY id LIMIT ?").all(workspaceId, limit).map((row) => ({ id: row.id, workspaceId: row.workspace_id, displayLabel: row.display_label, targetUrl: row.target_url, viewport: JSON.parse(row.viewport_json) as unknown, createdAt: row.created_at, updatedAt: row.updated_at }));
+  }
+  delete(id: string): void { this.db.query("DELETE FROM web_previews WHERE id=?").run(id); }
+}
+
 export class MetadataRepositories {
-  readonly projects: ProjectRepository; readonly worktreeLocations: WorktreeLocationRepository; readonly workspaces: WorkspaceRepository; readonly agents: AgentRepository; readonly layouts: LayoutRepository; readonly workspaceSettings: WorkspaceSettingsRepository; readonly metadataJobs: MetadataJobRepository; readonly sessionIndex: SessionIndexRepository;
-  constructor(db: Database) { this.projects = new ProjectRepository(db); this.worktreeLocations = new WorktreeLocationRepository(db); this.workspaces = new WorkspaceRepository(db); this.agents = new AgentRepository(db); this.layouts = new LayoutRepository(db); this.workspaceSettings = new WorkspaceSettingsRepository(db); this.metadataJobs = new MetadataJobRepository(db); this.sessionIndex = new SessionIndexRepository(db); }
+  readonly projects: ProjectRepository; readonly worktreeLocations: WorktreeLocationRepository; readonly workspaces: WorkspaceRepository; readonly agents: AgentRepository; readonly layouts: LayoutRepository; readonly workspaceSettings: WorkspaceSettingsRepository; readonly metadataJobs: MetadataJobRepository; readonly sessionIndex: SessionIndexRepository; readonly webPreviews: WebPreviewRepository;
+  constructor(db: Database) { this.projects = new ProjectRepository(db); this.worktreeLocations = new WorktreeLocationRepository(db); this.workspaces = new WorkspaceRepository(db); this.agents = new AgentRepository(db); this.layouts = new LayoutRepository(db); this.workspaceSettings = new WorkspaceSettingsRepository(db); this.metadataJobs = new MetadataJobRepository(db); this.sessionIndex = new SessionIndexRepository(db); this.webPreviews = new WebPreviewRepository(db); }
 }

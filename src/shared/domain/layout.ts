@@ -7,11 +7,12 @@ export type PaneTabKind =
   | "editor"
   | "diff"
   | "explorer"
-  | "changes";
+  | "changes"
+  | "preview";
 
 export const paneTabSchema = z.object({
   id: z.string().min(1).max(256),
-  kind: z.enum(["overview", "agent", "terminal", "editor", "diff", "explorer", "changes"]),
+  kind: z.enum(["overview", "agent", "terminal", "editor", "diff", "explorer", "changes", "preview"]),
   title: z.string().min(1).max(256),
   targetId: z.string().max(1024).optional(),
   pinned: z.boolean().optional(),

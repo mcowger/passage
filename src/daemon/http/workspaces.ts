@@ -34,7 +34,7 @@ function id(context: RouteContext, name: string): string {
 
 const success = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 
-export const createWorkspaceRoutes = (service: WorkspaceService): Hono => {
+export const createWorkspaceRoutes = (service: WorkspaceService, hooks?: { onArchiveWorkspace?: (workspaceId: string) => Promise<void> }): Hono => {
   const app = new Hono();
   app.use("*", async (context, next) => { context.header("Cache-Control", "no-store"); return next(); });
   app.get("/api/workspaces/snapshot", async (context) => { try { await service.ensureAllDefaults(); } catch {} return success(service.snapshot()); });
@@ -43,7 +43,7 @@ export const createWorkspaceRoutes = (service: WorkspaceService): Hono => {
   app.post("/api/projects/:projectId/reopen", (context) => { try { return success(service.reopenProject(id(context, "projectId"))); } catch (error) { return errorResponse(error); } });
   app.post("/api/projects/:projectId/workspaces", async (context) => { try { const input = workspaceInput.parse(await readJsonBody(context.req.raw)); return success(await service.createDirectoryWorkspace(id(context, "projectId"), input), 201); } catch (error) { return errorResponse(error); } });
   app.patch("/api/workspaces/:workspaceId", async (context) => { try { const input = labelInput.parse(await readJsonBody(context.req.raw)); return success(service.labelWorkspace(id(context, "workspaceId"), input.displayLabel)); } catch (error) { return errorResponse(error); } });
-  app.post("/api/workspaces/:workspaceId/archive", (context) => { try { service.archiveWorkspace(id(context, "workspaceId")); return success({ ok: true }); } catch (error) { return errorResponse(error); } });
+  app.post("/api/workspaces/:workspaceId/archive", async (context) => { try { const workspaceId = id(context, "workspaceId"); await hooks?.onArchiveWorkspace?.(workspaceId); service.archiveWorkspace(workspaceId); return success({ ok: true }); } catch (error) { return errorResponse(error); } });
   app.post("/api/workspaces/:workspaceId/reopen", (context) => { try { return success(service.reopenWorkspace(id(context, "workspaceId"))); } catch (error) { return errorResponse(error); } });
   app.post("/api/worktree-locations", async (context) => { try { const input = locationInput.parse(await readJsonBody(context.req.raw)); return success(await service.configureLocation(input), 201); } catch (error) { return errorResponse(error); } });
   app.get("/api/worktree-locations", (context) => { try { return success(service.listAllLocations()); } catch (error) { return errorResponse(error); } });

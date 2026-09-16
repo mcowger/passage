@@ -17,6 +17,15 @@ import { GitService } from "./workspaces/git.ts";
 import { FileService } from "./workspaces/files.ts";
 import { WorktreeService } from "./workspaces/worktrees.ts";
 import { TerminalManager } from "./terminals/manager.ts";
+import { WebPreviewManager } from "./previews/manager.ts";
+import { isAllowedPreviewRequest } from "./previews/relay.ts";
+import { createPreviewRoutes } from "./http/previews.ts";
+import {
+  MAX_PREVIEW_MESSAGE_BYTES,
+  MAX_PREVIEW_UPSTREAM_BYTES,
+  previewDownstreamMessageSchema,
+  previewUpstreamMessageSchema,
+} from "../shared/protocol/previews.ts";
 import {
   PROTOCOL_VERSION,
   agentMessagePayloadSchema,
@@ -59,6 +68,7 @@ const gitService = new GitService();
 const fileService = new FileService(workspaceService);
 const worktreeService = new WorktreeService(repositories, gitService);
 const terminalManager = new TerminalManager(workspaceService);
+const previewManager = new WebPreviewManager(repositories, workspaceService);
 const agentService = new AgentService(repositories, {
   sessionsRoot: process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(metadataPath), "sessions"),
 });
@@ -72,11 +82,12 @@ app.get("/api/daemon/snapshot", (context) => context.json({
   protocolVersion: PROTOCOL_VERSION,
   metadataSchemaVersion: metadata.schemaVersion,
 }));
-app.route("/", createWorkspaceRoutes(workspaceService));
+app.route("/", createWorkspaceRoutes(workspaceService, { onArchiveWorkspace: (workspaceId) => previewManager.stopForWorkspace(workspaceId) }));
 app.route("/", createGitRoutes(workspaceService, gitService, workspaceEvents));
 app.route("/", createFileRoutes(fileService, workspaceEvents));
-app.route("/", createWorktreeRoutes(worktreeService));
+app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (workspaceId) => previewManager.stopForWorkspace(workspaceId) }));
 app.route("/", createTerminalRoutes(terminalManager));
+app.route("/", createPreviewRoutes(previewManager, workspaceEvents));
 app.route("/", createAgentRoutes(agentService));
 app.route("/", createTranscriptPreviewRoutes());
 
@@ -86,7 +97,104 @@ function protocolError(requestId: string, code: string, message: string): Protoc
 
 type SocketData =
   | { kind: "agent"; subscriptions: Map<string, () => boolean>; workspaceSubscriptions: Map<string, () => boolean> }
-  | { kind: "terminal"; terminalId: string; clientId: string };
+  | { kind: "terminal"; terminalId: string; clientId: string }
+  | { kind: "preview"; previewId: string; clientId: string };
+
+const PREVIEW_UPSTREAM_FPS = 15;
+/** Browser sockets for preview streams, each paired with one loopback upstream. */
+const previewUpstreams = new WeakMap<Bun.ServerWebSocket<SocketData>, WebSocket>();
+
+function sendPreviewError(socket: Bun.ServerWebSocket<SocketData>, message: string): void {
+  try {
+    socket.sendText(JSON.stringify({ type: "error", message: message.slice(0, 512) }));
+  } catch {}
+}
+
+async function attachPreviewUpstream(socket: Bun.ServerWebSocket<SocketData>, previewId: string): Promise<void> {
+  // A disconnected preview may still have a live agent-browser session;
+  // reattach to it so a suspended client resumes at the newest frame.
+  if (previewManager.previewStatus(previewId) !== "ready") {
+    const reattached = await previewManager.rediscover(previewId);
+    if (!reattached) {
+      sendPreviewError(socket, "Preview is not running");
+      socket.close(1011, "preview is not running");
+      return;
+    }
+  }
+  const streamPort = previewManager.streamPortFor(previewId);
+  if (streamPort === null) {
+    sendPreviewError(socket, "Preview is not running");
+    socket.close(1011, "preview is not running");
+    return;
+  }
+  let upstream: WebSocket;
+  try {
+    upstream = new WebSocket(`ws://127.0.0.1:${streamPort}/?pacing=ack&maxFps=${PREVIEW_UPSTREAM_FPS}`);
+  } catch {
+    sendPreviewError(socket, "Preview stream is unavailable");
+    socket.close(1011, "preview stream unavailable");
+    return;
+  }
+  previewUpstreams.set(socket, upstream);
+  upstream.addEventListener("message", (event) => {
+    const text = typeof event.data === "string" ? event.data : null;
+    if (!text || text.length > MAX_PREVIEW_UPSTREAM_BYTES) return;
+    let value: unknown;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      return;
+    }
+    // Allowlist only: drop everything Passage does not relay.
+    if (!previewUpstreamMessageSchema.safeParse(value).success) return;
+    try {
+      if (socket.sendText(text) <= 0) {
+        try { upstream.close(); } catch {}
+        socket.close(1013, "client cannot receive preview frames");
+      }
+    } catch {}
+  });
+  const dropUpstream = () => {
+    previewManager.markDisconnected(previewId);
+    try { upstream.close(); } catch {}
+    previewUpstreams.delete(socket);
+    try { socket.close(1011, "preview stream disconnected"); } catch {}
+  };
+  upstream.addEventListener("close", dropUpstream);
+  upstream.addEventListener("error", dropUpstream);
+}
+
+function handlePreviewSocketMessage(socket: Bun.ServerWebSocket<SocketData>, previewId: string, clientId: string, message: string | Uint8Array | ArrayBuffer): void {
+  if (typeof message !== "string") {
+    sendPreviewError(socket, "Preview messages must be JSON text");
+    socket.close(1003, "preview messages must be JSON text");
+    return;
+  }
+  if (message.length > MAX_PREVIEW_MESSAGE_BYTES) {
+    socket.close(1009, "preview message is too large");
+    return;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(message);
+  } catch {
+    return;
+  }
+  const parsed = previewDownstreamMessageSchema.safeParse(value);
+  if (!parsed.success) return;
+  const upstream = previewUpstreams.get(socket);
+  if (!upstream || upstream.readyState !== WebSocket.OPEN) return;
+  const data = parsed.data;
+  // Frame acks and pacing config always flow (they preserve latest-frame-wins
+  // behavior for every client, including view-only ones). Input needs the lease.
+  if (data.type !== "ack" && data.type !== "config") {
+    const snapshot = previewManager.get(previewId, clientId);
+    if (!snapshot || snapshot.status !== "ready" || snapshot.hasInputLease !== true) return;
+  }
+  try {
+    upstream.send(JSON.stringify(data));
+  } catch {}
+}
 
 function sendSocketJson(socket: Bun.ServerWebSocket<SocketData>, value: unknown): void {
   if (socket.sendText(JSON.stringify(value)) <= 0) socket.close(1013, "client cannot receive events");
@@ -137,7 +245,7 @@ async function handleWorkspaceCommand(command: CommandEnvelope, socket: Bun.Serv
 }
 
 async function handleCommand(command: CommandEnvelope, socket: Bun.ServerWebSocket<SocketData>): Promise<ProtocolResponse> {
-  if (socket.data.kind !== "agent") return protocolError(command.requestId, "invalid-channel", "Terminal sockets do not accept agent commands");
+  if (socket.data.kind !== "agent") return protocolError(command.requestId, "invalid-channel", "Only /ws sockets accept agent commands");
   if (command.channel === "daemon" && command.type === "ping") {
     return { version: PROTOCOL_VERSION, requestId: command.requestId, ok: true } satisfies Acknowledgement;
   }
@@ -256,6 +364,19 @@ export const server = Bun.serve<SocketData>({
         : new Response("Terminal WebSocket upgrade failed", { status: 400 });
     }
 
+    if (url.pathname.startsWith("/api/previews/") && url.pathname.endsWith("/ws")) {
+      const parts = url.pathname.split("/");
+      const previewId = parts[3];
+      if (!previewId) return new Response("Missing preview ID", { status: 400 });
+      if (!isAllowedPreviewRequest(request)) return new Response("Origin is not allowed", { status: 403 });
+      // Ownership check: unknown IDs never reach the relay.
+      if (previewManager.previewWorkspace(previewId) === null) return new Response("Preview not found", { status: 404 });
+      const clientId = url.searchParams.get("clientId") || `client_${crypto.randomUUID()}`;
+      return server.upgrade(request, { data: { kind: "preview", previewId, clientId } })
+        ? undefined
+        : new Response("Preview WebSocket upgrade failed", { status: 400 });
+    }
+
     return app.fetch(request);
   },
   websocket: {
@@ -268,9 +389,15 @@ export const server = Bun.serve<SocketData>({
           sendBinary: (buf) => socket.sendBinary(buf),
           sendControl: (ctrl) => socket.sendText(JSON.stringify(ctrl)),
         });
+      } else if (socket.data.kind === "preview") {
+        void attachPreviewUpstream(socket, socket.data.previewId);
       }
     },
     async message(socket, message) {
+      if (socket.data.kind === "preview") {
+        handlePreviewSocketMessage(socket, socket.data.previewId, socket.data.clientId, message as string | Uint8Array | ArrayBuffer);
+        return;
+      }
       if (socket.data.kind === "terminal") {
         const { terminalId, clientId } = socket.data;
         if (typeof message === "string") {
@@ -358,6 +485,10 @@ export const server = Bun.serve<SocketData>({
     close(socket) {
       if (socket.data.kind === "terminal") {
         terminalManager.detach(socket.data.terminalId, socket.data.clientId);
+      } else if (socket.data.kind === "preview") {
+        try { previewUpstreams.get(socket)?.close(); } catch {}
+        previewUpstreams.delete(socket);
+        previewManager.releaseLease(socket.data.previewId, socket.data.clientId);
       } else {
         for (const unsubscribe of socket.data.subscriptions.values()) unsubscribe();
         socket.data.subscriptions.clear();
@@ -377,6 +508,7 @@ async function shutdown(): Promise<void> {
   shuttingDown = true;
   agentEvents.dispose();
   workspaceEvents.dispose();
+  await previewManager.shutdown();
   await agentService.shutdown();
   await server.stop(true);
   metadata.close();

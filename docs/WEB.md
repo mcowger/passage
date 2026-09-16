@@ -1,13 +1,10 @@
 # Embedded web preview
 
-Authority: `docs/DESIGN.md` (architecture and security) > `docs/UI.md`
-(interaction) > this document > `docs/WS.md` (current transport standard) >
-`PI.md` (Pi boundary).
+Authority: `docs/DESIGN.md` (architecture and security) > `docs/WS.md`
+(transport standard) > this document > `PI.md` (Pi boundary).
 
-Status: proposed design. The transport described here requires matching changes
-to `docs/DESIGN.md` and `docs/WS.md` before implementation. In particular, the
-current two-socket rule does not allow the bounded preview stream this design
-needs.
+Status: accepted. The `docs/WS.md` three-socket rule now authorizes the
+bounded preview stream this design needs (`GET /api/previews/:previewId/ws`).
 
 ## 1. Decision
 
@@ -30,10 +27,9 @@ the workspace and its development server, even when the Passage UI is open on
 another machine.
 
 Use the current native agent-browser implementation, not its removed
-Node/Playwright implementation. Pin an exact release and verify it before an
-upgrade. The release reviewed for this design is `v0.38.1`, which is Apache
-2.0 licensed and ships a Linux x64 native binary. Chrome remains a separate
-runtime dependency.
+Node/Playwright implementation. The release reviewed for this design is `v0.38.1`,
+which is Apache 2.0 licensed and ships a Linux x64 native binary. Chrome remains
+a separate runtime dependency.
 
 Passage uses agent-browser as an executable with a narrow command allowlist. It
 does not import agent-browser as a library, expose its raw command protocol to
@@ -132,7 +128,7 @@ activity. If agent-browser exits while idle, the next preview open starts a new
 browser and returns to the saved target URL.
 
 `WebPreviewManager` is the sole Passage owner of preview lifecycle. It invokes
-the pinned binary with fixed argument arrays, validates JSON responses, keeps
+the configured binary with fixed argument arrays, validates JSON responses, keeps
 bounded stderr/diagnostics, discovers the loopback stream port, and serializes
 mutating commands per preview. Browser HTTP handlers must not spawn or control
 agent-browser directly.
@@ -339,22 +335,12 @@ and agent risks, not as passive file viewing.
   explicit workspace trust decision as other executable project resources and
   are out of scope for the first version.
 
-Agent-browser's domain allowlist matches hostnames, not ports. A page allowed to
-load from `localhost:5173` may attempt requests to another loopback port. The
-browser same-origin policy limits reading many responses but does not prevent
-all writes or WebSocket attempts. This is a known first-version limitation on
-the existing trusted-host model. Stronger isolation would require a per-preview
-network namespace or an enforcing local proxy and is separate work.
-
 Passage still has no application authentication. Anyone who can use Passage on
 the trusted LAN can view and control previews unless an upstream authenticated
 proxy or VPN protects the deployment.
 
 ## 10. Packaging and compatibility
 
-- Pin agent-browser by version and checksum for Linux x64.
-- Install or package a compatible Chrome for Testing build. Do not download an
-  unpinned browser during normal daemon startup.
 - Keep agent-browser outside the Bun dependency graph. Bun starts its CLI with
   fixed arguments and parses bounded JSON output.
 - Headless Chrome is the default. Xvfb is optional and only needed for a proved
@@ -362,8 +348,6 @@ proxy or VPN protects the deployment.
 - Production build and package smoke tests must verify binary discovery,
   executable permissions, Chrome launch, loopback navigation, stream startup,
   input, and cleanup.
-- An agent-browser upgrade requires protocol fixtures and the live acceptance
-  tests below. Do not rely on `latest` documentation or private daemon APIs.
 
 ## 11. Delivery plan
 

@@ -305,10 +305,20 @@ When a non-focused agent completes, fails, or needs user input:
 ### Main canvas
 
 The main canvas hosts the serialized split tree from `DESIGN.md`. It contains
-agent, terminal, editor, diff, explorer, changes, and overview panels. Its
+agent, terminal, editor, diff, explorer, changes, overview, and web preview
+panels. Its
 default is not a permanently dense three-column layout: right-side inspection
 is contextual, and the canvas remains generous when the user is reading or
 steering an agent.
+
+A web preview panel shows one workspace-bound live browser session: a compact
+toolbar (Back, Forward, Reload, address, viewport, Take control, Stop, close),
+a canvas rendering the newest JPEG frame at the remote viewport's aspect ratio,
+and explicit connection states over the last frame when the stream freezes.
+Only one attached client holds the input/viewport lease; other clients are
+view-only until they explicitly take control. Closing the pane closes only the
+view, never the preview. On viewports below 640px the preview is a full-screen
+destination with touch-mapped pointer input.
 
 Every canvas tab shows resource icon, title, relevant status, unsaved/changed
 marker where appropriate, and close control. Pane splitting/moving is primarily
@@ -665,6 +675,7 @@ web/
       EditorPanel
       DiffView
       TerminalPanel
+      PreviewPanel
     settings/
       ThemeAndFontSettings
       ToolRendererPackSettings

@@ -87,3 +87,4 @@ export type PassageEventEnvelope = EventEnvelope;
 export * from "./agents.ts";
 export * from "./terminals.ts";
 export * from "./workspace.ts";
+export * from "./previews.ts";

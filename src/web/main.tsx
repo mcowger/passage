@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { AgentHistory, AgentSummary } from "../shared/domain/agents.ts";
 import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.ts";
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
+import type { WebPreview } from "../shared/domain/previews.ts";
 import type { PaneTab, WorkspaceLayout, LayoutNode } from "../shared/domain/layout.ts";
 import { addTabToGroup, countAgentTabs, createDefaultLayout, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs } from "../shared/domain/layout.ts";
 import type { WorkspaceSettings } from "../shared/domain/settings.ts";
@@ -18,6 +19,7 @@ import { ChangesPanel } from "./components/ChangesPanel.tsx";
 import { EditorPanel } from "./components/EditorPanel.tsx";
 import { DiffPanel } from "./components/DiffPanel.tsx";
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
+import { PreviewPanel } from "./components/PreviewPanel.tsx";
 import { NewWorktreeModal } from "./components/NewWorktreeModal.tsx";
 import { SplitCanvas } from "./components/SplitCanvas.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
@@ -70,7 +72,7 @@ function applyFontTokens(font?: FontPack) {
 }
 
 type FormKind = "project" | "worktree";
-type TabKind = "overview" | "agent" | "terminal" | "explorer" | "changes" | "editor" | "diff";
+type TabKind = "overview" | "agent" | "terminal" | "explorer" | "changes" | "editor" | "diff" | "preview";
 
 type FormDialogProps = {
   title: string;
@@ -162,6 +164,8 @@ function App() {
   const [openDiffPath, setOpenDiffPath] = useState<string>();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [terminals, setTerminals] = useState<TerminalSummary[]>([]);
+  const [previews, setPreviews] = useState<WebPreview[]>([]);
+  const [selectedPreviewId, setSelectedPreviewId] = useState<string>();
   const [previewHistory, setPreviewHistory] = useState<AgentHistory | null>(null);
   const [agentError, setAgentError] = useState("");
   const [form, setForm] = useState<FormKind>();
@@ -278,6 +282,17 @@ function App() {
     } catch {}
   }, [api]);
 
+  const loadPreviews = useCallback(async (workspaceId: string, selectFirst = true) => {
+    try {
+      const next = await api.listPreviews(workspaceId);
+      setPreviews(next);
+      setSelectedPreviewId((current) => {
+        if (current && next.some((p) => p.id === current)) return current;
+        return selectFirst ? next[0]?.id : undefined;
+      });
+    } catch {}
+  }, [api]);
+
   const loadLayoutAndSettings = useCallback(async (workspaceId: string) => {
     try {
       const [fetchedLayout, fetchedSettings, fetchedThemes, fetchedFonts] = await Promise.all([
@@ -313,17 +328,20 @@ function App() {
     agentsLoadGeneration.current += 1;
     setAgents([]);
     setTerminals([]);
+    setPreviews([]);
     setSelectedAgentId(undefined);
     setSelectedTerminalId(undefined);
+    setSelectedPreviewId(undefined);
     setOpenEditorPath(undefined);
     setOpenDiffPath(undefined);
     setActiveTab("agent");
     if (selectedWorkspaceId) {
       void loadAgents(selectedWorkspaceId);
       void loadTerminals(selectedWorkspaceId);
+      void loadPreviews(selectedWorkspaceId);
       void loadLayoutAndSettings(selectedWorkspaceId);
     }
-  }, [loadAgents, loadTerminals, loadLayoutAndSettings, selectedWorkspaceId]);
+  }, [loadAgents, loadTerminals, loadPreviews, loadLayoutAndSettings, selectedWorkspaceId]);
 
   const workspace = snapshot?.workspaces.find((item) => item.id === selectedWorkspaceId);
   const project = snapshot?.projects.find((item) => item.id === workspace?.projectId);
@@ -545,6 +563,41 @@ function App() {
     } catch {}
   };
 
+  const createPreview = async () => {
+    if (!workspace) return;
+    try {
+      const candidates = await api.previewCandidates(workspace.id).catch(() => []);
+      const targetUrl = candidates.find((c) => c.confidence === "high")
+        ? `http://localhost:${candidates.find((c) => c.confidence === "high")!.port}`
+        : "http://localhost:3000";
+      const created = await api.createPreview(workspace.id, { targetUrl });
+      setPreviews((current) => [...current, created]);
+      setSelectedPreviewId(created.id);
+      setActiveTab("preview");
+      openPaneTab({
+        id: `preview-${created.id}`,
+        kind: "preview",
+        title: created.label,
+        targetId: created.id,
+      });
+    } catch {}
+  };
+
+  const handleSelectPreview = (id: string) => {
+    setSelectedPreviewId(id);
+    setActiveTab("preview");
+    setDrawerOpen(false);
+    const previewObj = previews.find((p) => p.id === id);
+    if (previewObj) {
+      openPaneTab({
+        id: `preview-${id}`,
+        kind: "preview",
+        title: previewObj.label,
+        targetId: id,
+      });
+    }
+  };
+
   const closeAgentTab = async (tabId: string) => {
     if (!tabId.startsWith("agent-") || !selectedWorkspaceId) return;
     const agentId = tabId.slice("agent-".length);
@@ -618,6 +671,9 @@ function App() {
     } else if (tab.kind === "terminal" && tab.targetId) {
       setSelectedTerminalId(tab.targetId);
       setActiveTab("terminal");
+    } else if (tab.kind === "preview" && tab.targetId) {
+      setSelectedPreviewId(tab.targetId);
+      setActiveTab("preview");
     }
   }, []);
 
@@ -625,6 +681,7 @@ function App() {
     setSelectedWorkspaceId(id);
     setSelectedAgentId(undefined);
     setSelectedTerminalId(undefined);
+    setSelectedPreviewId(undefined);
     setActiveTab("agent");
     setDrawerOpen(false);
   };
@@ -797,6 +854,32 @@ function App() {
         );
       }
 
+      case "preview": {
+        const previewId = tab.targetId ?? selectedPreviewId;
+        const currentPreview = previews.find((p) => p.id === previewId) ?? previews[0];
+        return currentPreview ? (
+          <PreviewPanel
+            key={currentPreview.id}
+            preview={currentPreview}
+            api={api}
+            onPreviewChanged={(updated) => {
+              setPreviews((current) => current.map((p) => (p.id === updated.id ? updated : p)));
+            }}
+            onClose={() => {
+              // Closing a pane closes only the view, never the preview.
+              closeTabNow(`preview-${currentPreview.id}`);
+              setActiveTab("overview");
+            }}
+          />
+        ) : (
+          <div className="empty">
+            <span className="empty-icon" aria-hidden="true">◉</span>
+            <h1>No web preview</h1>
+            <button className="primary" onClick={() => void createPreview()}>Start web preview</button>
+          </div>
+        );
+      }
+
       default:
         return <div className="empty">Unknown view</div>;
     }
@@ -921,6 +1004,19 @@ function App() {
                   &gt;_ Terminal {terminals.length > 0 && <span className="tab-badge">{terminals.length}</span>}
                 </button>
                 <button
+                  className={`nav-tab ${activeTab === "preview" ? "active" : ""}`}
+                  onClick={() => {
+                    const target = previews.find((p) => p.id === selectedPreviewId) ?? previews[0];
+                    if (target) {
+                      handleSelectPreview(target.id);
+                    } else {
+                      void createPreview();
+                    }
+                  }}
+                >
+                  ◉ Preview {previews.length > 0 && <span className="tab-badge">{previews.length}</span>}
+                </button>
+                <button
                   className={`nav-tab ${activeTab === "explorer" ? "active" : ""}`}
                   onClick={() => {
                     setActiveTab("explorer");
@@ -969,7 +1065,7 @@ function App() {
                   id: `mobile-${activeTab}`,
                   kind: activeTab,
                   title: activeTab,
-                  targetId: activeTab === "agent" ? selectedAgentId : activeTab === "terminal" ? selectedTerminalId : activeTab === "editor" ? openEditorPath : activeTab === "diff" ? openDiffPath : undefined,
+                  targetId: activeTab === "agent" ? selectedAgentId : activeTab === "terminal" ? selectedTerminalId : activeTab === "preview" ? selectedPreviewId : activeTab === "editor" ? openEditorPath : activeTab === "diff" ? openDiffPath : undefined,
                 })
               ) : layout ? (
                 <SplitCanvas

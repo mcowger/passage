@@ -170,7 +170,7 @@ Definitions:
 - **Terminal** — a live PTY owned by the daemon and attached to a workspace.
   It is not persisted as a resumable shell across daemon restart.
 - **Panel** — a view of a workspace resource: agent, terminal, editor, diff,
-  explorer, changes, or overview.
+  explorer, changes, overview, or web preview.
 
 ### Desktop layout
 
@@ -392,9 +392,17 @@ the MVP commitment is made.
 - **WebSocket** carries a minimal browser-facing `pi` channel for selected
   Pi-native commands, normalized Pi events, acknowledgements, snapshots, and
   replay; separate Passage-owned channels carry file/Git invalidation,
-  pane-independent presence, and terminals.
+  pane-independent presence, and terminals. One narrow exception exists:
+  `GET /api/previews/:previewId/ws` relays bounded agent-browser frames and
+  input for web previews. It is high-volume disposable content (like PTY
+  bytes), never enters `WorkspaceEventHub`, replay buffers, SQLite, or Pi
+  history, and requires the `Host`/`Origin`, ownership, size-cap, and
+  single-lease rules in `docs/WS.md`.
 - **Binary WebSocket frames** carry high-volume terminal bytes. Semantic agent
   events remain structured JSON so tool-call boundaries cannot be lost.
+  Preview frames are high-volume disposable JPEG content relayed through the
+  preview socket with ack pacing and latest-frame-wins resume; they are never
+  replayed.
 
 All messages use a versioned Zod-defined envelope:
 
@@ -661,7 +669,9 @@ type LayoutNode =
 ```
 
 Pane kinds are `overview`, `agent`, `terminal`, `explorer`, `changes`, `editor`,
-and `diff`. Dragging a tab supports reordering, moving to a tab set, and
+`diff`, and `preview`. A preview tab views a live workspace-bound browser
+session; closing it closes only the view, never the underlying preview.
+Dragging a tab supports reordering, moving to a tab set, and
 splitting in a directional drop zone. The model enforces minimum dimensions,
 stable panel IDs, and schema migrations. Closing a resource pane removes only
 that view; resource archival/deletion always requires a separate command.

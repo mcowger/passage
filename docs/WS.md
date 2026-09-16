@@ -1,7 +1,8 @@
 # Passage WebSocket standard
 
 Authority: `docs/DESIGN.md` (architecture) > this document (WS review
-standard) > `docs/GIT.md` (Git mutation plan) > `PI.md` (Pi RPC boundary).
+standard) > `docs/WEB.md` (preview transport) > `docs/GIT.md` (Git mutation
+plan) > `PI.md` (Pi RPC boundary).
 If this document conflicts with DESIGN.md, DESIGN.md wins and this document
 MUST be fixed.
 
@@ -17,10 +18,19 @@ The event catalog lives in code (`src/shared/protocol/`, emitters in
    file content, listings, `GitStatus`, or diffs. Receivers refetch the
    authoritative HTTP snapshot. (`MAX_PROTOCOL_PAYLOAD_BYTES` = 48KB,
    `src/shared/protocol/index.ts`.)
-2. **Two sockets, no more.** `GET /ws` (JSON text) for `pi` + `workspace` +
+2. **Three sockets, no more.** `GET /ws` (JSON text) for `pi` + `workspace` +
    `daemon/ping`; `GET /api/terminals/:id/ws` (binary frames + JSON
-   control) for PTY bytes. A PR MUST NOT add a third socket, SSE
-   (`EventSource`), polling loops, or a new envelope format.
+   control) for PTY bytes; `GET /api/previews/:previewId/ws` (bounded
+   frame/input relay) for web-preview streams. A PR MUST NOT add a fourth
+   socket, SSE (`EventSource`), polling loops, or a new envelope format.
+   The preview socket is a narrow exception: high-volume disposable frames
+   and input only, never `/ws` invalidation envelopes, replay buffers,
+   SQLite rows, or Pi history. It MUST validate `Host`/`Origin`, verify
+   preview ownership, cap frame/input sizes, enforce a single input/viewport
+   lease, and close slow or malformed clients. Upstream it connects only to
+   the loopback agent-browser stream port discovered by
+   `WebPreviewManager`; CDP, daemon sockets, and stream ports MUST NOT be
+exposed beyond loopback.
 3. **One envelope shape.** All `/ws` traffic uses the versioned Zod
    envelopes in `src/shared/protocol/`: `commandEnvelopeSchema`
    (`{version, requestId, channel, type, payload}`),
@@ -122,7 +132,7 @@ as trusted-network-only unless behind an authenticated proxy/VPN.
       client parse (`workspaceSocket.test.ts` pattern)?
 - [ ] Two-client `agent-browser` check (mutate in A, observe B without
       reload; kill/reconnect/suspend reconciles; loading/error states)?
-- [ ] No new socket, transport, envelope, or state library?
+- [ ] No new socket beyond the three sanctioned ones, no new transport, envelope, or state library?
 
 Verification:
 
@@ -136,3 +146,6 @@ bun run test:gate
 Live-model tests require explicit per-turn permission (NullModel
 otherwise). `agent-browser` is required for browser-facing changes
 (AGENTS.md), desktop plus `<640px` where responsive code is touched.
+Preview-stream changes MUST verify ack pacing (`?pacing=ack&maxFps=15`),
+latest-frame-wins resume without backlog replay, view-only until
+`Take control`, and HTTP snapshot reconcile on reconnect.

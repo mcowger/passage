@@ -63,6 +63,18 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE workspaces ADD COLUMN repair_detail TEXT;
     `,
   },
+  {
+    version: 3,
+    name: "web_previews",
+    sql: `
+      CREATE TABLE web_previews (
+        id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, display_label TEXT NOT NULL,
+        target_url TEXT NOT NULL, viewport_json TEXT NOT NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+      );
+    `,
+  },
 ];
 
 export class MetadataStore {
