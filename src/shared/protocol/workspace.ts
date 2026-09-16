@@ -44,6 +44,30 @@ export const filesSearchResponseSchema = z.object({
 }).strict();
 export type FilesSearchResponse = z.infer<typeof filesSearchResponseSchema>;
 
+/** Host directory suggestions for the Add Project directory picker.
+ *  The picker browses daemon-local paths outside registered workspace
+ *  roots by design (it selects a new root); the endpoint is read-only and
+ *  bounded, and `registerProject` still resolves/verifies the final choice
+ *  before persisting anything. */
+export const directorySuggestQuerySchema = z.object({
+  path: z.string().max(MAX_FILE_PATH_LENGTH).default(""),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+}).strict();
+export type DirectorySuggestQuery = z.infer<typeof directorySuggestQuerySchema>;
+
+export const directorySuggestEntrySchema = z.object({
+  name: z.string().min(1).max(255),
+  path: z.string().min(1).max(MAX_FILE_PATH_LENGTH),
+}).strict();
+export type DirectorySuggestEntry = z.infer<typeof directorySuggestEntrySchema>;
+
+export const directorySuggestResponseSchema = z.object({
+  base: z.string().min(1).max(MAX_FILE_PATH_LENGTH),
+  entries: z.array(directorySuggestEntrySchema).max(50),
+  truncated: z.boolean(),
+}).strict();
+export type DirectorySuggestResponse = z.infer<typeof directorySuggestResponseSchema>;
+
 export const gitStatusChangedReasonSchema = z.enum([
   "stage", "unstage", "stage-all", "unstage-all", "discard", "commit", "pull", "fetch",
 ]);

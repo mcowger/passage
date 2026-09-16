@@ -4,7 +4,7 @@ import { MAX_FILE_PATH_LENGTH, fileRevisionSchema } from "../../shared/domain/fi
 import type { FilesChangedReason } from "../../shared/protocol/index.ts";
 import { FileError, FileService } from "../workspaces/files.ts";
 import type { WorkspaceEventHub } from "../workspaces/events.ts";
-import { filesSearchQuerySchema, filesSearchResponseSchema } from "../../shared/protocol/workspace.ts";
+import { filesSearchQuerySchema, filesSearchResponseSchema, directorySuggestQuerySchema, directorySuggestResponseSchema } from "../../shared/protocol/workspace.ts";
 import { opaqueDomainIdSchema } from "../../shared/domain/workspaces.ts";
 import { readJsonBody } from "./body.ts";
 
@@ -33,6 +33,15 @@ export const createFileRoutes = (files: FileService, events?: WorkspaceEventHub)
     } catch (e) { return error(e); }
   });
   app.get("/api/workspaces/:workspaceId/files/read", async (c) => { try { return ok(await files.read(id(c.req.param("workspaceId")), path.parse(c.req.query("path") ?? ""))); } catch (e) { return error(e); } });
+  // Bounded host directory suggestions for the Add Project picker.
+  // Read-only: emits no WS events. Unresolvable bases yield an empty list.
+  app.get("/api/filesystem/directories", async (c) => {
+    try {
+      const query = directorySuggestQuerySchema.parse({ path: c.req.query("path") ?? "", limit: c.req.query("limit") ?? "20" });
+      const result = await files.suggestDirectories(query.path, query.limit);
+      return ok(directorySuggestResponseSchema.parse(result));
+    } catch (e) { return error(e); }
+  });
   app.put("/api/workspaces/:workspaceId/files", async (c) => { try { const input = writeInput.parse(await readJsonBody(c.req.raw, 1_100_000)); const workspaceId = id(c.req.param("workspaceId")); const result = await files.write(workspaceId, input.path, input.content, input.expected); changed(workspaceId, "write", input.path); return ok(result); } catch (e) { return error(e); } });
   app.post("/api/workspaces/:workspaceId/files/create", async (c) => { try { const input = createInput.parse(await readJsonBody(c.req.raw)); const workspaceId = id(c.req.param("workspaceId")); const result = await files.create(workspaceId, input.path, input.kind); changed(workspaceId, "create", input.path); return ok(result, 201); } catch (e) { return error(e); } });
   app.post("/api/workspaces/:workspaceId/files/rename", async (c) => { try { const input = renameInput.parse(await readJsonBody(c.req.raw)); const workspaceId = id(c.req.param("workspaceId")); const result = await files.rename(workspaceId, input.path, input.newPath); changed(workspaceId, "rename", input.newPath, input.path); return ok(result); } catch (e) { return error(e); } });

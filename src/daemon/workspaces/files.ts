@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, opendir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import fuzzysort from "fuzzysort";
 import { MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES, type FileEntry, type FileListing, type FileRead, type FileRevision, type FileWrite } from "../../shared/domain/files.ts";
 import { WorkspaceService, WorkspaceError } from "./service.ts";
 
@@ -128,6 +130,60 @@ export class FileService {
     return { entries: matches.slice(0, capped).map(({ path, kind }) => ({ path, kind })), truncated };
   }
   listDirectory(workspaceId: string, path = ".", cursor?: string) { return this.list(workspaceId, path, cursor); }
+  /**
+   * Suggest child directories for the Add Project directory picker.
+   * Splits a partial host path into a base directory plus a trailing
+   * prefix, then fuzzy-matches child directory names server-side.
+   * Read-only and bounded; an unresolvable base yields an empty list
+   * (not an error) since live typing constantly produces intermediate
+   * states. Symlinked children are listed as-is; the final choice is
+   * resolved/canonicalized by `registerProject` before it is persisted.
+   */
+  async suggestDirectories(partialPath: string, limit = 20): Promise<{ base: string; entries: { name: string; path: string }[]; truncated: boolean }> {
+    const capped = Math.min(Math.max(Math.floor(limit) || 20, 1), 50);
+    const home = process.env.HOME || homedir();
+    const trimmed = partialPath.trim();
+    let base: string;
+    let prefix: string;
+    if (trimmed === "" || trimmed === "~") {
+      base = home;
+      prefix = "";
+    } else {
+      const expanded = trimmed.startsWith("~") ? join(home, trimmed.slice(1)) : trimmed;
+      const absolute = expanded.startsWith("/") ? expanded : resolve(home, expanded);
+      if (absolute.endsWith("/")) {
+        base = absolute.slice(0, -1) || "/";
+        prefix = "";
+      } else {
+        base = dirname(absolute);
+        prefix = basename(absolute);
+      }
+    }
+    try {
+      if (!(await stat(base)).isDirectory()) return { base, entries: [], truncated: false };
+    } catch {
+      return { base, entries: [], truncated: false };
+    }
+    const names: string[] = [];
+    try {
+      const directory = await opendir(base);
+      try {
+        while (names.length < MAX_DIRECTORY_ENTRIES) {
+          const item = await directory.read();
+          if (!item) break;
+          if (!item.isDirectory()) continue;
+          names.push(item.name);
+        }
+      } finally {
+        await directory.close();
+      }
+    } catch {
+      return { base, entries: [], truncated: false };
+    }
+    const ordered: string[] = prefix === "" ? [...names].sort() : fuzzysort.go(prefix, names, { threshold: -10000 }).map((result) => result.target);
+    const truncated = ordered.length > capped;
+    return { base, entries: ordered.slice(0, capped).map((name) => ({ name, path: join(base, name) })), truncated };
+  }
   readFile(workspaceId: string, path: string) { return this.read(workspaceId, path); }
   writeFile(workspaceId: string, path: string, content: string, expected: FileRevision) { return this.write(workspaceId, path, content, expected); }
   async create(workspaceId: string, path: string, kind: "file" | "directory"): Promise<FileEntry> {

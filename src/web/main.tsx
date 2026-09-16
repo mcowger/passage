@@ -21,6 +21,7 @@ import { DiffPanel } from "./components/DiffPanel.tsx";
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
 import { PreviewPanel } from "./components/PreviewPanel.tsx";
 import { NewWorktreeModal } from "./components/NewWorktreeModal.tsx";
+import { DirectoryPicker } from "./components/DirectoryPicker.tsx";
 import { SplitCanvas } from "./components/SplitCanvas.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
@@ -80,13 +81,14 @@ type FormDialogProps = {
   error?: string;
   onCancel: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
   children: ReactNode;
 };
 
-function FormDialog({ title, submitLabel, error, onCancel, onSubmit, children }: FormDialogProps) {
+function FormDialog({ title, submitLabel, error, onCancel, onSubmit, onEscapeKeyDown, children }: FormDialogProps) {
   return (
     <Dialog open onOpenChange={(isOpen) => { if (!isOpen) onCancel(); }}>
-      <DialogContent className="max-w-[480px]">
+      <DialogContent className="max-w-[480px]" onEscapeKeyDown={onEscapeKeyDown}>
         <form onSubmit={onSubmit} aria-label={title} className="flex flex-col gap-4">
           <DialogHeader>
             <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Workspace setup</p>
@@ -169,6 +171,7 @@ function App() {
   const [previewHistory, setPreviewHistory] = useState<AgentHistory | null>(null);
   const [agentError, setAgentError] = useState("");
   const [form, setForm] = useState<FormKind>();
+  const [dirSuggestOpen, setDirSuggestOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [layout, setLayout] = useState<WorkspaceLayout>();
   const [settings, setSettings] = useState<WorkspaceSettings>(DEFAULT_WORKSPACE_SETTINGS);
@@ -1216,6 +1219,9 @@ function App() {
           submitLabel="Register project"
           error={formError}
           onCancel={() => { setFormError(""); setForm(undefined); }}
+          // While directory suggestions are visible, Escape dismisses only
+          // the suggestion list (see DirectoryPicker), not the dialog.
+          onEscapeKeyDown={(event) => { if (dirSuggestOpen) event.preventDefault(); }}
           onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
@@ -1232,7 +1238,7 @@ function App() {
           }}
         >
           <label>Project name<input name="label" required placeholder="Payments platform" /></label>
-          <label>Directory path<input name="path" required placeholder="/home/user/code/payments" /></label>
+          <label>Directory path<DirectoryPicker api={api} name="path" placeholder="/home/user/code/payments" onOpenChange={setDirSuggestOpen} /></label>
           <p className="form-help">The daemon resolves and verifies this directory before registering it.</p>
         </FormDialog>
       )}

@@ -16,7 +16,7 @@ import { workspaceSettingsSchema, type WorkspaceSettings } from "../shared/domai
 import { themePackSchema, fontPackSchema, toolRendererPackSchema, type ThemePack, type FontPack, type ToolRendererPack } from "../shared/domain/customization.ts";
 import type { AgentImage } from "../shared/protocol/agents.ts";
 import { z } from "zod";
-import { filesSearchResponseSchema } from "../shared/protocol/workspace.ts";
+import { filesSearchResponseSchema, directorySuggestResponseSchema } from "../shared/protocol/workspace.ts";
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
 import type { GitDiff, GitStatus } from "../shared/domain/git.ts";
 import { webPreviewSchema, type WebPreview } from "../shared/domain/previews.ts";
@@ -194,6 +194,10 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     async searchFiles(workspaceId: string, q: string, limit = 20) {
       const query = new URLSearchParams({ q, limit: String(Math.min(Math.max(limit, 1), 50)) });
       return filesSearchResponseSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/search?${query}`));
+    },
+    async suggestDirectories(path: string, limit = 20) {
+      const query = new URLSearchParams({ path, limit: String(Math.min(Math.max(limit, 1), 50)) });
+      return directorySuggestResponseSchema.parse(await request(`/api/filesystem/directories?${query}`));
     },
     async respondUi(id: string, response: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) {
       okResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/ui-response`, {

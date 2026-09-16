@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import fuzzysort from "fuzzysort";
 import { toast } from "sonner";
 import type { FileEntry, FileListing } from "../../shared/domain/files.ts";
 import type { WorkspaceApi } from "../api.ts";
@@ -518,9 +519,9 @@ export function ExplorerPanel({
     if (!dirState) return null;
 
     let entries = dirState.entries;
-    if (filter) {
-      const query = filter.toLowerCase();
-      entries = entries.filter((e) => e.name.toLowerCase().includes(query));
+    const trimmedFilter = filter.trim();
+    if (trimmedFilter) {
+      entries = fuzzysort.go(trimmedFilter, entries, { key: "name", threshold: -10000 }).map((result) => result.obj);
     }
     const visibleLimit = visibleCounts[dirPath] ?? DIRECTORY_RENDER_CHUNK;
     const visibleEntries = entries.slice(0, visibleLimit);
