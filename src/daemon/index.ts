@@ -1,5 +1,4 @@
 import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { Hono } from "hono";
 import { AgentService } from "./agents/service.ts";
@@ -49,7 +48,7 @@ const MAX_WORKSPACE_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_INFLIGHT_COMMANDS = 256;
 const UNKNOWN_REQUEST_ID = "unknown";
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
-const defaultDataRoot = join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "passage");
+const defaultDataRoot = join(import.meta.dir, "..", "..", ".data");
 const metadataPath = process.env.PASSAGE_DB_PATH ?? join(defaultDataRoot, "passage.sqlite");
 mkdirSync(dirname(metadataPath), { recursive: true });
 
