@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, opendir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES, type FileEntry, type FileListing, type FileRead, type FileRevision, type FileWrite } from "../../shared/domain/files.ts";
 import { WorkspaceService, WorkspaceError } from "./service.ts";
 
-export class FileError extends Error { constructor(public readonly code: "not-found" | "invalid-path" | "outside-root" | "archived" | "not-file" | "not-directory" | "binary" | "oversize" | "too-many-entries" | "conflict" | "io", message: string) { super(message); this.name = "FileError"; } }
+export class FileError extends Error { constructor(public readonly code: "not-found" | "invalid-path" | "outside-root" | "archived" | "not-file" | "not-directory" | "binary" | "oversize" | "conflict" | "io", message: string) { super(message); this.name = "FileError"; } }
 const hash = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
 const revision = (s: { mtimeMs: number; size: number }, h: string): FileRevision => ({ hash: h, modifiedAt: s.mtimeMs, size: s.size });
 
@@ -13,16 +13,27 @@ export class FileService {
   async list(workspaceId: string, path = ".", cursor?: string): Promise<FileListing> {
     const absolute = await this.resolve(workspaceId, path); const info = await this.safeStat(absolute);
     if (!info.isDirectory()) throw new FileError("not-directory", "Path is not a directory");
-    const all = await readdir(absolute, { withFileTypes: true }); if (all.length > this.maxEntries) throw new FileError("too-many-entries", "Directory contains too many entries");
-    const start = cursor ? Number(cursor) : 0; if (!Number.isInteger(start) || start < 0 || start > all.length) throw new FileError("invalid-path", "Invalid directory cursor");
+    const start = cursor ? Number(cursor) : 0; if (!Number.isInteger(start) || start < 0) throw new FileError("invalid-path", "Invalid directory cursor");
     const entries: FileEntry[] = [];
-    for (const item of all.slice(start, start + this.maxEntries)) {
-      const child = join(absolute, item.name); let kind: "file" | "directory";
-      if (item.isDirectory()) kind = "directory"; else if (item.isFile()) kind = "file"; else continue;
-      let rev: FileRevision | null = null; if (kind === "file") { const s = await stat(child); if (s.size <= this.maxBytes) rev = revision(s, hash(await readFile(child))); }
-      entries.push({ name: item.name, kind, path: path === "." ? item.name : `${path}/${item.name}`, revision: rev });
+    let index = 0;
+    let hasMore = false;
+    const directory = await opendir(absolute);
+    try {
+      while (true) {
+        const item = await directory.read();
+        if (!item) break;
+        if (!item.isDirectory() && !item.isFile()) continue;
+        if (index++ < start) continue;
+        if (entries.length >= this.maxEntries) { hasMore = true; break; }
+        const child = join(absolute, item.name); const kind = item.isDirectory() ? "directory" : "file";
+        let rev: FileRevision | null = null; if (kind === "file") { const s = await stat(child); if (s.size <= this.maxBytes) rev = revision(s, hash(await readFile(child))); }
+        entries.push({ name: item.name, kind, path: path === "." ? item.name : `${path}/${item.name}`, revision: rev });
+      }
+    } finally {
+      await directory.close();
     }
-    return { path, entries, nextCursor: start + entries.length < all.length ? String(start + entries.length) : null };
+    if (!hasMore && start > index) throw new FileError("invalid-path", "Invalid directory cursor");
+    return { path, entries, nextCursor: hasMore ? String(start + entries.length) : null };
   }
   async read(workspaceId: string, path: string): Promise<FileRead> { const absolute = await this.resolve(workspaceId, path); const s = await this.safeStat(absolute); if (!s.isFile()) throw new FileError("not-file", "Path is not a file"); if (s.size > this.maxBytes) throw new FileError("oversize", "File is too large"); const data = await readFile(absolute); if (data.includes(0)) throw new FileError("binary", "Binary files are not supported"); return { path, content: new TextDecoder().decode(data), revision: revision(s, hash(data)) }; }
   listDirectory(workspaceId: string, path = ".", cursor?: string) { return this.list(workspaceId, path, cursor); }

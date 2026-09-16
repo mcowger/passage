@@ -113,4 +113,23 @@ describe("files HTTP API", () => {
 
     f.store.close();
   });
+
+  test("pages directories larger than the entry limit", async () => {
+    const f = await fixture();
+    await Promise.all(Array.from({ length: 1001 }, (_, index) => writeFile(join(f.root, `file-${index}.txt`), String(index))));
+
+    const firstRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files?path=.`));
+    expect(firstRes.status).toBe(200);
+    const first = await firstRes.json() as { entries: Array<{ name: string }>; nextCursor: string | null };
+    expect(first.entries).toHaveLength(1000);
+    expect(first.nextCursor).toBe("1000");
+
+    const secondRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files?path=.&cursor=${first.nextCursor}`));
+    expect(secondRes.status).toBe(200);
+    const second = await secondRes.json() as { entries: Array<{ name: string }>; nextCursor: string | null };
+    expect(second.entries).toHaveLength(2);
+    expect(second.nextCursor).toBeNull();
+
+    f.store.close();
+  });
 });
