@@ -245,9 +245,9 @@ export function NewWorktreeModal({
                 <SelectTrigger id="worktree-project" className="w-full h-8 text-xs">
                   <SelectValue placeholder="Select project" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" align="start" className="w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
                   {activeProjects.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.displayLabel} ({p.canonicalRootPath})</SelectItem>
+                    <SelectItem key={p.id} value={p.id}><span className="min-w-0 flex-1 truncate">{p.displayLabel} ({p.canonicalRootPath})</span></SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -260,10 +260,10 @@ export function NewWorktreeModal({
                   <SelectTrigger className="w-full h-8 text-xs" aria-label="Worktree location">
                     <SelectValue placeholder="Select location" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent position="popper" align="start" className="w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
                     {availableLocations.map((loc) => (
                       <SelectItem key={loc.id} value={loc.id}>
-                        {loc.displayLabel} ({loc.configuredRootPath})
+                        <span className="min-w-0 flex-1 truncate">{loc.displayLabel} ({loc.configuredRootPath})</span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -450,9 +450,9 @@ export function NewWorktreeModal({
                   <SelectTrigger id="discover-project" className="flex-1 h-8 text-xs">
                     <SelectValue placeholder="Select project" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent position="popper" align="start" className="w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
                     {activeProjects.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.displayLabel}</SelectItem>
+                      <SelectItem key={p.id} value={p.id}><span className="min-w-0 flex-1 truncate">{p.displayLabel}</span></SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
