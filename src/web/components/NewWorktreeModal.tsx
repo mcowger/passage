@@ -203,7 +203,10 @@ export function NewWorktreeModal({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-[560px] max-h-[calc(100vh-2rem)] overflow-y-auto">
+      <DialogContent
+        className="max-w-[560px] max-h-[calc(100vh-2rem)] overflow-y-auto"
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle className="text-lg font-semibold">Git Worktrees</DialogTitle>
           <Tabs
