@@ -16,8 +16,30 @@
   .agent-header-actions { flex-wrap: wrap; margin-top: 8px; }
   .agent-header, .timeline, .composer-container, .usage-strip { padding-left: 12px; padding-right: 12px; }
   .agent-panel { min-height: 0; }
-  .composer-container { padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .composer-container { padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); overflow: hidden; }
   .user-message-card { max-width: 90%; }
+  /* Narrow-viewport header: keep brand, view tabs, and actions on one
+     scrollable row instead of colliding. */
+  .workspace-nav-bar { gap: 6px; padding: 0 8px; overflow: hidden; flex-wrap: nowrap; }
+  .workspace-nav-brand { max-width: 34vw; flex: 1 1 auto; }
+  .workspace-crumb-title b { max-width: 16vw; }
+  .workspace-crumb-title span:last-child { max-width: 16vw; }
+  .nav-tabs { flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .nav-tabs::-webkit-scrollbar { display: none; }
+  .nav-tab { padding: 5px 7px; font-size: 12px; flex: none; }
+  .workspace-nav-actions { flex: none; }
+  .workspace-nav-actions .nav-action-btn { padding: 5px 6px; font-size: 12px; }
+  .workspace-nav-actions .nav-action-btn kbd { display: none; }
+  /* Composer toolbar wraps so the Send button is never clipped off-screen. */
+  .composer-toolbar { flex-wrap: wrap; row-gap: 8px; }
+  .composer-toolbar-left { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
+  .composer-toolbar-right { min-width: 0; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+  .composer-card textarea { min-width: 0; }
+}
+
+@media (max-width: 480px) {
+  .branch-pill { display: none; }
+  .workspace-nav-brand { max-width: 30vw; }
 }
 
 @media (prefers-reduced-motion: reduce) {
