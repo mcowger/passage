@@ -4,7 +4,7 @@ import type { AgentHistory, AgentSummary } from "../shared/domain/agents.ts";
 import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.ts";
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import type { PaneTab, WorkspaceLayout, LayoutNode } from "../shared/domain/layout.ts";
-import { addTabToGroup, createDefaultLayout, getFirstTabGroup, replaceOverviewTabs } from "../shared/domain/layout.ts";
+import { addTabToGroup, createDefaultLayout, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs } from "../shared/domain/layout.ts";
 import type { WorkspaceSettings } from "../shared/domain/settings.ts";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
 import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
@@ -475,6 +475,15 @@ function App() {
     }
   };
 
+  const closeTabNow = useCallback((tabId: string) => {
+    if (layout && selectedWorkspaceId) {
+      const nextRoot = removeTabFromTree(layout.root, tabId);
+      handleLayoutChange(nextRoot ? { ...layout, root: nextRoot } : createDefaultLayout(selectedWorkspaceId));
+    }
+    if (tabId.startsWith("editor-")) setOpenEditorPath(undefined);
+    if (tabId.startsWith("diff-")) setOpenDiffPath(undefined);
+  }, [layout, selectedWorkspaceId, handleLayoutChange]);
+
   const handleActivateTab = useCallback((tab: PaneTab) => {
     if (tab.kind === "agent" && tab.targetId) {
       setSelectedAgentId(tab.targetId);
@@ -574,6 +583,7 @@ function App() {
             terminal={currentTerm}
             api={api}
             onClose={() => {
+              closeTabNow(`terminal-${currentTerm.id}`);
               setActiveTab("overview");
             }}
             onTerminated={() => {
@@ -619,7 +629,7 @@ function App() {
             filePath={filePath}
             api={api}
             onClose={() => {
-              setOpenEditorPath(undefined);
+              closeTabNow(`editor-${filePath}`);
               setActiveTab("explorer");
             }}
             onOpenDiff={openFileDiff}
@@ -642,7 +652,7 @@ function App() {
             api={api}
             onOpenFile={openEditorFile}
             onClose={() => {
-              setOpenDiffPath(undefined);
+              closeTabNow(`diff-${diffPath}`);
               setActiveTab("changes");
             }}
           />
