@@ -14,8 +14,10 @@ import {
   Bot,
   Terminal as TerminalIcon,
   Trash2,
+  Plus,
 } from "lucide-react";
 import { cn } from "../lib/utils.ts";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -98,9 +100,6 @@ export function Sidebar({
         <Button variant="secondary" size="xs" className="w-full justify-start text-xs font-normal" onClick={onNewWorkspace}>
           ＋ Directory workspace
         </Button>
-        <Button variant="secondary" size="xs" className="w-full justify-start text-xs font-normal" onClick={onNewProject}>
-          Register project
-        </Button>
       </div>
       <div className="side-label">Projects &amp; Worktrees</div>
       <div className="project-list">
@@ -126,7 +125,17 @@ export function Sidebar({
       {activeProjects.length === 0 && <p className="muted side-empty">No active projects registered yet.</p>}
       <footer>
         <span className="footer-status"><span className="connected-dot" aria-hidden="true" /> Connected</span>
-        <span className="muted">v1.4.0</span>
+        <span className="flex items-center gap-1">
+          <span className="muted">v1.4.0</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-xs" onClick={onNewProject} aria-label="Register project">
+                <Plus aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Register project</TooltipContent>
+          </Tooltip>
+        </span>
       </footer>
       <AlertDialog open={pendingRemove !== null} onOpenChange={(isOpen) => { if (!isOpen) setPendingRemove(null); }}>
         <AlertDialogContent className="max-w-[440px]">
