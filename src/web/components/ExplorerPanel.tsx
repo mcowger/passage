@@ -20,9 +20,15 @@ type DirectoryState = {
   loading: boolean;
 };
 
+// Maximum entries rendered per directory before the user explicitly reveals
+// more. Server pages can hold up to MAX_DIRECTORY_ENTRIES (1000); rendering
+// them all at once freezes the DOM and buries pagination controls.
+const DIRECTORY_RENDER_CHUNK = 100;
+
 export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: ExplorerProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["."]));
   const [dirMap, setDirMap] = useState<Map<string, DirectoryState>>(new Map());
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
 
@@ -61,6 +67,7 @@ export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: Ex
 
   useEffect(() => {
     setDirMap(new Map());
+    setVisibleCounts({});
     setExpanded(new Set(["."]));
     void loadDirectory(".");
   }, [workspaceId, loadDirectory]);
@@ -99,10 +106,13 @@ export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: Ex
       const query = filter.toLowerCase();
       entries = entries.filter((e) => e.name.toLowerCase().includes(query));
     }
+    const visibleLimit = visibleCounts[dirPath] ?? DIRECTORY_RENDER_CHUNK;
+    const visibleEntries = entries.slice(0, visibleLimit);
+    const hiddenCount = entries.length - visibleEntries.length;
 
     return (
       <div className="explorer-subtree" style={{ paddingLeft: level > 0 ? 14 : 0 }}>
-        {entries.map((entry) => {
+        {visibleEntries.map((entry) => {
           const isDir = entry.kind === "directory";
           const isExpanded = expanded.has(entry.path);
           const isSelected = selectedFile === entry.path;
@@ -140,6 +150,20 @@ export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: Ex
             </button>
           );
         })}
+
+        {hiddenCount > 0 && (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="w-full mt-1 text-muted-foreground"
+            onClick={() => setVisibleCounts((prev) => ({
+              ...prev,
+              [dirPath]: visibleLimit + DIRECTORY_RENDER_CHUNK,
+            }))}
+          >
+            Show more ({hiddenCount} remaining)...
+          </Button>
+        )}
 
         {dirState.nextCursor && (
           <Button
