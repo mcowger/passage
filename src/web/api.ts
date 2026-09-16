@@ -32,6 +32,35 @@ export class WorkspaceApiError extends Error {
   }
 }
 
+const FRIENDLY_API_ERRORS: Record<string, string> = {
+  "invalid-request": "Some fields are missing or invalid. Check the form and try again.",
+  "invalid-root": "Directory does not exist or is inaccessible.",
+  "outside-root": "That path is outside the registered workspace root.",
+  "not-found": "The requested item was not found. It may have been removed.",
+  "archived": "This item is archived. Reopen it before making changes.",
+  "invalid-location": "That worktree location is not valid. Choose another location.",
+  "invalid-path": "That path is not valid. Check it and try again.",
+  "invalid-id": "Invalid identifier. Refresh and try again.",
+  "invalid-cursor": "The listing expired. Refresh and try again.",
+  "body-too-large": "The request was too large.",
+  "request-failed": "Request failed. Check your connection and try again.",
+  "conflict": "That conflicts with the current state. Refresh and try again.",
+  "force-required": "That would discard uncommitted changes. Confirm a force delete to proceed.",
+  "git-failed": "The git operation failed. Check the repository state and try again.",
+};
+
+/** Convert API/validation failures into human-readable UI messages. Raw
+ *  kebab-case codes (e.g. `invalid-request`) are never shown to users; server
+ *  messages that are already sentences pass through untouched. */
+export function friendlyApiError(cause: unknown, fallback: string): string {
+  if (cause instanceof WorkspaceApiError) {
+    const looksRaw = !cause.message || cause.message === cause.code || /^[a-z0-9]+(-[a-z0-9]+)*$/.test(cause.message);
+    if (!looksRaw) return cause.message;
+    return FRIENDLY_API_ERRORS[cause.code] ?? fallback;
+  }
+  return cause instanceof Error && cause.message ? cause.message : fallback;
+}
+
 export type DiscoveredWorktree = {
   path: string;
   branchRef: string | null;

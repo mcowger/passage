@@ -9,7 +9,7 @@ import type { WorkspaceSettings } from "../shared/domain/settings.ts";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
 import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
 import { BUILTIN_THEMES, BUILTIN_FONTS } from "../shared/domain/customization.ts";
-import { createWorkspaceApi } from "./api.ts";
+import { createWorkspaceApi, friendlyApiError } from "./api.ts";
 import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { WorkspaceDetailsModal } from "./components/WorkspaceDetailsModal.tsx";
@@ -357,7 +357,7 @@ function App() {
       if (await refreshWorkspaces()) setForm(undefined);
       else setFormError("Saved, but Passage could not refresh the workspace list. Retry the refresh above.");
     } catch (cause) {
-      setFormError(cause instanceof Error ? cause.message : "Request failed");
+      setFormError(friendlyApiError(cause, "Request failed. Try again."));
     }
   };
 
@@ -933,9 +933,15 @@ function App() {
           onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
+            const displayLabel = String(data.get("label") ?? "").trim();
+            const configuredRootPath = String(data.get("path") ?? "").trim();
+            if (!displayLabel || !configuredRootPath) {
+              setFormError("Project name and directory path cannot be empty.");
+              return;
+            }
             void runWorkspaceMutation(() => api.registerProject({
-              configuredRootPath: String(data.get("path")).trim(),
-              displayLabel: String(data.get("label")).trim(),
+              configuredRootPath,
+              displayLabel,
             }));
           }}
         >
@@ -954,9 +960,14 @@ function App() {
           onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
-            const cwd = String(data.get("cwd")).trim();
+            const displayLabel = String(data.get("label") ?? "").trim();
+            if (!displayLabel) {
+              setFormError("Workspace label cannot be empty.");
+              return;
+            }
+            const cwd = String(data.get("cwd") ?? "").trim();
             void runWorkspaceMutation(() => api.createDirectoryWorkspace(activeProject.id, {
-              displayLabel: String(data.get("label")).trim(),
+              displayLabel,
               ...(cwd ? { cwd } : {}),
             }));
           }}
