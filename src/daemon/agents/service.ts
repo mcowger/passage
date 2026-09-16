@@ -19,6 +19,7 @@ const MAX_LISTENERS = 64;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_SHORT_VALUE_LENGTH = 256;
 const MAX_RUNTIME_DIAGNOSTICS = 100;
+const DEFAULT_ABORT_TIMEOUT_MS = 30_000;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const encoder = new TextEncoder();
 
@@ -33,6 +34,11 @@ type RuntimeDiagnostic = {
   exitStatus: string;
   stderr: string[];
   stderrTruncated: boolean;
+};
+
+type Cancellation = {
+  process: PiRpcProcess;
+  generation: number;
 };
 
 export type AgentCapabilities = ReturnType<typeof agentCapabilitiesSchema.parse>;
@@ -72,11 +78,13 @@ export class AgentService {
   private readonly leaves = new Map<string, string>();
   private readonly diagnostics = new Map<string, RuntimeDiagnostic>();
   private readonly pendingUiRequests = new Map<string, Record<string, unknown>>();
+  private readonly cancellations = new Map<string, Cancellation>();
   private readonly eventChains = new Map<string, Promise<void>>();
   private readonly manager: PiRpcManager;
   private readonly listLimit: number;
   private readonly pi: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
   private readonly sessionsRoot: string;
+  private readonly abortTimeoutMs: number;
 
   constructor(
     private readonly repositories: MetadataRepositories,
@@ -84,6 +92,7 @@ export class AgentService {
       sessionsRoot: string;
       manager?: PiRpcManager;
       listLimit?: number;
+      abortTimeoutMs?: number;
       pi?: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
     },
   ) {
@@ -91,10 +100,14 @@ export class AgentService {
     if (options.listLimit !== undefined && (!Number.isSafeInteger(options.listLimit) || options.listLimit < 1 || options.listLimit > MAX_LIST)) {
       throw new AgentError("invalid-input", "invalid list limit");
     }
+    if (options.abortTimeoutMs !== undefined && (!Number.isSafeInteger(options.abortTimeoutMs) || options.abortTimeoutMs < 1)) {
+      throw new AgentError("invalid-input", "invalid abort timeout");
+    }
     this.manager = options.manager ?? new PiRpcManager();
     this.listLimit = options.listLimit ?? MAX_LIST;
     this.pi = options.pi ?? {};
     this.sessionsRoot = resolve(options.sessionsRoot);
+    this.abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_ABORT_TIMEOUT_MS;
   }
 
   subscribe(listener: (event: AgentServiceEvent) => void): () => boolean {
@@ -107,7 +120,9 @@ export class AgentService {
     const agent = this.requireAgent(agentId);
     const process = this.manager.get(agentId);
     const diagnostic = this.diagnostics.get(agentId);
-    const pendingUiRequest = (process?.getPendingUiRequest() as Record<string, unknown> | undefined) ?? this.pendingUiRequests.get(agentId);
+    const pendingUiRequest = agent.lastKnownStatus === "stopping"
+      ? undefined
+      : (process?.getPendingUiRequest() as Record<string, unknown> | undefined) ?? this.pendingUiRequests.get(agentId);
     const lastKnownStatus = pendingUiRequest ? "needs-attention" : agent.lastKnownStatus;
     return {
       ...agent,
@@ -155,6 +170,10 @@ export class AgentService {
 
   async start(agentId: string): Promise<void> {
     const agent = this.requireAgent(agentId);
+    if (agent.lastKnownStatus === "stopping") {
+      if (this.cancellations.has(agentId)) throw new AgentError("invalid-input", "agent cancellation is in progress");
+      this.updateStatus(agentId, "initializing", "status");
+    }
     const workspace = this.requireWorkspace(agent.workspaceId);
     const sessionDir = this.sessionDirectory(agent.id);
     try {
@@ -176,8 +195,10 @@ export class AgentService {
 
   async prompt(agentId: string, text: string, images?: AgentImage[]): Promise<void> {
     this.validateMessage(text);
-    if (this.requireAgent(agentId).lastKnownStatus === "running") {
-      throw new AgentError("invalid-input", "agent is running; use steer or follow-up");
+    const agent = this.requireAgent(agentId);
+    this.rejectWhileStopping(agent);
+    if (agent.lastKnownStatus === "running") {
+      throw new AgentError("invalid-input", "agent is active; use steer or follow-up, or wait for cancellation");
     }
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
     const process = await this.ensureProcess(agentId);
@@ -192,6 +213,7 @@ export class AgentService {
 
   async steer(agentId: string, text: string, images?: AgentImage[]): Promise<void> {
     this.validateMessage(text);
+    this.rejectWhileStopping(this.requireAgent(agentId));
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
     const process = await this.ensureProcess(agentId);
     await process.request({ type: "steer", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
@@ -199,6 +221,7 @@ export class AgentService {
 
   async followUp(agentId: string, text: string, images?: AgentImage[]): Promise<void> {
     this.validateMessage(text);
+    this.rejectWhileStopping(this.requireAgent(agentId));
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
     const process = await this.ensureProcess(agentId);
     await process.request({ type: "follow_up", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
@@ -206,11 +229,23 @@ export class AgentService {
 
   async abort(agentId: string): Promise<void> {
     this.pendingUiRequests.delete(agentId);
+    const agent = this.requireAgent(agentId);
     const process = this.manager.get(agentId);
-    if (process) await process.request({ type: "abort" });
+    if (!process) {
+      if (agent.lastKnownStatus === "running" || agent.lastKnownStatus === "stopping") {
+        this.updateStatus(agentId, "error", "attention", undefined, "Pi process is not running");
+      }
+      return;
+    }
+    if (agent.lastKnownStatus === "stopping" && this.cancellations.has(agentId)) return;
+    const cancellation = { process, generation: process.generation };
+    this.cancellations.set(agentId, cancellation);
+    this.updateStatus(agentId, "stopping", "status", process.generation);
+    void this.completeAbort(agentId, cancellation);
   }
 
   async respondExtensionUi(agentId: string, response: PiExtensionUiResponse): Promise<void> {
+    this.rejectWhileStopping(this.requireAgent(agentId));
     const process = this.requireProcess(agentId);
     process.respondExtensionUi(response);
     this.pendingUiRequests.delete(agentId);
@@ -263,6 +298,7 @@ export class AgentService {
   async model(agentId: string, provider: string, modelId: string): Promise<void> {
     this.validateShortValue(provider, "provider");
     this.validateShortValue(modelId, "model");
+    this.rejectWhileStopping(this.requireAgent(agentId));
     const capabilities = await this.capabilities(agentId);
     if (!capabilities.models.some((model) => model.provider === provider && model.id === modelId)) {
       throw new AgentError("invalid-input", "model is unavailable");
@@ -274,6 +310,7 @@ export class AgentService {
 
   async thinking(agentId: string, level: string): Promise<void> {
     this.validateShortValue(level, "thinking level");
+    this.rejectWhileStopping(this.requireAgent(agentId));
     const capabilities = await this.capabilities(agentId);
     if (!capabilities.thinkingLevels.includes(level)) {
       throw new AgentError("invalid-input", "thinking level is unavailable");
@@ -286,7 +323,7 @@ export class AgentService {
   async history(agentId: string, before?: number, limit = 100): Promise<AgentHistoryResult> {
     let agent = this.requireAgent(agentId);
     if (!agent.piSessionPath) {
-      await this.reconcile(agentId);
+      await this.reconcile(agentId, !this.cancellations.has(agentId));
       agent = this.requireAgent(agentId);
     }
     if (!agent.piSessionPath) return { unpersisted: true, history: null };
@@ -356,7 +393,7 @@ export class AgentService {
     this.enqueue(agentId, async () => this.onLifecycle(agentId, event));
   }
 
-  private enqueue(agentId: string, operation: () => Promise<void>): void {
+  private enqueue(agentId: string, operation: () => Promise<void>): Promise<void> {
     const previous = this.eventChains.get(agentId) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(operation);
     this.eventChains.set(agentId, next);
@@ -367,6 +404,7 @@ export class AgentService {
     }).finally(() => {
       if (this.eventChains.get(agentId) === next) this.eventChains.delete(agentId);
     });
+    return next;
   }
 
   private sanitizeEventPayload(value: unknown): unknown {
@@ -429,6 +467,8 @@ export class AgentService {
       await this.reconcile(agentId);
       const status = this.requireAgent(agentId).lastKnownStatus as AgentStatus;
       this.emit({ agentId, type: "settled", status, generation: event.generation, payload });
+    } else if (currentStatus === "stopping") {
+      this.emit({ agentId, type: String(event.type ?? "event"), status: currentStatus, generation: event.generation, payload });
     } else if (event.type === "agent_start" || event.type === "turn_start") {
       this.updateStatus(agentId, "running", "status", event.generation, undefined, payload);
     } else if (
@@ -460,7 +500,26 @@ export class AgentService {
     this.updateStatus(agentId, "error", "attention", event.generation, `Pi process exited (${event.exitCode})`);
   }
 
-  private async reconcile(agentId: string): Promise<void> {
+  private async completeAbort(agentId: string, cancellation: Cancellation): Promise<void> {
+    const { process, generation } = cancellation;
+    try {
+      const clearQueue = process.request({ type: "clear_queue" }, this.abortTimeoutMs);
+      const abort = process.request({ type: "abort" }, this.abortTimeoutMs);
+      await Promise.all([clearQueue, abort]);
+      if (this.manager.get(agentId) !== process || process.generation !== generation) return;
+      await this.enqueue(agentId, () => this.reconcile(agentId, true));
+    } catch (cause) {
+      if (this.manager.get(agentId) !== process || process.generation !== generation) return;
+      if (this.requireAgent(agentId).lastKnownStatus === "idle") return;
+      const message = cause instanceof Error ? cause.message : "Unable to confirm agent cancellation";
+      await this.manager.stop(agentId).catch(() => undefined);
+      this.updateStatus(agentId, "error", "attention", generation, `Unable to confirm agent cancellation: ${message}`);
+    } finally {
+      if (this.cancellations.get(agentId) === cancellation) this.cancellations.delete(agentId);
+    }
+  }
+
+  private async reconcile(agentId: string, allowStoppingToSettle = false): Promise<void> {
     const process = this.manager.get(agentId);
     if (!process) {
       this.updateStatus(agentId, "error", "attention", undefined, "Pi process is not running");
@@ -513,12 +572,20 @@ export class AgentService {
       this.repositories.agents.updateThinkingPreference(agentId, data.thinkingLevel);
     }
     if (!agent.piSessionPath && !sessionPath) {
-      this.updateStatus(agentId, "initializing", "status", process.generation);
+      const currentStatus = this.requireAgent(agentId).lastKnownStatus as AgentStatus;
+      const status = data.isStreaming === true
+        ? currentStatus === "stopping" ? "stopping" : "running"
+        : currentStatus === "initializing" ? "initializing" : currentStatus === "stopping" && !allowStoppingToSettle ? "stopping" : "idle";
+      this.updateStatus(agentId, status, "status", process.generation);
       return;
     }
     const persistedPath = this.repositories.agents.get(agentId)?.piSessionPath;
     if (!persistedPath) {
-      this.updateStatus(agentId, "initializing", "status", process.generation);
+      const currentStatus = this.requireAgent(agentId).lastKnownStatus as AgentStatus;
+      const status = data.isStreaming === true
+        ? currentStatus === "stopping" ? "stopping" : "running"
+        : currentStatus === "initializing" ? "initializing" : currentStatus === "stopping" && !allowStoppingToSettle ? "stopping" : "idle";
+      this.updateStatus(agentId, status, "status", process.generation);
       return;
     }
     try {
@@ -531,7 +598,9 @@ export class AgentService {
       const hasActiveError = latestItem && "error" in latestItem && Boolean(latestItem.error);
       const currentStatus = this.requireAgent(agentId).lastKnownStatus as AgentStatus;
       if (currentStatus === "needs-attention") return;
-      if (hasActiveError && data.isStreaming !== true) {
+      if (currentStatus === "stopping" && !allowStoppingToSettle) return;
+      const confirmedCancellation = allowStoppingToSettle && currentStatus === "stopping" && data.isStreaming === false;
+      if (hasActiveError && data.isStreaming !== true && !confirmedCancellation) {
         this.updateStatus(agentId, "error", "attention", process.generation, String(latestItem.error));
         return;
       }
@@ -540,7 +609,7 @@ export class AgentService {
       return;
     }
     const currentStatus = this.requireAgent(agentId).lastKnownStatus as AgentStatus;
-    if (currentStatus === "needs-attention") return;
+    if (currentStatus === "needs-attention" || (currentStatus === "stopping" && (data.isStreaming === true || !allowStoppingToSettle))) return;
     this.updateStatus(agentId, data.isStreaming === true ? "running" : "idle", "status", process.generation);
   }
 
@@ -568,6 +637,12 @@ export class AgentService {
     if (!agent) throw new AgentError("not-found", "agent not found");
     if (agent.archivedAt) throw new AgentError("archived", "agent archived");
     return agent;
+  }
+
+  private rejectWhileStopping(agent: Agent): void {
+    if (agent.lastKnownStatus === "stopping") {
+      throw new AgentError("invalid-input", "agent cancellation is in progress");
+    }
   }
 
   private async ensureProcess(agentId: string): Promise<PiRpcProcess> {

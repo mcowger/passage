@@ -38,7 +38,7 @@ Persistent Bun daemon
 | Agent runtime | Pi only, integrated through one `pi --mode rpc` process per active agent. No provider abstraction in v1. |
 | Canonical agent history | Pi JSONL sessions, including branches, compaction, and usage records. Passage never maintains a duplicate transcript. |
 | Other persistence | A small local SQLite registry holds only Passage metadata, indexes, preferences, and pane layouts; it is never authoritative for Pi-derived data. |
-| Runtime | Bun end to end. The pinned Pi CLI must execute under the supported Bun runtime as an intentional RPC agent process; no separate Node implementation layer or Node-based fallback sidecar is permitted. |
+| Runtime | Bun end to end. Bun starts and supervises the pinned `pi` executable directly; Pi uses its supported shebang runtime. Passage has no separate Node daemon, implementation layer, or fallback sidecar. |
 | Initial host support | Linux x64. Other platforms require their own Bun native terminal and packaging gates before support is claimed. |
 | UI | React, Bun HTML imports, Tailwind CSS, and shadcn/ui. Bun handles development rendering, bundling, and production packaging. |
 | MVP | Multiple agents and live terminals per workspace; durable projects/workspaces/worktrees; Git/files/diff; a persistent split-pane canvas; responsive PWA. |
@@ -288,10 +288,16 @@ Passage agent is therefore a durable workspace-scoped handle over a Pi-owned
 conversation.
 
 ```text
-initializing → idle ⇄ running → needs-attention
+initializing → idle ⇄ running → stopping → idle
+                    └────────→ needs-attention
                     └────────→ error
-all non-archived states ──────→ archived
+all non-archived states ────────────────→ archived
 ```
+
+`stopping` means Passage accepted a cancellation request but has not yet
+confirmed that Pi is idle. It blocks further agent commands. Passage only
+returns the agent to `idle` after Pi reports settlement and reconciliation
+confirms `isStreaming: false`; cancellation failure leaves an error state.
 
 `needs-attention` is a UI state for user input, permission, process failure, or
 an unaddressed error; it is not an invented Pi transcript event. Browser reloads
@@ -370,10 +376,10 @@ disposable Bun integration spike:
 4. Build and start the production Bun bundle with Pi and native dependencies
    installed as they will be packaged.
 
-The Pi RPC process is a required agent process, not a fallback sidecar. No
-separate Node implementation layer or Node-based fallback is permitted. A failed
-compatibility item blocks the dependent feature and must be resolved or
-explicitly deferred before the MVP commitment is made.
+The Pi RPC process is a required agent process, not a fallback sidecar. Bun
+starts and supervises the `pi` executable directly. A failed compatibility item
+blocks the dependent feature and must be resolved or explicitly deferred before
+the MVP commitment is made.
 
 ## Browser/daemon protocol
 
@@ -727,14 +733,13 @@ the product build.
 
 - Set up one Bun package, TypeScript, `bun test`, and a minimal Bun HTML-import
   React page.
-- Prove direct Pi runtime/session/history/steer/follow-up behavior under Bun.
+- Prove Bun-supervised Pi process/session/history/steer/follow-up behavior.
 - Prove Bun's native terminal lifecycle and production packaging.
 - Prove a Bun WebSocket can stream Pi output and terminal bytes concurrently.
 - Record exact supported OS/runtime versions and any package patches in an ADR.
 
 **Exit criteria:** all four compatibility-gate checks above pass in CI and on a
-developer workstation. If a check fails, defer its dependent product feature;
-do not introduce Node.
+developer workstation. If a check fails, defer its dependent product feature.
 
 ### Phase 1 — Daemon foundation and durable workspace identity
 

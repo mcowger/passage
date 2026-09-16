@@ -99,6 +99,15 @@ describe("agent HTTP API", () => {
     expect(snapshot.thinkingPreference).toBe("high");
   });
 
+  test("accepts an abort while cancellation settles asynchronously", async () => {
+    const { app } = await fixture();
+    const created = await json(await app.fetch(request("/api/workspaces/workspace-1/agents", { method: "POST", body: "{}" })));
+    const response = await app.fetch(request(`/api/agents/${created.id}/abort`, { method: "POST" }));
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ accepted: true });
+    expect((await json(await app.fetch(request(`/api/agents/${created.id}`)))).status).toBe("stopping");
+  });
+
   test("returns explicit unpersisted history and validates cursors", async () => {
     const { app } = await fixture();
     const created = await json(await app.fetch(request("/api/workspaces/workspace-1/agents", { method: "POST", body: "{}" })));

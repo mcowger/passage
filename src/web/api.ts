@@ -145,7 +145,7 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
     async prompt(id: string, message: string, images?: AgentImage[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/prompt`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}) }) })); },
     async steer(id: string, message: string, images?: AgentImage[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/steer`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}) }) })); },
     async followUp(id: string, message: string, images?: AgentImage[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/follow-up`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}) }) })); },
-    async abort(id: string) { okResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/abort`, { method: "POST" })); },
+    async abort(id: string) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/abort`, { method: "POST" })); },
     async respondUi(id: string, response: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) {
       okResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/ui-response`, {
         method: "POST",

@@ -354,7 +354,7 @@ The 40px agent header remains visible while the timeline scrolls:
 [state] Agent title                         [model] [thinking] [live stats] [⋯]
 ```
 
-- `state` is an idle, running, waiting, attention, or error state conveyed by a
+- `state` is an idle, running, stopping, waiting, attention, or error state conveyed by a
   named icon and accessible description; a tooltip is supplementary only.
 - `model` and `thinking` are compact selectors. They show the current setting,
   not only an icon.
@@ -398,6 +398,9 @@ assistant answer rendered as a readable document
   wall time, input/output/cache tokens, rate, and local cost where available.
 - Do not render empty boilerplate headers. Inactive/missing metrics reserve no
   space; an active streaming metric updates in place.
+- Render a Pi terminal error or cancellation result as a labeled shadcn `Alert`,
+  never as assistant prose. The alert names Pi as the source; an expected abort
+  says `Agent run stopped`, while other terminal failures say `Pi error`.
 
 #### Thinking
 
@@ -497,6 +500,10 @@ available without covering the last assistant outcome.
   color-only treatment. Pi 0.84.3 does not expose per-item queue removal, so
   Passage presents queue state and mode without promising a false removal action.
 - Abort is a separate destructive/stop control, never hidden inside Send.
+- After Stop is requested, replace run controls with a disabled `Stopping…`
+  control and stop live counters immediately. Restore Send only after the
+  daemon confirms Pi has settled; show an error state if cancellation cannot
+  be confirmed.
 - Autosave drafts per agent/workspace. Retain a failed submission as a draft.
 - On mobile, preserve the message area and current send-mode label; move model,
   thinking, attachments, and other secondary controls into a compact control

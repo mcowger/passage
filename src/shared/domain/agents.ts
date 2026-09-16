@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { protocolPayloadSchema, type JsonValue } from "../protocol/index.ts";
 
-export const agentStatusSchema = z.enum(["initializing", "idle", "running", "needs-attention", "error", "archived"]);
+export const agentStatusSchema = z.enum(["initializing", "idle", "running", "stopping", "needs-attention", "error", "archived"]);
 export type AgentStatus = z.infer<typeof agentStatusSchema>;
 
 export const agentSummarySchema = z.object({

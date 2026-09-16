@@ -5,12 +5,14 @@ import type { WorkspaceApi } from "../api.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { Streamdown } from "streamdown";
 import { Button } from "./ui/button.tsx";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert.tsx";
 import { ToolRow } from "./ToolRow.tsx";
 import { QuestionCard, type QuestionRequest, type QuestionOption } from "./QuestionCard.tsx";
 import { getToolDiff } from "../lib/tool-diff.ts";
 import { estimateUpdatedTokens, getStreamingTokenText, type TokenEstimateCacheEntry } from "../lib/streaming-tokens.ts";
 import {
   Clock,
+  CircleAlert,
   Square,
   ArrowUp,
   Expand,
@@ -187,6 +189,14 @@ export function resolveCurrentModel(
   return historyModel ? findModel(historyModel.provider, historyModel.modelId) : undefined;
 }
 
+export function resolveStreamActive(status: AgentSummary["status"]): boolean {
+  return status === "running";
+}
+
+export function isComposerLocked(status: AgentSummary["status"]): boolean {
+  return status === "stopping";
+}
+
 export function AgentPanel({
   agent,
   history,
@@ -206,8 +216,9 @@ export function AgentPanel({
   const [busy, setBusy] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const running = agent.status === "running";
+  const stopping = isComposerLocked(agent.status);
   const timeline = effectiveHistory?.timeline ?? [];
-  const streamActive = running || hasPendingStreamingItem(timeline);
+  const streamActive = resolveStreamActive(agent.status);
   const streamingTokenText = useMemo(() => getStreamingTokenText(timeline), [timeline]);
   const streamingTokenTextRef = useRef(streamingTokenText);
   const streamingTokenCacheRef = useRef<TokenEstimateCacheEntry | undefined>(undefined);
@@ -347,6 +358,7 @@ export function AgentPanel({
       <AgentComposer
         agentId={agent.id}
         running={running}
+        stopping={stopping}
         streamActive={streamActive}
         streamingTokens={streamingTokens}
         streamingTokensPerSecond={streamingTokensPerSecond}
@@ -406,6 +418,7 @@ const LiveStreamingStats = memo(function LiveStreamingStats({
 type AgentComposerProps = {
   agentId: string;
   running: boolean;
+  stopping: boolean;
   streamActive: boolean;
   streamingTokens: number;
   streamingTokensPerSecond: number | null;
@@ -433,6 +446,7 @@ type AgentComposerProps = {
 function AgentComposerInner({
   agentId,
   running,
+  stopping,
   streamActive,
   streamingTokens,
   streamingTokensPerSecond,
@@ -627,16 +641,20 @@ function AgentComposerInner({
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
+              if (stopping) return;
               if (running) send("steer");
               else if (!busy) send("prompt");
             }
           }}
           placeholder={
-            running
+            stopping
+              ? "Stopping agent execution…"
+              : running
               ? "Steer now (Enter) or queue follow-up…"
               : "@ for files/agents; / for commands and skills; ! for shell; # for snippets"
           }
           aria-label="Agent message"
+          disabled={stopping}
           rows={2}
         />
         {composerError && (
@@ -677,6 +695,7 @@ function AgentComposerInner({
                 type="file"
                 accept="image/png,image/jpeg,image/gif,image/webp"
                 multiple
+                disabled={stopping}
                 onChange={(event) => {
                   void addImages(event.target.files);
                   event.currentTarget.value = "";
@@ -769,9 +788,13 @@ function AgentComposerInner({
               onSelectThinking={async (level) => {
                 await run(() => api.setThinking(agentId, level));
               }}
-              disabled={busy}
+              disabled={busy || stopping}
             />
-            {running ? (
+            {stopping ? (
+              <Button size="xs" className="composer-action-btn" disabled aria-label="Stopping agent execution">
+                Stopping…
+              </Button>
+            ) : running ? (
               <>
                 <Button
                   size="xs"
@@ -825,11 +848,6 @@ function AgentComposerInner({
 
 const AgentComposer = memo(AgentComposerInner);
 
-function hasPendingStreamingItem(timeline: TimelineItem[]): boolean {
-  const last = timeline.at(-1);
-  return last?.kind === "thinking" || (last?.kind === "tool" && last.status === "running");
-}
-
 function summarizeChanges(timeline: TimelineItem[]): { fileCount: number; additions: number; deletions: number } | undefined {
   const files = new Set<string>();
   let additions = 0;
@@ -845,7 +863,7 @@ function summarizeChanges(timeline: TimelineItem[]): { fileCount: number; additi
   return files.size > 0 ? { fileCount: files.size, additions, deletions } : undefined;
 }
 
-const TimelineRow = memo(function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }) {
+export const TimelineRow = memo(function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }) {
   if (item.kind === "unknown") return <article className="timeline-row unknown"><strong>Unknown activity</strong><code>{item.entryType}</code></article>;
   if (item.kind === "tool") {
     if (concise && !item.significant && item.status !== "error") {
@@ -902,6 +920,19 @@ const TimelineRow = memo(function TimelineRow({ item, concise }: { item: Timelin
           <p>{item.text}</p>
         </div>
       </div>
+    );
+  }
+  if (item.error) {
+    const wasAborted = item.error === "Request was aborted";
+    return (
+      <Alert
+        variant={wasAborted ? "default" : "destructive"}
+        className={`assistant-error-alert px-3 py-2${wasAborted ? " assistant-abort-alert" : " border-destructive/40 bg-destructive/5"}`}
+      >
+        <CircleAlert aria-hidden="true" />
+        <AlertTitle>{wasAborted ? "Agent run stopped" : "Pi error"}</AlertTitle>
+        <AlertDescription>{wasAborted ? "Pi notice" : "Pi reported"}: {item.error}</AlertDescription>
+      </Alert>
     );
   }
   return (

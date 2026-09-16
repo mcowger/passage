@@ -11,7 +11,7 @@ const DEFAULT_COMMAND_BYTES = 64 * 1024;
 function defaultPiCommand(): string[] {
   const piExecutable = process.env.PASSAGE_PI_PATH ?? Bun.which("pi");
   if (!piExecutable) throw new Error("Pi CLI was not found; set PASSAGE_PI_PATH");
-  return [process.execPath, piExecutable];
+  return [piExecutable];
 }
 
 async function consumeStream(stream: ReadableStream<Uint8Array>, onChunk: (chunk: Uint8Array) => void): Promise<void> {

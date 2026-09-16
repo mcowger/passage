@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { formatDuration, resolveActiveQuestionRequest, resolveCurrentModel } from "./AgentPanel.tsx";
+import React from "react";
+import ReactDOMServer from "react-dom/server";
+import { formatDuration, isComposerLocked, resolveActiveQuestionRequest, resolveCurrentModel, resolveStreamActive, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 
 const modelOptions: AgentCapabilities["models"] = [
@@ -52,6 +54,38 @@ describe("resolveCurrentModel", () => {
       provider: "test",
       id: "old-model",
     });
+  });
+});
+
+describe("resolveStreamActive", () => {
+  test("stops streaming stats while cancellation is in progress", () => {
+    expect(resolveStreamActive("idle")).toBe(false);
+    expect(resolveStreamActive("running")).toBe(true);
+    expect(resolveStreamActive("stopping")).toBe(false);
+  });
+
+  test("locks the composer until cancellation is confirmed", () => {
+    expect(isComposerLocked("stopping")).toBe(true);
+    expect(isComposerLocked("idle")).toBe(false);
+    expect(isComposerLocked("running")).toBe(false);
+  });
+});
+
+describe("TimelineRow", () => {
+  test("renders a Pi abort as a labeled alert instead of assistant prose", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        concise: false,
+        item: { kind: "assistant", id: "turn-1:terminal", text: "Request was aborted", error: "Request was aborted" },
+      }),
+    );
+
+    expect(html).toContain('data-slot="alert"');
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("assistant-abort-alert");
+    expect(html).toContain("Agent run stopped");
+    expect(html).toContain("Pi notice: Request was aborted");
+    expect(html).not.toContain("assistant-prose");
   });
 });
 

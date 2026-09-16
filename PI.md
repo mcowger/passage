@@ -125,7 +125,8 @@ operations:
 | Steer now | `{"type":"steer","message":...}` | Delivered after current tool work and before the next model call. |
 | Queue follow-up | `{"type":"follow_up","message":...}` | Waits for the current run to complete. |
 | Stop agent | `{"type":"abort"}` | Distinct from stopping Bash or compaction. |
-| Configure queue mode | `{"type":"set_steering_mode",...}` / `{"type":"set_follow_up_mode",...}` | Pi 0.84.3 exposes queue modes, not per-item removal or queue clearing. |
+| Stop all queued work | `{"type":"clear_queue"}` followed by `{"type":"abort"}` | Clear queued steering/follow-up work before cancelling the active operation. |
+| Configure queue mode | `{"type":"set_steering_mode",...}` / `{"type":"set_follow_up_mode",...}` | Pi exposes queue modes; Passage delegates delivery semantics to Pi. |
 | Change model | `{"type":"set_model","provider":...,"modelId":...}` | Use Pi's available-model query for valid choices. |
 | Change thinking | `{"type":"set_thinking_level","level":...}` | Query Pi for levels supported by the current model. |
 | Compact | `{"type":"compact",...}` | May produce activity after a normal run boundary. |
@@ -172,7 +173,7 @@ These event meanings must remain distinct:
 | `message_update` | Build provisional text/thinking/tool display only. |
 | `message_end` | Finalize one streamed message projection. |
 | `agent_end` | Keep listening: retry, compaction, extension-queued, or follow-up work may continue. |
-| `agent_settled` | Important settlement signal; combine with current state and pinned-version behavior before marking the agent idle. |
+| `agent_settled` | Important settlement signal; combine with current state and pinned-version behavior before marking the agent idle. During cancellation, retain `stopping` until Pi's correlated `abort` response and a non-streaming reconciliation confirm it. |
 | Direct JSONL read | Durable reconciliation after completion, reconnect, process restart, or uncertain delivery. |
 
 Never close the browser's live agent subscription merely because the first
@@ -469,6 +470,6 @@ and target Bun runtime:
    lifecycle.
 8. Do not adopt direct-SDK injected extensions or custom TUI bridging for v1.
 9. Require explicit trust before project-controlled Pi resources execute.
-10. The pinned Pi CLI must run under the supported Bun runtime as an intentional
-    agent process. There is no separate Node implementation layer or Node-based
-    fallback sidecar.
+10. Bun starts and supervises the pinned `pi` executable directly. Pi uses its
+    supported shebang runtime; Passage has no separate Node daemon, implementation
+    layer, or fallback sidecar.

@@ -73,6 +73,29 @@ export async function runLiveAcceptance(): Promise<void> {
   }
 }
 
+export async function runAbortAcceptance(): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), "passage-pi-abort-live-"));
+  const cwd = join(root, "workspace");
+  const sessions = join(root, "sessions");
+  await Bun.write(join(cwd, ".keep"), "");
+  const client = new PiRpcClient({ cwd, sessionDir: sessions, sessionId: "abort-agent" });
+  try {
+    const prompt = await client.request({ type: "prompt", message: "Explain distributed systems in detail." });
+    if (prompt.success !== true) throw new Error("abort test prompt was not admitted");
+    await waitFor(client, "agent_start");
+    const abort = await client.request({ type: "abort" });
+    if (abort.success !== true) throw new Error("Pi did not confirm abort");
+    await waitFor(client, "agent_settled");
+    const state = await client.request({ type: "get_state" });
+    if ((state.data as { isStreaming?: unknown }).isStreaming !== false) {
+      throw new Error("Pi remained streaming after confirming abort");
+    }
+  } finally {
+    await client.shutdown();
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 if (import.meta.main) {
   if (process.env.PASSAGE_PI_LIVE === "real" || process.env.PASSAGE_PI_USE_REAL === "1") {
     await runLiveAcceptance();

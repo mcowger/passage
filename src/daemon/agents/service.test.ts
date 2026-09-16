@@ -65,6 +65,50 @@ test("requires explicit steering or follow-up while an agent is running", async 
   f.store.close();
 });
 
+test("keeps an agent stopping until Pi confirms cancellation", async () => {
+  const f = await make();
+  const abortScript = `let streaming=false;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n')}const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};if(r.type==='abort')setTimeout(()=>{streaming=false;process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n')},20);else process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+  const service = new AgentService(f.repos, {
+    sessionsRoot: join(f.root, "abort-sessions"),
+    manager: new PiRpcManager(1),
+    abortTimeoutMs: 100,
+    pi: { executable: process.execPath, executableArgs: ["-e", abortScript] },
+  });
+  const agent = await service.create("w");
+  await service.prompt(agent.id, "keep running");
+  await Bun.sleep(10);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+
+  await service.abort(agent.id);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("stopping");
+  await expect(service.prompt(agent.id, "racing prompt")).rejects.toMatchObject({ code: "invalid-input" });
+
+  await Bun.sleep(100);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  await service.shutdown();
+  f.store.close();
+});
+
+test("reports cancellation failure without claiming an agent is idle", async () => {
+  const f = await make();
+  const hangingAbortScript = `let streaming=false;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n')}if(r.type==='abort')continue;const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+  const service = new AgentService(f.repos, {
+    sessionsRoot: join(f.root, "hanging-abort-sessions"),
+    manager: new PiRpcManager(1),
+    abortTimeoutMs: 20,
+    pi: { executable: process.execPath, executableArgs: ["-e", hangingAbortScript] },
+  });
+  const agent = await service.create("w");
+  await service.prompt(agent.id, "keep running");
+  await service.abort(agent.id);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("stopping");
+
+  await Bun.sleep(60);
+  expect(service.snapshot(agent.id)).toMatchObject({ lastKnownStatus: "error", live: false });
+  await service.shutdown();
+  f.store.close();
+});
+
 test("retains bounded diagnostics after an unexpected process exit", async () => {
   const f = await make();
   const crashingScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');if(r.type==='get_entries')setTimeout(()=>{console.error('crash-marker');process.exit(7)},5)}})`;

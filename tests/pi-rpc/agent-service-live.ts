@@ -83,3 +83,54 @@ export async function runAgentServiceAcceptance(): Promise<void> {
     await rm(root, { recursive: true, force: true });
   }
 }
+
+export async function runAgentServiceAbortAcceptance(): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), "passage-agent-service-abort-live-"));
+  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const repositories = new MetadataRepositories(store.db);
+  repositories.projects.save({
+    id: "project-live",
+    configuredRootPath: root,
+    canonicalRootPath: root,
+    displayLabel: "Live Pi project",
+    archivedAt: null,
+  });
+  repositories.workspaces.save({
+    id: "workspace-live",
+    projectId: "project-live",
+    kind: "directory",
+    cwd: root,
+    checkoutRoot: root,
+    mainRepositoryRoot: null,
+    branchRef: null,
+    displayLabel: "Live Pi workspace",
+    locationId: null,
+    ownershipState: "not-owned",
+    archivedAt: null,
+  });
+  const service = new AgentService(repositories, { sessionsRoot: join(root, "sessions") });
+
+  try {
+    const agent = await service.create("workspace-live", "Live cancellation agent");
+    await service.prompt(agent.id, "Give a detailed explanation of distributed systems and include many examples.");
+    const runningDeadline = Date.now() + SETTLEMENT_TIMEOUT_MS;
+    while (Date.now() < runningDeadline && service.snapshot(agent.id).lastKnownStatus !== "running") {
+      await Bun.sleep(POLL_INTERVAL_MS);
+    }
+    if (service.snapshot(agent.id).lastKnownStatus !== "running") {
+      throw new Error("Pi agent did not begin streaming before cancellation");
+    }
+    await service.abort(agent.id);
+    if (service.snapshot(agent.id).lastKnownStatus !== "stopping") {
+      throw new Error("Pi agent did not enter stopping state after cancellation request");
+    }
+    await waitForSettled(service, agent.id);
+    if (service.snapshot(agent.id).lastKnownStatus !== "idle") {
+      throw new Error("Pi agent did not return to idle after confirmed cancellation");
+    }
+  } finally {
+    await service.shutdown();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}

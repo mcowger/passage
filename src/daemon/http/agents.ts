@@ -127,7 +127,7 @@ export function createAgentRoutes(service: AgentService): Hono {
   app.post("/api/agents/:agentId/steer", messageRoute("steer"));
   app.post("/api/agents/:agentId/follow-up", messageRoute("followUp"));
   app.post("/api/agents/:agentId/abort", async (context) => {
-    try { await service.abort(id(context.req.param("agentId"))); return success(okResponseSchema.parse({ ok: true })); }
+    try { await service.abort(id(context.req.param("agentId"))); return success(acceptedResponseSchema.parse({ accepted: true }), 202); }
     catch (error) { return errorResponse(error); }
   });
   app.post("/api/agents/:agentId/model", async (context) => {

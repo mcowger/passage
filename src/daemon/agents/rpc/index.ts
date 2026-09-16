@@ -11,7 +11,7 @@ import {
 export type PiRecord = { type?: string; id?: string; [key: string]: unknown };
 export type PiImageBlock = AgentImage;
 export type PiCommand =
-  | { type: "get_state" | "get_tree" | "get_available_models" | "get_available_thinking_levels" | "abort" | "abort_bash" }
+  | { type: "get_state" | "get_tree" | "get_available_models" | "get_available_thinking_levels" | "abort" | "abort_bash" | "clear_queue" }
   | { type: "get_entries"; start?: number; end?: number; limit?: number }
   | { type: "prompt" | "steer" | "follow_up"; message: string; images?: readonly PiImageBlock[]; streamingBehavior?: "steer" | "followUp" }
   | { type: "set_steering_mode"; mode: "one-at-a-time" | "all" }
@@ -41,13 +41,6 @@ export type PiRpcOptions = {
 const encoder = new TextEncoder();
 const MAX_PI_COMMAND_BYTES = MAX_AGENT_IMAGES * MAX_AGENT_IMAGE_DATA_CHARACTERS + MAX_AGENT_MESSAGE_BYTES + 4096;
 const asError = (value: unknown) => value instanceof Error ? value : new Error(String(value));
-
-function bunRuntime(): string {
-  if (process.execPath.endsWith("/bun") || process.execPath.endsWith("\\bun.exe")) return process.execPath;
-  const executable = process.env.PASSAGE_BUN_PATH ?? Bun.which("bun");
-  if (!executable) throw new Error("Bun runtime was not found; set PASSAGE_BUN_PATH");
-  return executable;
-}
 
 function piAgentDirectory(): string {
   return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
@@ -94,7 +87,7 @@ export class PiRpcProcess {
     }
     const pi = options.executable ?? process.env.PASSAGE_PI_PATH ?? Bun.which("pi");
     if (!pi) throw new Error("Pi CLI was not found; set PASSAGE_PI_PATH");
-    const command = options.executable ? [options.executable, ...(options.executableArgs ?? [])] : [bunRuntime(), pi];
+    const command = options.executable ? [options.executable, ...(options.executableArgs ?? [])] : [pi];
     command.push("--mode", "rpc", "--session-dir", options.sessionDir, "--session-id", options.sessionId, "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve");
     this.child = Bun.spawn(command, {
       cwd: options.cwd,
@@ -163,7 +156,8 @@ export class PiRpcProcess {
   request(command: PiCommand, timeoutMs = 10_000): Promise<PiRecord> {
     if (this.lifecycle !== "running") return Promise.reject(new Error(`Pi process is ${this.lifecycle}`));
     if (!Number.isFinite(timeoutMs) || timeoutMs < 0) return Promise.reject(new Error("request timeout must be non-negative"));
-    const id = `passage-${this.generation}-${++this.nextId}`; const line = `${JSON.stringify({ ...command, id })}\n`;
+    const id = `passage-${this.generation}-${++this.nextId}`;
+    const line = `${JSON.stringify({ ...command, id })}\n`;
     if (encoder.encode(line).byteLength > this.limits.maxCommandBytes) return Promise.reject(new Error("Pi command exceeds byte limit"));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Pi request timed out: ${command.type}`)); }, timeoutMs);

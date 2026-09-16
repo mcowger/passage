@@ -205,7 +205,7 @@ function ProjectRow({
             const isWorkspaceSelected = workspace.id === selected;
             const workspaceAgents = isWorkspaceSelected ? agents.filter((agent) => agent.workspaceId === workspace.id) : [];
             const workspaceTerminals = isWorkspaceSelected ? terminals.filter((term) => term.workspaceId === workspace.id) : [];
-            const hasActiveAgent = workspaceAgents.some((a) => a.status === "running");
+            const hasActiveAgent = workspaceAgents.some((a) => a.status === "running" || a.status === "stopping");
 
             return (
               <div className="workspace-group group/ws" key={workspace.id}>
@@ -285,13 +285,13 @@ function ProjectRow({
                         onClick={() => onSelectAgent(agent.id)}
                       >
                         <span
-                          className={cn("status-dot dot-sm shrink-0", agent.status === "running" ? "running" : "idle")}
+                          className={cn("status-dot dot-sm shrink-0", (agent.status === "running" || agent.status === "stopping") ? "running" : "idle")}
                           aria-hidden="true"
                         />
                         <Bot className="w-3 h-3 text-muted-foreground shrink-0" />
                         <span className="agent-row-title text-xs">{agent.title}</span>
-                        <small className={cn("agent-row-meta", agent.status === "running" && "running")}>
-                          {agent.status === "running" ? "running" : "idle"}
+                        <small className={cn("agent-row-meta", (agent.status === "running" || agent.status === "stopping") && "running")}>
+                          {agent.status === "stopping" ? "stopping" : agent.status === "running" ? "running" : agent.status}
                         </small>
                       </button>
                     ))}

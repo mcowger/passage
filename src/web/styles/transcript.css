@@ -39,6 +39,8 @@
 .assistant-prose { font-size: 14.5px; line-height: 1.62; color: var(--foreground); }
 .assistant-prose p { margin: 0 0 8px; white-space: pre-wrap; }
 .assistant-prose p:last-child { margin-bottom: 0; }
+.assistant-error-alert { margin: 4px 0; }
+.assistant-abort-alert { border-color: var(--badge-orange); background: var(--badge-orange-subtle); color: var(--badge-orange); }
 
 /* Inline Result Chips (e.g. committed chip) */
 .commit-chip {
