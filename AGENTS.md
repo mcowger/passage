@@ -5,6 +5,7 @@
 - `docs/DESIGN.md` is the product architecture, security, persistence, and scope authority.
 - `docs/UI.md` defines UI behavior and accessibility.
 - `PI.md` defines the Pi RPC boundary and durable-history rules.
+- `docs/WS.md` is the WebSocket review standard. Consult it before adding or changing any project/workspace mutation, and before sending or receiving state updates.
 
 ## Product and runtime
 
@@ -24,6 +25,7 @@ Passage is a single-user, trusted-LAN coding environment. A persistent Bun daemo
 - A successful Pi `prompt` response means admission, not completion. Keep subscriptions alive through message finalization, `agent_end`, settlement, queued work, compaction, reconnects, and JSONL reconciliation.
 - Keep daemon-owned PTY terminals separate from Pi `bash`/`abort_bash` RPC. Terminal byte streams use binary WebSocket frames and an explicit single-client size lease.
 - All browser protocol payloads use Zod-defined, versioned envelopes with request IDs and per-subject sequences. Bound reads, history pages, files, diffs, process output, stderr, and replay buffers.
+- Mutations return fresh HTTP snapshots inline and broadcast invalidations over `/ws` per `docs/WS.md`. Never push content on the wire, add transports, or duplicate hub logic.
 
 ## Security and workspace rules
 
