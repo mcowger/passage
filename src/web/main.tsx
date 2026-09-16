@@ -1,18 +1,16 @@
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentCapabilities, AgentHistory, AgentSummary, TimelineItem, ToolActivity } from "../shared/domain/agents.ts";
-import type { JsonValue } from "../shared/protocol/index.ts";
+import type { AgentHistory, AgentSummary } from "../shared/domain/agents.ts";
 import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.ts";
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
-import type { LayoutNode, PaneTab, WorkspaceLayout } from "../shared/domain/layout.ts";
+import type { PaneTab, WorkspaceLayout } from "../shared/domain/layout.ts";
 import { addTabToGroup, createDefaultLayout, getFirstTabGroup, replaceOverviewTabs } from "../shared/domain/layout.ts";
 import type { WorkspaceSettings } from "../shared/domain/settings.ts";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
 import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
 import { BUILTIN_THEMES, BUILTIN_FONTS } from "../shared/domain/customization.ts";
 import { createWorkspaceApi } from "./api.ts";
-import { subscribeAgent } from "./agentSocket.ts";
-import { AgentPanel } from "./components/AgentPanel.tsx";
+import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { WorkspaceDetailsModal } from "./components/WorkspaceDetailsModal.tsx";
 import { ExplorerPanel } from "./components/ExplorerPanel.tsx";
@@ -25,9 +23,8 @@ import { SplitCanvas } from "./components/SplitCanvas.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { showAgentNotification } from "./notifications.ts";
-import { applyStreamEvent } from "./lib/streaming-events.ts";
 import { Button } from "./components/ui/button.tsx";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, Plus } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -106,11 +103,8 @@ function App() {
   const [openDiffPath, setOpenDiffPath] = useState<string>();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [terminals, setTerminals] = useState<TerminalSummary[]>([]);
-  const [history, setHistory] = useState<AgentHistory>();
-  const [capabilities, setCapabilities] = useState<AgentCapabilities>();
   const [previewHistory, setPreviewHistory] = useState<AgentHistory | null>(null);
   const [agentError, setAgentError] = useState("");
-  const [agentLoading, setAgentLoading] = useState(false);
   const [form, setForm] = useState<FormKind>();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [layout, setLayout] = useState<WorkspaceLayout>();
@@ -125,12 +119,6 @@ function App() {
   const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
 
-  const agentsRef = useRef(agents);
-  agentsRef.current = agents;
-  const settingsRef = useRef(settings);
-  settingsRef.current = settings;
-
-  const agentLoadGeneration = useRef(0);
   const agentsLoadGeneration = useRef(0);
 
   // Register service worker and offline listeners
@@ -246,63 +234,14 @@ function App() {
     } catch {}
   }, [api]);
 
-  const loadAgent = useCallback(async (agentId: string, isInitial = false) => {
-    const generation = ++agentLoadGeneration.current;
-    if (isInitial) setAgentLoading(true);
-    try {
-      const [summary, result] = await Promise.all([api.agent(agentId), api.history(agentId)]);
-      if (generation !== agentLoadGeneration.current) return;
-      setAgentError("");
-      setAgents((current) => current.map((agent) => agent.id === summary.id ? summary : agent));
-      setHistory((currentHistory) => {
-        if ("unpersisted" in result) return undefined;
-        const diskHistory = result.history;
-        if (!diskHistory) return currentHistory;
-
-        // Never clobber an in-progress live streaming turn with an older disk snapshot
-        if (summary.status === "running" && currentHistory?.timeline?.length) {
-          const hasStreamingItems = currentHistory.timeline.some(
-            (item) => item.kind === "thinking" || (item.kind === "tool" && item.status === "running")
-          );
-          if (hasStreamingItems && currentHistory.timeline.length >= diskHistory.timeline.length) {
-            return {
-              ...currentHistory,
-              revision: diskHistory.revision,
-              usage:
-                currentHistory.usage.totalTokens > diskHistory.usage.totalTokens
-                  ? currentHistory.usage
-                  : diskHistory.usage,
-            };
-          }
-        }
-
-        return diskHistory;
-      });
-      try {
-        const capabilities = await api.capabilities(agentId);
-        if (generation === agentLoadGeneration.current) setCapabilities(capabilities);
-      } catch {
-        if (generation === agentLoadGeneration.current) setCapabilities(undefined);
-      }
-    } catch (cause) {
-      if (generation !== agentLoadGeneration.current) return;
-      setAgentError(cause instanceof Error ? cause.message : "Unable to load agent");
-    } finally {
-      if (generation === agentLoadGeneration.current) setAgentLoading(false);
-    }
-  }, [api]);
-
   useEffect(() => { void refreshWorkspaces(); }, [refreshWorkspaces]);
 
   useEffect(() => {
     agentsLoadGeneration.current += 1;
-    agentLoadGeneration.current += 1;
     setAgents([]);
     setTerminals([]);
     setSelectedAgentId(undefined);
     setSelectedTerminalId(undefined);
-    setHistory(undefined);
-    setCapabilities(undefined);
     setOpenEditorPath(undefined);
     setOpenDiffPath(undefined);
     setActiveTab("agent");
@@ -313,54 +252,9 @@ function App() {
     }
   }, [loadAgents, loadTerminals, loadLayoutAndSettings, selectedWorkspaceId]);
 
-  useEffect(() => {
-    if (!selectedAgentId) return;
-    void loadAgent(selectedAgentId, true);
-    const subscription = subscribeAgent(
-      selectedAgentId,
-      (value, state) => {
-        if (state.status) {
-          setAgents((current) =>
-            current.map((agent) => (agent.id === selectedAgentId ? { ...agent, status: state.status! } : agent))
-          );
-        }
-        const envelope = (value && typeof value === "object" && "type" in value) ? (value as { type?: string }) : undefined;
-        const type = envelope?.type;
-        const payload = (value && typeof value === "object" && "payload" in value && typeof (value as { payload?: unknown }).payload === "object")
-          ? ((value as { payload: Record<string, unknown> }).payload)
-          : undefined;
-
-        if (type === "attention" && payload?.id) {
-          setAgents((current) =>
-            current.map((agent) => (agent.id === selectedAgentId ? { ...agent, pendingUiRequest: payload } : agent))
-          );
-        } else if (type === "settled" || type === "agent_settled" || (state.status && state.status !== "needs-attention")) {
-          setAgents((current) =>
-            current.map((agent) => (agent.id === selectedAgentId ? { ...agent, pendingUiRequest: undefined } : agent))
-          );
-        }
-
-        if (type === "settled" || type === "agent_settled") {
-          void loadAgent(selectedAgentId, false);
-          if (settingsRef.current.notificationsEnabled) {
-            const agentObj = agentsRef.current.find((a) => a.id === selectedAgentId);
-            showAgentNotification(
-              `Agent: ${agentObj?.title ?? "Activity finished"}`,
-              "Agent completed turn and is waiting for input."
-            );
-          }
-        }
-        setHistory((prev) => applyStreamEvent(prev, value));
-      },
-      () => loadAgent(selectedAgentId, false),
-    );
-    return () => subscription.close();
-  }, [loadAgent, selectedAgentId]);
-
   const workspace = snapshot?.workspaces.find((item) => item.id === selectedWorkspaceId);
   const project = snapshot?.projects.find((item) => item.id === workspace?.projectId);
   const activeProject = project ?? snapshot?.projects.find((item) => !item.archivedAt);
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
   const selectedTerminal = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
 
   const handleLayoutChange = useCallback(
@@ -448,18 +342,16 @@ function App() {
     } catch {}
   };
 
-  const archiveSelectedAgent = async () => {
-    if (!selectedAgentId || !selectedWorkspaceId) return;
+  const closeAgentTab = async (tabId: string) => {
+    if (!tabId.startsWith("agent-") || !selectedWorkspaceId) return;
+    const agentId = tabId.slice("agent-".length);
+    if (!agents.some((agent) => agent.id === agentId)) return;
     try {
-      setAgentError("");
-      await api.archiveAgent(selectedAgentId);
-      setSelectedAgentId(undefined);
-      setHistory(undefined);
-      setCapabilities(undefined);
+      await api.archiveAgent(agentId);
+      if (selectedAgentId === agentId) setSelectedAgentId(undefined);
       await loadAgents(selectedWorkspaceId, false);
-      setActiveTab("agent");
     } catch (cause) {
-      setAgentError(cause instanceof Error ? cause.message : "Unable to archive agent");
+      setAgentError(cause instanceof Error ? cause.message : "Unable to close agent session");
     }
   };
 
@@ -493,6 +385,16 @@ function App() {
     }
   };
 
+  const handleActivateTab = useCallback((tab: PaneTab) => {
+    if (tab.kind === "agent" && tab.targetId) {
+      setSelectedAgentId(tab.targetId);
+      setActiveTab("agent");
+    } else if (tab.kind === "terminal" && tab.targetId) {
+      setSelectedTerminalId(tab.targetId);
+      setActiveTab("terminal");
+    }
+  }, []);
+
   const handleSelectWorkspace = (id: string) => {
     setSelectedWorkspaceId(id);
     setSelectedAgentId(undefined);
@@ -515,47 +417,27 @@ function App() {
     switch (tab.kind) {
       case "overview":
       case "agent": {
-        const agentId = tab.targetId ?? selectedAgentId;
-        const currentAgent = agents.find((a) => a.id === agentId) ?? selectedAgent ?? agents[0];
+        const agentId = tab.targetId;
+        const currentAgent = agentId ? agents.find((a) => a.id === agentId) : undefined;
         const previewEnabled = typeof window !== "undefined"
           && new URLSearchParams(window.location.search).get("transcriptPreview") === "1";
         return currentAgent ? (
-          <AgentPanel
+          <AgentSessionPanel
             key={currentAgent.id}
             agent={currentAgent}
-            history={history}
-            capabilities={capabilities}
-            loading={agentLoading}
-            error={agentError}
             api={api}
-            onRefresh={() => loadAgent(currentAgent.id)}
-            onModelChanged={(updatedAgent) => {
+            onAgentChanged={(updatedAgent) => {
               setAgents((current) => current.map((agent) => agent.id === updatedAgent.id ? updatedAgent : agent));
             }}
-            onArchive={archiveSelectedAgent}
             previewHistory={previewEnabled ? previewHistory ?? undefined : undefined}
-            onOptimisticMessage={(message) => {
-              setHistory((prev) => {
-                const base: AgentHistory = prev ? { ...prev, timeline: [...prev.timeline] } : {
-                  sessionId: "",
-                  revision: { mtimeMs: Date.now(), size: 0, contentHash: "" },
-                  timeline: [],
-                  branches: [],
-                  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
-                  unknownRecordCount: 0,
-                  agentErrorCount: 0,
-                  malformedRecordCount: 0,
-                  partialTail: false,
-                  invalidUtf8Count: 0,
-                  rewritten: false,
-                };
-                return {
-                  ...base,
-                  timeline: [...base.timeline, { kind: "user", id: `user-${Date.now()}`, text: message }],
-                };
-              });
-            }}
           />
+        ) : tab.kind === "overview" ? (
+          <div className="empty flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto">
+            <span className="empty-icon text-3xl mb-2 text-primary" aria-hidden="true">◈</span>
+            <h1 className="text-lg font-semibold text-foreground mb-1">Workspace Overview</h1>
+            <p className="text-xs text-muted-foreground mb-4">Start a new agent session to begin a conversation.</p>
+            {!workspace.archivedAt && <Button size="sm" onClick={() => void createAgent()}>+ Start Agent Session</Button>}
+          </div>
         ) : (
           <div className="empty flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto">
             <span className="empty-icon text-3xl mb-2 text-primary" aria-hidden="true">◈</span>
@@ -819,14 +701,14 @@ function App() {
               </div>
               <div className="nav-tabs">
                 <button
+                  type="button"
                   className={`nav-tab ${activeTab === "agent" ? "active" : ""}`}
-                  onClick={() => {
-                    if (!selectedAgentId && agents[0]) setSelectedAgentId(agents[0].id);
-                    setActiveTab("agent");
-                    if (agents[0]) handleSelectAgent(agents[0].id);
-                  }}
+                  aria-label="Create new agent session"
+                  title="Create new agent session"
+                  onClick={() => void createAgent()}
                 >
-                  ◈ Agent {agents.length > 0 && <span className="tab-badge">{agents.length}</span>}
+                  ◈ Agent <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                  {agents.length > 0 && <span className="tab-badge">{agents.length}</span>}
                 </button>
                 <button
                   className={`nav-tab ${activeTab === "terminal" ? "active" : ""}`}
@@ -892,7 +774,9 @@ function App() {
                   layout={layout}
                   onLayoutChange={handleLayoutChange}
                   renderTabContent={renderTabContent}
+                  onActivateTab={handleActivateTab}
                   onCloseTab={(tabId) => {
+                    void closeAgentTab(tabId);
                     if (tabId.startsWith("editor-")) setOpenEditorPath(undefined);
                     if (tabId.startsWith("diff-")) setOpenDiffPath(undefined);
                   }}

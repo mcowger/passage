@@ -66,9 +66,9 @@ export type WorkspaceLayout = z.infer<typeof workspaceLayoutSchema>;
 
 export function createDefaultLayout(workspaceId: string, initialTab?: PaneTab): WorkspaceLayout {
   const defaultTab: PaneTab = initialTab ?? {
-    id: `agent-${workspaceId}`,
-    kind: "agent",
-    title: "Agent",
+    id: `overview-${workspaceId}`,
+    kind: "overview",
+    title: "Overview",
   };
   return {
     version: CURRENT_LAYOUT_SCHEMA_VERSION,
@@ -367,8 +367,8 @@ export function resizeSplitNode(
 export function replaceOverviewTabs(node: LayoutNode): LayoutNode {
   if (node.type === "tabs") {
     const nextTabs = node.tabs.map((tab) =>
-      tab.kind === "overview"
-        ? { ...tab, kind: "agent" as const, title: "Agent" }
+      (tab.kind === "overview" || (tab.kind === "agent" && !tab.targetId))
+        ? { ...tab, kind: "overview" as const, title: "Overview" }
         : tab
     );
     return { ...node, tabs: nextTabs };

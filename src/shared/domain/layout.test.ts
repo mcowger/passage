@@ -16,14 +16,14 @@ import {
 } from "./layout.ts";
 
 describe("split-tree layout domain operations", () => {
-  test("creates valid default layout with agent tab", () => {
+  test("creates valid default layout with overview tab", () => {
     const layout = createDefaultLayout("ws_1");
     expect(layout.version).toBe(1);
     expect(layout.root.type).toBe("tabs");
     if (layout.root.type === "tabs") {
       expect(layout.root.tabs).toHaveLength(1);
-      expect(layout.root.tabs[0].kind).toBe("agent");
-      expect(layout.root.activeTabId).toBe("agent-ws_1");
+      expect(layout.root.tabs[0].kind).toBe("overview");
+      expect(layout.root.activeTabId).toBe("overview-ws_1");
     }
     expect(workspaceLayoutSchema.safeParse(layout).success).toBe(true);
   });
@@ -57,7 +57,7 @@ describe("split-tree layout domain operations", () => {
       expect(splitRoot.direction).toBe("horizontal");
       expect(splitRoot.children).toHaveLength(2);
       expect(splitRoot.sizes).toEqual([0.5, 0.5]);
-      expect(findTab(splitRoot, "agent-ws_1")).not.toBeNull();
+      expect(findTab(splitRoot, "overview-ws_1")).not.toBeNull();
       expect(findTab(splitRoot, "term-1")).not.toBeNull();
     }
   });
@@ -73,7 +73,7 @@ describe("split-tree layout domain operations", () => {
     expect(collapsedRoot?.type).toBe("tabs");
     if (collapsedRoot?.type === "tabs") {
       expect(collapsedRoot.tabs).toHaveLength(1);
-      expect(collapsedRoot.tabs[0].id).toBe("agent-ws_1");
+      expect(collapsedRoot.tabs[0].id).toBe("overview-ws_1");
     }
   });
 

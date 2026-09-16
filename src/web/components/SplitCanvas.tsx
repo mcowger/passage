@@ -14,6 +14,7 @@ export interface SplitCanvasProps {
   layout: WorkspaceLayout;
   onLayoutChange: (layout: WorkspaceLayout) => void;
   renderTabContent: (tab: PaneTab) => React.ReactNode;
+  onActivateTab?: (tab: PaneTab) => void;
   onCloseTab?: (tabId: string) => void;
   workspaceId: string;
 }
@@ -22,6 +23,7 @@ export function SplitCanvas({
   layout,
   onLayoutChange,
   renderTabContent,
+  onActivateTab,
   onCloseTab,
   workspaceId,
 }: SplitCanvasProps) {
@@ -36,8 +38,10 @@ export function SplitCanvas({
     (groupId: string, tabId: string) => {
       const nextRoot = setActiveTabInTree(layout.root, groupId, tabId);
       onLayoutChange({ ...layout, root: nextRoot });
+      const selectedTab = findTabInNode(layout.root, tabId);
+      if (selectedTab) onActivateTab?.(selectedTab);
     },
-    [layout, onLayoutChange]
+    [layout, onActivateTab, onLayoutChange]
   );
 
   const handleCloseTab = useCallback(
@@ -89,6 +93,7 @@ export function SplitCanvas({
         layout={layout}
         onLayoutChange={onLayoutChange}
         renderTabContent={renderTabContent}
+        onActivateTab={onActivateTab}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
         onSplitRight={handleSplitRight}
@@ -155,6 +160,7 @@ interface NodeRendererProps {
   layout: WorkspaceLayout;
   onLayoutChange: (layout: WorkspaceLayout) => void;
   renderTabContent: (tab: PaneTab) => React.ReactNode;
+  onActivateTab?: (tab: PaneTab) => void;
   onSelectTab: (groupId: string, tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onSplitRight: (groupId: string, tab: PaneTab) => void;
