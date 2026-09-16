@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch run src/daemon/index.ts",
-    "build": "bun build --target=bun --production --outdir=dist --entry-naming='[name].[ext]' --asset-naming='[name]-[hash].[ext]' ./src/daemon/index.ts",
+    "build": "bun run scripts/build.ts",
     "start": "bun --cwd dist run ./index.js",
     "package": "bun build --compile --target=bun --production --outfile=dist/passage ./src/daemon/index.ts",
     "smoke:development": "bun run tests/smoke/server-smoke.ts --source",
