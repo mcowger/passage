@@ -333,9 +333,9 @@ code { font-family: var(--font-mono); }
 }
 
 .composer-ctx-pill {
-  height: 22px;
-  min-height: 22px;
-  max-height: 22px;
+  height: 26px;
+  min-height: 26px;
+  max-height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
