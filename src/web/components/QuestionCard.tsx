@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo } from "react";
 import {
   HelpCircle,
   Edit3,
@@ -11,6 +11,14 @@ import {
   CheckCheck,
 } from "lucide-react";
 import { cn } from "../lib/utils.ts";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./ui/card.tsx";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs.tsx";
+import { RadioGroup, RadioGroupItem } from "./ui/radio-group.tsx";
+import { Checkbox } from "./ui/checkbox.tsx";
+import { Textarea } from "./ui/textarea.tsx";
+import { Label } from "./ui/label.tsx";
+import { Button } from "./ui/button.tsx";
+import { Badge } from "./ui/badge.tsx";
 
 export interface QuestionOption {
   label: string;
@@ -204,253 +212,263 @@ export function QuestionCard({ request, onRespond }: QuestionCardProps) {
   const isMultiple = Boolean(activeQuestion?.multiple);
 
   return (
-    <div className="w-full my-2 text-sm">
-      <div className="border border-border/30 rounded-xl bg-muted/10 overflow-hidden shadow-xs">
-        {/* Header */}
-        <div className="px-3 py-2 border-b border-border/20 flex items-center gap-2 bg-muted/20">
-          <HelpCircle className="h-4 w-4 text-amber-500 shrink-0" />
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Input needed</span>
+    <Card className="w-full my-2 text-sm gap-0 py-0 overflow-hidden">
+      <CardHeader className="px-3 py-2 flex-row items-center gap-2 border-b border-border/20 bg-muted/20">
+        <HelpCircle className="h-4 w-4 text-amber-500 shrink-0" />
+        <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          Input needed
+        </CardTitle>
 
-          {activeHeader && (
-            <span className="ml-auto text-xs font-medium text-foreground/80 px-2 py-0.5 rounded-full bg-muted/40 border border-border/30 truncate max-w-[200px]">
-              {activeHeader}
-            </span>
-          )}
+        {activeHeader && (
+          <Badge variant="outline" className="ml-auto text-xs font-medium truncate max-w-[200px]">
+            {activeHeader}
+          </Badge>
+        )}
 
-          <div className={cn("flex items-center gap-1", activeHeader ? null : "ml-auto")}>
-            <button
-              type="button"
-              onClick={handleCopyMarkdown}
-              title="Copy as Markdown"
-              aria-label="Copy as Markdown"
-              className="flex items-center justify-center h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-            >
-              {copiedMd ? <CheckCheck className="h-3.5 w-3.5 text-emerald-500" /> : <FileText className="h-3.5 w-3.5" />}
-            </button>
-            <button
-              type="button"
-              onClick={handleCopyJson}
-              title="Copy as JSON"
-              aria-label="Copy as JSON"
-              className="flex items-center justify-center h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-            >
-              {copiedJson ? <CheckCheck className="h-3.5 w-3.5 text-emerald-500" /> : <Code className="h-3.5 w-3.5" />}
-            </button>
-          </div>
+        <div className={cn("flex items-center gap-1", activeHeader ? null : "ml-auto")}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={handleCopyMarkdown}
+            title="Copy as Markdown"
+            aria-label="Copy as Markdown"
+          >
+            {copiedMd ? <CheckCheck className="h-3.5 w-3.5 text-emerald-500" /> : <FileText className="h-3.5 w-3.5" />}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={handleCopyJson}
+            title="Copy as JSON"
+            aria-label="Copy as JSON"
+          >
+            {copiedJson ? <CheckCheck className="h-3.5 w-3.5 text-emerald-500" /> : <Code className="h-3.5 w-3.5" />}
+          </Button>
         </div>
+      </CardHeader>
 
-        {/* Tab Bar (for multi-questions) */}
-        {tabs.length > 1 && (
-          <div className="px-3 pt-2 pb-1 flex items-center gap-1.5 flex-wrap border-b border-border/10 bg-muted/10">
+      {/* Tab Bar (for multi-questions) */}
+      {tabs.length > 1 && (
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="px-3 pt-2 pb-1 border-b border-border/10 bg-muted/10 gap-0">
+          <TabsList className="h-auto bg-transparent p-0 gap-1.5 flex-wrap">
             {tabs.map((tab) => {
-              const isActive = activeTab === tab.value;
               const isSummary = tab.value === SUMMARY_TAB;
               const tabIndex = isSummary ? -1 : Number(tab.value);
               const isAnswered = !isSummary && !unansweredIndexes.includes(tabIndex);
 
               return (
-                <button
-                  key={tab.value}
-                  type="button"
-                  onClick={() => setActiveTab(tab.value)}
-                  className={cn(
-                    "px-2.5 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5",
-                    isActive
-                      ? "bg-accent/40 text-foreground font-semibold"
-                      : isSummary
-                      ? "text-muted-foreground hover:text-foreground hover:bg-muted/30"
-                      : isAnswered
-                      ? "text-muted-foreground/70 hover:text-foreground hover:bg-muted/30"
-                      : "text-foreground/85 hover:text-foreground hover:bg-muted/30"
-                  )}
-                >
+                <TabsTrigger key={tab.value} value={tab.value} className="px-2.5 py-1 text-xs data-[state=active]:bg-accent/40">
                   {isSummary && <ListChecks className="h-3 w-3" />}
                   {tab.label}
                   {isAnswered && !isSummary && <Check className="h-2.5 w-2.5 text-emerald-500" />}
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </Tabs>
+      )}
+
+      {/* Content Area */}
+      <CardContent className="px-3 py-3">
+        {isSummaryTab ? (
+          <div className="space-y-2">
+            {questions.map((q, index) => {
+              const selected = selectedOptions[index] ?? [];
+              const custom = customText[index]?.trim();
+              const hasCustom = customMode[index] && Boolean(custom);
+              const answerText = hasCustom ? custom : selected.length > 0 ? selected.join(", ") : "(no answer)";
+
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  onClick={() => setActiveTab(String(index))}
+                  className="w-full text-left rounded-lg p-2 hover:bg-muted/20 transition-colors border border-border/10"
+                >
+                  <div className="text-xs text-muted-foreground">{q.header || `Question ${index + 1}`}</div>
+                  <div className={cn("text-sm font-medium mt-0.5", answerText !== "(no answer)" ? "text-foreground" : "text-muted-foreground/50 italic")}>
+                    {answerText}
+                  </div>
                 </button>
               );
             })}
           </div>
-        )}
-
-        {/* Content Area */}
-        <div className="px-3 py-3">
-          {isSummaryTab ? (
-            <div className="space-y-2">
-              {questions.map((q, index) => {
-                const selected = selectedOptions[index] ?? [];
-                const custom = customText[index]?.trim();
-                const hasCustom = customMode[index] && Boolean(custom);
-                const answerText = hasCustom ? custom : selected.length > 0 ? selected.join(", ") : "(no answer)";
-
-                return (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => setActiveTab(String(index))}
-                    className="w-full text-left rounded-lg p-2 hover:bg-muted/20 transition-colors border border-border/10"
-                  >
-                    <div className="text-xs text-muted-foreground">{q.header || `Question ${index + 1}`}</div>
-                    <div className={cn("text-sm font-medium mt-0.5", answerText !== "(no answer)" ? "text-foreground" : "text-muted-foreground/50 italic")}>
-                      {answerText}
-                    </div>
-                  </button>
-                );
-              })}
+        ) : activeQuestion ? (
+          <>
+            <div className="font-semibold text-foreground text-sm leading-snug mb-2">
+              {activeQuestion.question}
             </div>
-          ) : activeQuestion ? (
-            <>
-              <div className="font-semibold text-foreground text-sm leading-snug mb-2">
-                {activeQuestion.question}
-              </div>
 
-              {isMultiple && (
-                <div className="text-xs text-muted-foreground mb-2">Select multiple options</div>
-              )}
+            {isMultiple && (
+              <div className="text-xs text-muted-foreground mb-2">Select multiple options</div>
+            )}
 
+            {isMultiple ? (
               <div className="space-y-1">
                 {activeQuestion.options.map((option, index) => {
                   const selected = selectedForActive.includes(option.label);
                   const recommended = /\(recommended\)/i.test(option.label);
+                  const optionId = `q${activeIndex}-opt${index}`;
 
                   return (
-                    <button
+                    <Label
                       key={`${index}:${option.label}`}
-                      type="button"
-                      onClick={() => handleToggleOption(option.label)}
-                      disabled={isResponding}
+                      htmlFor={optionId}
                       className={cn(
-                        "w-full px-2.5 py-2 text-left rounded-lg transition-all border",
+                        "w-full px-2.5 py-2 rounded-lg transition-all border flex items-start gap-2.5 cursor-pointer",
                         selected
                           ? "bg-accent/25 border-border/50"
                           : "hover:bg-muted/30 border-transparent",
-                        isResponding ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
+                        isResponding && "opacity-60 cursor-not-allowed"
                       )}
                     >
-                      <div className="flex items-start gap-2.5">
-                        <div className="mt-0.5 shrink-0">
-                          {isMultiple ? (
-                            <div
-                              className={cn(
-                                "w-4 h-4 rounded border flex items-center justify-center transition-colors",
-                                selected
-                                  ? "bg-primary border-primary text-primary-foreground"
-                                  : "border-muted-foreground/40 bg-transparent"
-                              )}
-                            >
-                              {selected && <Check className="w-3 h-3" />}
-                            </div>
-                          ) : (
-                            <div
-                              className={cn(
-                                "w-4 h-4 rounded-full border flex items-center justify-center transition-colors",
-                                selected
-                                  ? "border-primary"
-                                  : "border-muted-foreground/40 bg-transparent"
-                              )}
-                            >
-                              {selected && <div className="w-2 h-2 rounded-full bg-primary" />}
-                            </div>
+                      <Checkbox
+                        id={optionId}
+                        checked={selected}
+                        disabled={isResponding}
+                        onCheckedChange={() => handleToggleOption(option.label)}
+                        className="mt-0.5 shrink-0"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          <span className={cn("text-sm break-words", selected ? "text-foreground font-medium" : "text-foreground/85")}>
+                            {option.label}
+                          </span>
+                          {recommended && (
+                            <Badge variant="outline" className="text-[10px] text-primary/90 px-1.5 py-0 rounded bg-primary/10 border-primary/20">
+                              recommended
+                            </Badge>
                           )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className={cn("text-sm break-words", selected ? "text-foreground font-medium" : "text-foreground/85")}>
-                              {option.label}
-                            </span>
-                            {recommended && (
-                              <span className="text-[10px] text-primary/90 font-medium px-1.5 py-0.2 rounded bg-primary/10 border border-primary/20">
-                                recommended
-                              </span>
-                            )}
-                          </div>
-                          {option.description && (
-                            <div className="text-xs text-muted-foreground mt-0.5 break-words">
-                              {option.description}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </button>
+                        </span>
+                        {option.description && (
+                          <span className="block text-xs text-muted-foreground mt-0.5 break-words">
+                            {option.description}
+                          </span>
+                        )}
+                      </span>
+                    </Label>
                   );
                 })}
-
-                {/* Custom "Other..." option */}
-                <button
-                  type="button"
-                  onClick={handleSelectCustom}
-                  disabled={isResponding}
-                  className={cn(
-                    "w-full px-2.5 py-2 text-left rounded-lg transition-all border",
-                    isCustomActive ? "bg-accent/20 border-border/40" : "hover:bg-muted/30 border-transparent",
-                    isResponding ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <Edit3 className={cn("h-3.5 w-3.5", isCustomActive ? "text-primary" : "text-muted-foreground/60")} />
-                    <span className={cn("text-sm", isCustomActive ? "text-foreground font-medium" : "text-muted-foreground")}>
-                      Other…
-                    </span>
-                  </div>
-                </button>
-
-                {isCustomActive && (
-                  <div className="pl-6 pr-2 pt-1">
-                    <textarea
-                      value={customText[activeIndex] ?? ""}
-                      onChange={(e) => handleCustomChange(e.target.value)}
-                      placeholder="Your answer..."
-                      disabled={isResponding}
-                      rows={2}
-                      className="w-full bg-background/50 border border-border/40 focus:border-primary rounded-lg px-2.5 py-1.5 outline-hidden text-sm text-foreground placeholder:text-muted-foreground/50 transition-colors resize-y min-h-[56px]"
-                      autoFocus
-                    />
-                  </div>
-                )}
               </div>
-            </>
-          ) : null}
-        </div>
+            ) : (
+              <RadioGroup
+                value={selectedForActive[0] ?? ""}
+                onValueChange={handleToggleOption}
+                disabled={isResponding}
+                className="gap-1"
+              >
+                {activeQuestion.options.map((option, index) => {
+                  const selected = selectedForActive.includes(option.label);
+                  const recommended = /\(recommended\)/i.test(option.label);
+                  const optionId = `q${activeIndex}-opt${index}`;
 
-        {/* Footer Actions */}
-        <div className="px-3 py-2 border-t border-border/20 flex items-center gap-2 bg-muted/20">
-          <button
-            type="button"
-            onClick={handleNextOrSubmit}
-            disabled={isResponding || (!requiredSatisfied && isSingleQuestion)}
-            className={cn(
-              "flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer",
-              "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20",
-              "disabled:opacity-50 disabled:cursor-not-allowed"
+                  return (
+                    <Label
+                      key={`${index}:${option.label}`}
+                      htmlFor={optionId}
+                      className={cn(
+                        "w-full px-2.5 py-2 rounded-lg transition-all border flex items-start gap-2.5 cursor-pointer",
+                        selected
+                          ? "bg-accent/25 border-border/50"
+                          : "hover:bg-muted/30 border-transparent",
+                        isResponding && "opacity-60 cursor-not-allowed"
+                      )}
+                    >
+                      <RadioGroupItem id={optionId} value={option.label} className="mt-0.5 shrink-0" />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          <span className={cn("text-sm break-words", selected ? "text-foreground font-medium" : "text-foreground/85")}>
+                            {option.label}
+                          </span>
+                          {recommended && (
+                            <Badge variant="outline" className="text-[10px] text-primary/90 px-1.5 py-0 rounded bg-primary/10 border-primary/20">
+                              recommended
+                            </Badge>
+                          )}
+                        </span>
+                        {option.description && (
+                          <span className="block text-xs text-muted-foreground mt-0.5 break-words">
+                            {option.description}
+                          </span>
+                        )}
+                      </span>
+                    </Label>
+                  );
+                })}
+              </RadioGroup>
             )}
-          >
-            {requiredSatisfied || isSingleQuestion ? <Check className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-            {requiredSatisfied || isSingleQuestion ? "Submit" : "Next"}
-          </button>
 
-          <button
-            type="button"
-            onClick={handleDismiss}
-            disabled={isResponding}
-            className={cn(
-              "flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer",
-              "bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20",
-              "disabled:opacity-50 disabled:cursor-not-allowed"
-            )}
-          >
-            <X className="h-3.5 w-3.5" />
-            Dismiss
-          </button>
+            <div className="space-y-1 mt-1">
+              {/* Custom "Other..." option */}
+              <button
+                type="button"
+                onClick={handleSelectCustom}
+                disabled={isResponding}
+                className={cn(
+                  "w-full px-2.5 py-2 text-left rounded-lg transition-all border",
+                  isCustomActive ? "bg-accent/20 border-border/40" : "hover:bg-muted/30 border-transparent",
+                  isResponding ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <Edit3 className={cn("h-3.5 w-3.5", isCustomActive ? "text-primary" : "text-muted-foreground/60")} />
+                  <span className={cn("text-sm", isCustomActive ? "text-foreground font-medium" : "text-muted-foreground")}>
+                    Other…
+                  </span>
+                </div>
+              </button>
 
-          {isResponding && (
-            <div className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-              <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />
-              <span>Sending...</span>
+              {isCustomActive && (
+                <div className="pl-6 pr-2 pt-1">
+                  <Textarea
+                    value={customText[activeIndex] ?? ""}
+                    onChange={(e) => handleCustomChange(e.target.value)}
+                    placeholder="Your answer..."
+                    disabled={isResponding}
+                    rows={2}
+                    className="min-h-[56px] resize-y"
+                    autoFocus
+                  />
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </div>
-    </div>
+          </>
+        ) : null}
+      </CardContent>
+
+      {/* Footer Actions */}
+      <CardFooter className="px-3 py-2 border-t border-border/20 bg-muted/20 gap-2">
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleNextOrSubmit}
+          disabled={isResponding || (!requiredSatisfied && isSingleQuestion)}
+          className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20"
+        >
+          {requiredSatisfied || isSingleQuestion ? <Check className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          {requiredSatisfied || isSingleQuestion ? "Submit" : "Next"}
+        </Button>
+
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleDismiss}
+          disabled={isResponding}
+          className="bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20"
+        >
+          <X className="h-3.5 w-3.5" />
+          Dismiss
+        </Button>
+
+        {isResponding && (
+          <div className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+            <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />
+            <span>Sending...</span>
+          </div>
+        )}
+      </CardFooter>
+    </Card>
   );
 }
