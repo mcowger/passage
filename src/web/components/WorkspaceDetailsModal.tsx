@@ -208,16 +208,16 @@ export function WorkspaceDetailsModal({
             </h4>
             <dl className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-2 text-xs">
               <dt className="text-muted-foreground">Project root</dt>
-              <dd className="font-mono break-all flex items-start gap-1">{project.canonicalRootPath}<CopyValueButton value={project.canonicalRootPath} label="project root path" /></dd>
+              <dd className="font-mono break-words flex items-start gap-1">{project.canonicalRootPath}<CopyValueButton value={project.canonicalRootPath} label="project root path" /></dd>
 
               <dt className="text-muted-foreground">Working directory</dt>
-              <dd className="font-mono break-all flex items-start gap-1">{workspace.cwd}<CopyValueButton value={workspace.cwd} label="working directory path" /></dd>
+              <dd className="font-mono break-words flex items-start gap-1">{workspace.cwd}<CopyValueButton value={workspace.cwd} label="working directory path" /></dd>
 
               <dt className="text-muted-foreground">Checkout root</dt>
-              <dd className="font-mono break-all flex items-start gap-1">{workspace.checkoutRoot ?? "Not applicable"}{workspace.checkoutRoot && <CopyValueButton value={workspace.checkoutRoot} label="checkout root path" />}</dd>
+              <dd className="font-mono break-words flex items-start gap-1">{workspace.checkoutRoot ?? "Not applicable"}{workspace.checkoutRoot && <CopyValueButton value={workspace.checkoutRoot} label="checkout root path" />}</dd>
 
               <dt className="text-muted-foreground">Main repository</dt>
-              <dd className="font-mono break-all flex items-start gap-1">{workspace.mainRepositoryRoot ?? "Not applicable"}{workspace.mainRepositoryRoot && <CopyValueButton value={workspace.mainRepositoryRoot} label="main repository path" />}</dd>
+              <dd className="font-mono break-words flex items-start gap-1">{workspace.mainRepositoryRoot ?? "Not applicable"}{workspace.mainRepositoryRoot && <CopyValueButton value={workspace.mainRepositoryRoot} label="main repository path" />}</dd>
 
               <dt className="text-muted-foreground">Branch ref</dt>
               <dd className="font-mono">{workspace.branchRef ?? "None (directory)"}</dd>
@@ -228,7 +228,7 @@ export function WorkspaceDetailsModal({
               {workspace.markerPath && (
                 <>
                   <dt className="text-muted-foreground">Marker path</dt>
-                  <dd className="font-mono break-all">{workspace.markerPath}</dd>
+                  <dd className="font-mono break-words">{workspace.markerPath}</dd>
                 </>
               )}
             </dl>
