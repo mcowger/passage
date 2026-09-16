@@ -4,7 +4,7 @@ import type { AgentHistory, AgentSummary } from "../shared/domain/agents.ts";
 import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.ts";
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import type { PaneTab, WorkspaceLayout, LayoutNode } from "../shared/domain/layout.ts";
-import { addTabToGroup, createDefaultLayout, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs } from "../shared/domain/layout.ts";
+import { addTabToGroup, countAgentTabs, createDefaultLayout, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs } from "../shared/domain/layout.ts";
 import type { WorkspaceSettings } from "../shared/domain/settings.ts";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
 import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
@@ -340,6 +340,13 @@ function App() {
   const workspaceProject = activeProjects.find((item) => item.id === workspaceProjectId) ?? activeProject;
   const selectedTerminal = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
   const isGitWorkspace = workspace?.mainRepositoryRoot != null;
+
+  // Agents exist only while they have an open canvas pane, so the top-bar count
+  // reflects the agent tabs actually present for the current workspace.
+  const openAgentCount = useMemo(() => {
+    if (!layout) return 0;
+    return countAgentTabs(layout.root, new Set(agents.map((agent) => agent.id)));
+  }, [layout, agents]);
 
   const handleLayoutChange = useCallback(
     (nextLayout: WorkspaceLayout) => {
@@ -907,7 +914,7 @@ function App() {
                   onClick={() => void createAgent()}
                 >
                   ◈ Agent <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                  {agents.length > 0 && <span className="tab-badge">{agents.length}</span>}
+                  {openAgentCount > 0 && <span className="tab-badge">{openAgentCount}</span>}
                 </button>
                 <button
                   className={`nav-tab ${activeTab === "terminal" ? "active" : ""}`}
