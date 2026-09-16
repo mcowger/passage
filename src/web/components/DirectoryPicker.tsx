@@ -77,7 +77,12 @@ export function DirectoryPicker({ api, name, defaultValue = "", placeholder, aut
     <Command
       shouldFilter={false}
       label="Directory path"
-      className="relative overflow-visible rounded-md border border-input bg-transparent"
+      // Restyle the internal CommandInput wrapper to match a plain form
+      // field (ui/input): the palette styling (bottom-border-only row on a
+      // filled box) otherwise renders a double frame that overflows the
+      // dialog grid. The inner input is taller (h-10) than its row (h-9),
+      // so pin it to h-9 as well; twMerge keeps our conflicting classes.
+      className="relative min-w-0 overflow-visible bg-transparent [&_[data-slot=command-input-wrapper]]:h-9 [&_[data-slot=command-input-wrapper]]:min-w-0 [&_[data-slot=command-input-wrapper]]:rounded-sm [&_[data-slot=command-input-wrapper]]:border [&_[data-slot=command-input-wrapper]]:border-input [&_[data-slot=command-input-wrapper]]:bg-transparent"
     >
       <CommandInput
         name={name}
@@ -100,7 +105,7 @@ export function DirectoryPicker({ api, name, defaultValue = "", placeholder, aut
           // and input-level stopPropagation cannot preempt it.
           if (event.key === "Escape" && open && (loading || entries.length > 0)) setOpen(false);
         }}
-        className="border-0"
+        className="h-9 min-w-0 flex-1 rounded-none border-0! bg-transparent! shadow-none"
       />
       {open && (loading || entries.length > 0) && (
         <div className="absolute inset-x-0 top-full z-50 mt-1 overflow-hidden rounded-md border bg-popover shadow-md">
