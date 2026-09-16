@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { AgentHistory, AgentSummary } from "../shared/domain/agents.ts";
 import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.ts";
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
-import type { PaneTab, WorkspaceLayout } from "../shared/domain/layout.ts";
+import type { PaneTab, WorkspaceLayout, LayoutNode } from "../shared/domain/layout.ts";
 import { addTabToGroup, createDefaultLayout, getFirstTabGroup, replaceOverviewTabs } from "../shared/domain/layout.ts";
 import type { WorkspaceSettings } from "../shared/domain/settings.ts";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
@@ -90,6 +90,43 @@ function FormDialog({ title, submitLabel, error, onCancel, onSubmit, children }:
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function stripGitTabsFromLayout(node: LayoutNode): LayoutNode | null {
+  if (node.type === "tabs") {
+    const tabs = node.tabs.filter((tab) => tab.kind !== "changes" && tab.kind !== "diff");
+    if (tabs.length === 0) return null;
+    const activeTabId = tabs.some((tab) => tab.id === node.activeTabId) ? node.activeTabId : tabs[0].id;
+    return { ...node, tabs, activeTabId };
+  }
+  const children: LayoutNode[] = [];
+  const sizes: number[] = [];
+  for (let i = 0; i < node.children.length; i++) {
+    const next = stripGitTabsFromLayout(node.children[i]);
+    if (next) {
+      children.push(next);
+      sizes.push(node.sizes[i] ?? 1 / node.children.length);
+    }
+  }
+  if (children.length === 0) return null;
+  if (children.length === 1) return children[0];
+  const total = sizes.reduce((sum, size) => sum + size, 0);
+  return { ...node, children, sizes: sizes.map((size) => size / total) };
+}
+
+function layoutContainsGitTabs(node: LayoutNode): boolean {
+  if (node.type === "tabs") return node.tabs.some((tab) => tab.kind === "changes" || tab.kind === "diff");
+  return node.children.some(layoutContainsGitTabs);
+}
+
+function NonGitPane({ title }: { title: string }) {
+  return (
+    <div className="empty flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto">
+      <span className="empty-icon text-3xl mb-2" aria-hidden="true">±</span>
+      <h1 className="text-lg font-semibold text-foreground mb-1">{title} unavailable</h1>
+      <p className="text-xs text-muted-foreground">This workspace is not inside a Git repository.</p>
+    </div>
   );
 }
 
@@ -259,6 +296,7 @@ function App() {
   const project = snapshot?.projects.find((item) => item.id === workspace?.projectId);
   const activeProject = project ?? snapshot?.projects.find((item) => !item.archivedAt);
   const selectedTerminal = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
+  const isGitWorkspace = workspace?.mainRepositoryRoot != null;
 
   const handleLayoutChange = useCallback(
     (nextLayout: WorkspaceLayout) => {
@@ -287,13 +325,27 @@ function App() {
   const openPaneTab = useCallback(
     (tab: PaneTab) => {
       if (!layout) return;
+      if ((tab.kind === "changes" || tab.kind === "diff") && workspace?.mainRepositoryRoot == null) return;
       const firstGroup = getFirstTabGroup(layout.root);
       if (!firstGroup) return;
       const nextRoot = addTabToGroup(layout.root, firstGroup.id, tab);
       handleLayoutChange({ ...layout, root: nextRoot });
     },
-    [layout, handleLayoutChange]
+    [layout, handleLayoutChange, workspace?.mainRepositoryRoot]
   );
+
+  useEffect(() => {
+    if (!workspace || !layout) return;
+    if (workspace.mainRepositoryRoot != null) return;
+    if (!layoutContainsGitTabs(layout.root)) return;
+    const stripped = stripGitTabsFromLayout(layout.root);
+    if (stripped) {
+      handleLayoutChange({ ...layout, root: stripped });
+    } else {
+      handleLayoutChange(createDefaultLayout(workspace.id));
+    }
+    setActiveTab((current) => (current === "changes" || current === "diff" ? "agent" : current));
+  }, [workspace, layout, handleLayoutChange]);
 
   const runWorkspaceMutation = async (action: () => Promise<unknown>) => {
     try {
@@ -522,6 +574,7 @@ function App() {
         );
 
       case "changes":
+        if (!isGitWorkspace) return <NonGitPane title="Changes" />;
         return (
           <ChangesPanel
             workspaceId={workspace.id}
@@ -551,6 +604,18 @@ function App() {
 
       case "editor": {
         const filePath = tab.targetId ?? openEditorPath;
+        const openFileDiff = isGitWorkspace
+          ? (path: string) => {
+              setOpenDiffPath(path);
+              setActiveTab("diff");
+              openPaneTab({
+                id: `diff-${path}`,
+                kind: "diff",
+                title: `Diff: ${path.split("/").pop() ?? path}`,
+                targetId: path,
+              });
+            }
+          : undefined;
         return filePath ? (
           <EditorPanel
             workspaceId={workspace.id}
@@ -560,16 +625,7 @@ function App() {
               setOpenEditorPath(undefined);
               setActiveTab("explorer");
             }}
-            onOpenDiff={(path) => {
-              setOpenDiffPath(path);
-              setActiveTab("diff");
-              openPaneTab({
-                id: `diff-${path}`,
-                kind: "diff",
-                title: `Diff: ${path.split("/").pop() ?? path}`,
-                targetId: path,
-              });
-            }}
+            onOpenDiff={openFileDiff}
           />
         ) : (
           <div className="empty">
@@ -580,6 +636,7 @@ function App() {
       }
 
       case "diff": {
+        if (!isGitWorkspace) return <NonGitPane title="Diff" />;
         const diffPath = tab.targetId ?? openDiffPath;
         return (
           <DiffPanel
@@ -732,15 +789,17 @@ function App() {
                 >
                   📁 Files
                 </button>
-                <button
-                  className={`nav-tab ${activeTab === "changes" ? "active" : ""}`}
-                  onClick={() => {
-                    setActiveTab("changes");
-                    openPaneTab({ id: `changes-${workspace.id}`, kind: "changes", title: "Changes" });
-                  }}
-                >
-                  ± Changes
-                </button>
+                {isGitWorkspace && (
+                  <button
+                    className={`nav-tab ${activeTab === "changes" ? "active" : ""}`}
+                    onClick={() => {
+                      setActiveTab("changes");
+                      openPaneTab({ id: `changes-${workspace.id}`, kind: "changes", title: "Changes" });
+                    }}
+                  >
+                    ± Changes
+                  </button>
+                )}
               </div>
 
               <div className="workspace-nav-actions">
@@ -805,12 +864,14 @@ function App() {
         onClose={() => setCommandPaletteOpen(false)}
         snapshot={snapshot ?? { projects: [], workspaces: [], locations: [] }}
         selectedWorkspaceId={selectedWorkspaceId}
+        isGitWorkspace={isGitWorkspace}
         agents={agents}
         terminals={terminals}
         onSelectWorkspace={handleSelectWorkspace}
         onSelectAgent={handleSelectAgent}
         onSelectTerminal={handleSelectTerminal}
         onOpenView={(view) => {
+          if ((view === "changes" || view === "diff") && !isGitWorkspace) return;
           setActiveTab(view);
           if (workspace) openPaneTab({ id: `${view}-${workspace.id}`, kind: view, title: view });
         }}

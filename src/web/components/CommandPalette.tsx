@@ -33,6 +33,7 @@ export interface CommandPaletteProps {
   onSelectWorkspace: (id: string) => void;
   onSelectAgent: (id: string) => void;
   onSelectTerminal: (id: string) => void;
+  isGitWorkspace?: boolean;
   onOpenView: (view: "agent" | "terminal" | "explorer" | "changes" | "diff") => void;
   onCreateAgent: () => void;
   onCreateTerminal: () => void;
@@ -53,6 +54,7 @@ export function CommandPalette({
   onSelectWorkspace,
   onSelectAgent,
   onSelectTerminal,
+  isGitWorkspace = true,
   onOpenView,
   onCreateAgent,
   onCreateTerminal,
@@ -88,22 +90,26 @@ export function CommandPalette({
         shortcut: "Alt+2",
         run: () => onOpenView("explorer"),
       },
-      {
-        id: "view-changes",
-        category: "Views",
-        title: "Git Changes",
-        icon: "±",
-        shortcut: "Alt+3",
-        run: () => onOpenView("changes"),
-      },
-      {
-        id: "view-diff",
-        category: "Views",
-        title: "Diff Viewer",
-        icon: "🔍",
-        shortcut: "Alt+4",
-        run: () => onOpenView("diff"),
-      },
+      ...(isGitWorkspace
+        ? [
+            {
+              id: "view-changes",
+              category: "Views" as const,
+              title: "Git Changes",
+              icon: "±",
+              shortcut: "Alt+3",
+              run: () => onOpenView("changes"),
+            },
+            {
+              id: "view-diff",
+              category: "Views" as const,
+              title: "Diff Viewer",
+              icon: "🔍",
+              shortcut: "Alt+4",
+              run: () => onOpenView("diff"),
+            },
+          ]
+        : []),
       {
         id: "action-new-agent",
         category: "Actions",
@@ -189,6 +195,7 @@ export function CommandPalette({
     snapshot.workspaces,
     agents,
     terminals,
+    isGitWorkspace,
     onOpenView,
     onCreateAgent,
     onCreateTerminal,
