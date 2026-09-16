@@ -5,6 +5,7 @@ import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { Button } from "./ui/button.tsx";
 import { Input } from "./ui/input.tsx";
 import { Alert, AlertDescription } from "./ui/alert.tsx";
+import { Spinner } from "./ui/spinner.tsx";
 
 type ExplorerProps = {
   workspaceId: string;
@@ -148,7 +149,12 @@ export function ExplorerPanel({ workspaceId, api, onOpenFile, selectedFile }: Ex
             onClick={() => void loadDirectory(dirPath, dirState.nextCursor ?? undefined)}
             disabled={dirState.loading}
           >
-            {dirState.loading ? "Loading..." : "Load more entries..."}
+            {dirState.loading ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Spinner className="size-3" />
+                Loading...
+              </span>
+            ) : "Load more entries..."}
           </Button>
         )}
       </div>

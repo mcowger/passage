@@ -24,6 +24,7 @@ import { Switch } from "./ui/switch.tsx";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group.tsx";
 import { Label } from "./ui/label.tsx";
 import { Alert, AlertDescription } from "./ui/alert.tsx";
+import { toast } from "sonner";
 
 export interface SettingsModalProps {
   open: boolean;
@@ -127,6 +128,7 @@ export function SettingsModal({
       setNewLabel("");
       setNewPath("");
       await refreshLocations();
+      toast.success("Worktree location added");
     } catch (err) {
       setLocationError(err instanceof Error ? err.message : "Failed to add location");
     } finally {

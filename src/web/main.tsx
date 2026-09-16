@@ -33,6 +33,7 @@ import {
 } from "./components/ui/dialog.tsx";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
 import { Alert, AlertDescription } from "./components/ui/alert.tsx";
+import { Toaster } from "./components/ui/sonner.tsx";
 import "./styles.css";
 
 function applyThemeTokens(theme?: ThemePack) {
@@ -923,4 +924,4 @@ function App() {
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Passage root element is missing");
-createRoot(root).render(<StrictMode><TooltipProvider><App /></TooltipProvider></StrictMode>);
+createRoot(root).render(<StrictMode><TooltipProvider><App /><Toaster /></TooltipProvider></StrictMode>);

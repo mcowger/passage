@@ -5,6 +5,8 @@ import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { Button } from "./ui/button.tsx";
 import { Badge } from "./ui/badge.tsx";
 import { Alert, AlertDescription } from "./ui/alert.tsx";
+import { Spinner } from "./ui/spinner.tsx";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty.tsx";
 
 type ChangesProps = {
   workspaceId: string;
@@ -117,13 +119,21 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
       {error && <Alert variant="destructive" className="panel-alert"><AlertDescription>{error}</AlertDescription></Alert>}
 
       <div className="changes-list">
-        {loading && !status && <div className="muted empty-inline">Checking status...</div>}
+        {loading && !status && (
+          <div className="muted empty-inline flex items-center gap-2">
+            <Spinner className="size-3.5" />
+            Checking status...
+          </div>
+        )}
 
         {!loading && files.length === 0 && (
-          <div className="empty-inline muted">
-            <span style={{ fontSize: 24, display: "block", marginBottom: 6 }}>✓</span>
-            Working tree is clean. No uncommitted changes.
-          </div>
+          <Empty className="border-none p-6">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">✓</EmptyMedia>
+              <EmptyTitle>Working tree is clean</EmptyTitle>
+              <EmptyDescription>No uncommitted changes.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
 
         {displayedFiles.map((file) => (

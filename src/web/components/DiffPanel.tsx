@@ -3,6 +3,8 @@ import type { DiffHunk, GitDiff } from "../../shared/domain/git.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { Alert, AlertDescription } from "./ui/alert.tsx";
+import { Spinner } from "./ui/spinner.tsx";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty.tsx";
 
 type DiffProps = {
   workspaceId: string;
@@ -133,12 +135,22 @@ export function DiffPanel({ workspaceId, initialPath, api, onOpenFile, onClose }
       {error && <Alert variant="destructive" className="panel-alert"><AlertDescription>{error}</AlertDescription></Alert>}
 
       <div className="diff-content-list">
-        {loading && diffs.length === 0 && <div className="muted empty-inline">Computing diff...</div>}
+        {loading && diffs.length === 0 && (
+          <div className="muted empty-inline flex items-center gap-2">
+            <Spinner className="size-3.5" />
+            Computing diff...
+          </div>
+        )}
 
         {!loading && displayedDiffs.length === 0 && (
-          <div className="muted empty-inline">
-            No changes found in {target === "staged" ? "staged index" : "working tree"}.
-          </div>
+          <Empty className="border-none p-6">
+            <EmptyHeader>
+              <EmptyTitle>No changes found</EmptyTitle>
+              <EmptyDescription>
+                No changes found in {target === "staged" ? "staged index" : "working tree"}.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
 
         {displayedDiffs.map((diffItem) => (
