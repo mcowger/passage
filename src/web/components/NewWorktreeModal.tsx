@@ -27,6 +27,7 @@ type Props = {
   projects: Project[];
   locations: WorktreeLocation[];
   defaultProjectId?: string;
+  lockedProjectId?: string;
   initialTab?: "create" | "discover";
   api: WorkspaceApi;
   onClose: () => void;
@@ -38,6 +39,7 @@ export function NewWorktreeModal({
   projects,
   locations,
   defaultProjectId,
+  lockedProjectId,
   initialTab = "create",
   api,
   onClose,
@@ -45,8 +47,14 @@ export function NewWorktreeModal({
   onLocationsChanged,
 }: Props) {
   const activeProjects = projects.filter((p) => !p.archivedAt);
+  const lockedProject = lockedProjectId ? activeProjects.find((p) => p.id === lockedProjectId) : undefined;
   const [activeTab, setActiveTab] = useState<"create" | "discover">(initialTab);
-  const [projectId, setProjectId] = useState(defaultProjectId ?? activeProjects[0]?.id ?? "");
+  const [projectId, setProjectId] = useState(lockedProjectId ?? defaultProjectId ?? activeProjects[0]?.id ?? "");
+
+  useEffect(() => {
+    const next = lockedProjectId ?? defaultProjectId;
+    if (next) setProjectId(next);
+  }, [lockedProjectId, defaultProjectId]);
 
   // Create Tab State
   const availableLocations = locations.filter(
@@ -231,7 +239,12 @@ export function NewWorktreeModal({
           <form onSubmit={handleCreate} className="flex flex-col gap-3 pt-1">
             <div className="flex flex-col gap-1 text-xs font-medium">
               <Label htmlFor="worktree-project" className="text-xs">Project</Label>
-              <Select
+              {lockedProject ? (
+                <p id="worktree-project" className="text-xs text-foreground font-normal truncate" title={lockedProject.canonicalRootPath}>
+                  {lockedProject.displayLabel} ({lockedProject.canonicalRootPath})
+                </p>
+              ) : (
+                <Select
                 value={projectId}
                 onValueChange={(value) => {
                   setProjectId(value);
@@ -251,6 +264,7 @@ export function NewWorktreeModal({
                   ))}
                 </SelectContent>
               </Select>
+              )}
             </div>
 
             <div className="flex flex-col gap-1 text-xs font-medium">
@@ -446,6 +460,11 @@ export function NewWorktreeModal({
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs font-medium flex-1">
                 <Label htmlFor="discover-project" className="text-xs shrink-0">Project:</Label>
+                {lockedProject ? (
+                  <span id="discover-project" className="text-xs font-normal truncate" title={lockedProject.canonicalRootPath}>
+                    {lockedProject.displayLabel}
+                  </span>
+                ) : (
                 <Select value={projectId} onValueChange={setProjectId}>
                   <SelectTrigger id="discover-project" className="flex-1 h-8 text-xs">
                     <SelectValue placeholder="Select project" />
@@ -456,6 +475,7 @@ export function NewWorktreeModal({
                     ))}
                   </SelectContent>
                 </Select>
+                )}
               </div>
               <Button
                 type="button"

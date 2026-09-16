@@ -37,7 +37,7 @@ const success = (value: unknown, status = 200) => Response.json(value, { status,
 export const createWorkspaceRoutes = (service: WorkspaceService): Hono => {
   const app = new Hono();
   app.use("*", async (context, next) => { context.header("Cache-Control", "no-store"); return next(); });
-  app.get("/api/workspaces/snapshot", (context) => success(service.snapshot()));
+  app.get("/api/workspaces/snapshot", async (context) => { try { await service.ensureAllDefaults(); } catch {} return success(service.snapshot()); });
   app.post("/api/projects", async (context) => { try { const input = projectInput.parse(await readJsonBody(context.req.raw)); return success(await service.registerProject(input.configuredRootPath, input.displayLabel), 201); } catch (error) { return errorResponse(error); } });
   app.post("/api/projects/:projectId/archive", (context) => { try { service.archiveProject(id(context, "projectId")); return success({ ok: true }); } catch (error) { return errorResponse(error); } });
   app.post("/api/projects/:projectId/reopen", (context) => { try { return success(service.reopenProject(id(context, "projectId"))); } catch (error) { return errorResponse(error); } });
