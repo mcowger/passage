@@ -690,9 +690,11 @@ function App() {
   const renderTabContent = (tab: PaneTab): ReactNode => {
     if (!workspace || !project) {
       return (
-        <div className="empty">
-          <span className="empty-icon" aria-hidden="true">⌂</span>
-          <h1>Select a workspace</h1>
+        <div className="empty flex flex-1 flex-col items-center justify-center p-8 text-center max-w-md mx-auto">
+          <span className="empty-icon text-3xl mb-2" aria-hidden="true">⌂</span>
+          <h1 className="text-lg font-semibold text-foreground mb-1">Select a workspace</h1>
+          <p className="text-xs text-muted-foreground mb-4">Choose a workspace from navigation or register a project to begin.</p>
+          <Button size="xs" onClick={() => { setFormError(""); setForm("project"); }}>+ Add Project</Button>
         </div>
       );
     }
@@ -1091,10 +1093,11 @@ function App() {
             </div>
           </div>
         ) : (
-          <div className="empty">
-            <span className="empty-icon" aria-hidden="true">⌂</span>
-            <h1>Select a workspace</h1>
-            <p>Choose a workspace from navigation or register a project to begin.</p>
+          <div className="empty flex flex-1 flex-col items-center justify-center p-8 text-center max-w-md mx-auto">
+            <span className="empty-icon text-3xl mb-2" aria-hidden="true">⌂</span>
+            <h1 className="text-lg font-semibold text-foreground mb-1">Select a workspace</h1>
+            <p className="text-xs text-muted-foreground mb-4">Choose a workspace from navigation or register a project to begin.</p>
+            <Button size="xs" onClick={() => { setFormError(""); setForm("project"); }}>+ Add Project</Button>
           </div>
         )}
       </main>
