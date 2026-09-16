@@ -1,11 +1,12 @@
 {
   "worktree": {
-    "setup": ["./init_worktree.sh"]
+    "setup": ["./init_worktree.sh"],
+    "servicePorts": { "portScript": "./scripts/dev-port.ts" }
   },
   "scripts": {
     "dev": {
       "type": "service",
-      "command": "PORT=\"$PASEO_PORT\" bun run dev"
+      "command": "bun run dev"
     },
     "typecheck": {
       "command": "bun run typecheck"

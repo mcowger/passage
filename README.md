@@ -31,7 +31,9 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-The daemon listens on port `3333` by default. Set `PORT` to use another port.
+The daemon picks a stable per-worktree port in `3000`–`3999` via
+`scripts/dev-port.ts` (hashed from the worktree path, bumped while occupied).
+Set `PORT` to override it.
 
 Useful checks:
 
