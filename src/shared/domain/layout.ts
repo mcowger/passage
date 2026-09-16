@@ -118,6 +118,23 @@ export function findTab(
   return null;
 }
 
+export function countAgentTabs(node: LayoutNode, agentIds?: ReadonlySet<string>): number {
+  const seen = new Set<string>();
+  const visit = (current: LayoutNode) => {
+    if (current.type === "tabs") {
+      for (const tab of current.tabs) {
+        if (tab.kind !== "agent" || tab.targetId === undefined) continue;
+        if (agentIds && !agentIds.has(tab.targetId)) continue;
+        seen.add(tab.targetId);
+      }
+      return;
+    }
+    current.children.forEach(visit);
+  };
+  visit(node);
+  return seen.size;
+}
+
 export function findNode(node: LayoutNode, nodeId: string): LayoutNode | null {
   if (node.id === nodeId) return node;
   if (node.type === "split") {

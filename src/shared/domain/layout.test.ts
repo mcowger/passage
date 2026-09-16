@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   addTabToGroup,
+  countAgentTabs,
   createDefaultLayout,
   findNode,
   findTab,
@@ -108,6 +109,23 @@ describe("split-tree layout domain operations", () => {
         expect(resized.sizes[1]).toBeCloseTo(0.3);
       }
     }
+  });
+
+  test("counts only distinct agent tabs targeting known agents", () => {
+    const layout = createDefaultLayout("ws_1");
+    const agentOne: PaneTab = { id: "agent-a", kind: "agent", title: "Agent A", targetId: "a" };
+    const agentTwo: PaneTab = { id: "agent-b", kind: "agent", title: "Agent B", targetId: "b" };
+    const orphan: PaneTab = { id: "agent-orphan", kind: "agent", title: "Agent C", targetId: "c" };
+    const legacy: PaneTab = { id: "agent-legacy", kind: "agent", title: "Agent" };
+
+    let root = addTabToGroup(layout.root, layout.root.id, agentOne);
+    root = addTabToGroup(root, layout.root.id, agentTwo);
+    root = addTabToGroup(root, layout.root.id, orphan);
+    root = addTabToGroup(root, layout.root.id, legacy);
+
+    expect(countAgentTabs(root)).toBe(3);
+    expect(countAgentTabs(root, new Set(["a", "b"]))).toBe(2);
+    expect(countAgentTabs(createDefaultLayout("ws_1").root, new Set(["a"]))).toBe(0);
   });
 
   test("migrates layout from valid version or falls back to default", () => {
