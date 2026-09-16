@@ -335,8 +335,7 @@ function TabGroupRenderer({
               >
                 <span className="canvas-tab-icon">{getTabIcon(tab.kind)}</span>
                 <span className="canvas-tab-title">{tab.title}</span>
-                {group.tabs.length > 1 && (
-                  <button
+                <button
                     type="button"
                     className="canvas-tab-close"
                     title="Close tab"
@@ -348,7 +347,6 @@ function TabGroupRenderer({
                   >
                     ×
                   </button>
-                )}
               </div>
             );
           })}
