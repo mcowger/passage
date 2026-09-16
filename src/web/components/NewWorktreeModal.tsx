@@ -533,13 +533,13 @@ export function NewWorktreeModal({
             {/* Manual Path Import */}
             <div className="pt-2 border-t border-border/50">
               <span className="text-xs font-medium text-muted-foreground block mb-1.5">Or import by directory path:</span>
-              <div className="flex gap-2">
+              <div className="flex gap-2 min-w-0">
                 <Input
                   type="text"
                   placeholder="/path/to/existing/worktree"
                   value={manualPath}
                   onChange={(e) => setManualPath(e.target.value)}
-                  className="h-8 text-xs font-mono flex-1"
+                  className="h-8 text-xs font-mono flex-1 min-w-0"
                 />
                 <Input
                   type="text"
