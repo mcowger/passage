@@ -168,6 +168,10 @@ function readLastWorkspaceId(): string | undefined {
   }
 }
 
+function setupToastId(runId: string): string {
+  return `workspace-setup-${runId}`;
+}
+
 function App() {
   const api = useMemo(() => createWorkspaceApi(), []);
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
@@ -410,6 +414,43 @@ function App() {
 
   useEffect(() => {
     if (!selectedWorkspaceId) return;
+    const workspaceId = selectedWorkspaceId;
+    const settleSetupRun = (run: WorkspaceActionRun) => {
+      if (run.status === "running" || announcedSetupRuns.current.has(run.id)) return;
+      announcedSetupRuns.current.add(run.id);
+      pendingSetupRuns.current.delete(run.workspaceId);
+      const id = setupToastId(run.id);
+      if (run.status === "succeeded") {
+        toast.success("Workspace setup complete", {
+          id,
+          description: `Finished ${run.results.length} setup command${run.results.length === 1 ? "" : "s"}.`,
+          duration: 5000,
+        });
+        return;
+      }
+      const failed = run.results.find((result) => result.exitCode !== 0);
+      toast.error("Workspace setup failed", {
+        id,
+        description: failed
+          ? `${failed.command}${failed.exitCode === null ? " was cancelled or timed out." : ` exited with code ${failed.exitCode}.`}`
+          : run.error ?? "The setup action did not complete.",
+        duration: 8000,
+      });
+    };
+    const ensureSetupToast = () => {
+      const runId = pendingSetupRuns.current.get(workspaceId);
+      if (!runId || announcedSetupRuns.current.has(runId)) return;
+      // Re-assert the loading state so the progression toast stays visible
+      // across reloads or workspace switches, and so a run that finished
+      // before we subscribed still resolves into the same toast.
+      toast.loading("Setting up workspace", {
+        id: setupToastId(runId),
+        description: "Running the worktree setup action in the background.",
+        duration: Infinity,
+      });
+      void api.getWorkspaceActionRun(workspaceId, runId).then(settleSetupRun).catch(() => undefined);
+    };
+    ensureSetupToast();
     const sub = subscribeWorkspace(
       selectedWorkspaceId,
       (event) => {
@@ -417,23 +458,7 @@ function App() {
         const payload = event.payload as { runId?: unknown };
         const runId = typeof payload.runId === "string" ? payload.runId : undefined;
         if (!runId || pendingSetupRuns.current.get(selectedWorkspaceId) !== runId || announcedSetupRuns.current.has(runId)) return;
-        void api.getWorkspaceActionRun(selectedWorkspaceId, runId).then((run: WorkspaceActionRun) => {
-          if (run.status === "running" || announcedSetupRuns.current.has(run.id)) return;
-          announcedSetupRuns.current.add(run.id);
-          pendingSetupRuns.current.delete(run.workspaceId);
-          if (run.status === "succeeded") {
-            toast.success("Workspace setup complete", {
-              description: `Finished ${run.results.length} setup command${run.results.length === 1 ? "" : "s"}.`,
-            });
-            return;
-          }
-          const failed = run.results.find((result) => result.exitCode !== 0);
-          toast.error("Workspace setup failed", {
-            description: failed
-              ? `${failed.command}${failed.exitCode === null ? " was cancelled or timed out." : ` exited with code ${failed.exitCode}.`}`
-              : run.error ?? "The setup action did not complete.",
-          });
-        }).catch(() => undefined);
+        void api.getWorkspaceActionRun(selectedWorkspaceId, runId).then(settleSetupRun).catch(() => undefined);
       },
       async () => {
         await Promise.all([
@@ -1549,8 +1574,10 @@ function App() {
           onCreated={(created) => {
             if (created.setup) {
               pendingSetupRuns.current.set(created.workspace.id, created.setup.id);
-              toast.message("Setting up workspace", {
+              toast.loading("Setting up workspace", {
+                id: setupToastId(created.setup.id),
                 description: "Running the worktree setup action in the background.",
+                duration: Infinity,
               });
             }
             void refreshWorkspaces().then(() => {
