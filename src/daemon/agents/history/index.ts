@@ -219,6 +219,14 @@ function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "s
         ? message.content
         : [{ type: "text", text: message?.content }];
       let assistantContent = false;
+      const error = role === "assistant" ? string(message?.errorMessage) : undefined;
+      let errorInserted = false;
+      const insertError = () => {
+        if (!error || errorInserted) return;
+        timeline.push({ kind: "assistant", id: `${entryId}:terminal`, text: error, error });
+        errorInserted = true;
+        agentErrorCount += 1;
+      };
       for (const [index, value] of blocks.entries()) {
         const block = object(value);
         if (!block) continue;
@@ -230,6 +238,9 @@ function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "s
           timeline.push({ kind: "thinking", id: blockId, text: string(block.thinking) ?? "" });
           assistantContent = true;
         } else if (block.type === "toolCall" && role === "assistant") {
+          // Pi emits the terminal error before a retained, unexecuted tool call.
+          // Keep that order when rebuilding the timeline from JSONL.
+          insertError();
           const toolId = string(block.id) ?? `${entryId}:tool:${index}`;
           const name = string(block.name) ?? "tool";
           const tool: ToolActivity = {
@@ -246,11 +257,8 @@ function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "s
         }
       }
       if (role === "assistant") {
-        const error = string(message?.errorMessage);
-        if (!assistantContent || error) {
-          timeline.push({ kind: "assistant", id: `${entryId}:terminal`, text: error ?? "", ...(error ? { error } : {}) });
-        }
-        if (error) agentErrorCount += 1;
+        if (error) insertError();
+        else if (!assistantContent) timeline.push({ kind: "assistant", id: `${entryId}:terminal`, text: "" });
         const provider = string(message?.provider);
         const modelId = string(message?.model);
         if (provider && modelId) currentModel = { provider, modelId };
