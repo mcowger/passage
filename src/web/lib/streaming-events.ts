@@ -10,7 +10,7 @@ export function applyStreamEvent(
   const { type, payload } = envelope as { type?: string; payload?: Record<string, unknown> };
   if (!type || !payload) return prev;
 
-  const base: AgentHistory = prev
+  let base: AgentHistory = prev
     ? { ...prev, timeline: [...prev.timeline] }
     : {
         sessionId: "",
@@ -18,6 +18,7 @@ export function applyStreamEvent(
         timeline: [],
         branches: [],
         usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
+        contextUsage: { tokens: null },
         unknownRecordCount: 0,
         agentErrorCount: 0,
         malformedRecordCount: 0,
@@ -47,6 +48,13 @@ export function applyStreamEvent(
         cost: usage.cost?.total ?? base.usage.cost,
       }
     : base.usage;
+
+  // Streaming usage is per-message, so its total is the live context size.
+  base = {
+    ...base,
+    usage: nextUsage,
+    contextUsage: usage?.totalTokens !== undefined ? { tokens: usage.totalTokens } : base.contextUsage,
+  };
 
   const event = payload.assistantMessageEvent as
     | {

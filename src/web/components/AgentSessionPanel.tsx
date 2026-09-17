@@ -113,6 +113,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
             timeline: [],
             branches: [],
             usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
+            contextUsage: { tokens: null },
             unknownRecordCount: 0,
             agentErrorCount: 0,
             malformedRecordCount: 0,
