@@ -10,7 +10,7 @@ type StatusInput = Pick<AgentSummary, "status"> & {
  * Maps an agent to its dot color kind:
  * - attention (red): waiting on the user (needs-attention status or a pending UI request) or errored
  * - active (green): currently working (initializing, running, stopping)
- * - idle (blue): everything else (idle, archived, no work in flight)
+ * - idle (gray): everything else (idle, archived, no work in flight)
  */
 export function getAgentStatusKind(agent: StatusInput): AgentStatusKind {
   if (agent.pendingUiRequest != null) return "attention";
@@ -23,7 +23,7 @@ export function getAgentStatusKind(agent: StatusInput): AgentStatusKind {
 
 /**
  * Workspace dot aggregates its agents with attention > active > idle priority.
- * Empty (no agents) is idle/blue.
+ * Empty (no agents) is idle/gray.
  */
 export function getWorkspaceStatusKind(agents: StatusInput[]): AgentStatusKind {
   let sawActive = false;
