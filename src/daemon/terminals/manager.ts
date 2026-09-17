@@ -1,3 +1,4 @@
+import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   type CreateTerminalInput,
@@ -231,9 +232,30 @@ class TerminalInstance {
     }
   }
 
+  /** PID of the shell spawned for this terminal (null when unavailable). */
+  get pid(): number | null {
+    try {
+      const pid = this.process.pid;
+      return typeof pid === "number" && Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+    } catch {
+      return null;
+    }
+  }
+
   kill() {
     logger("terminal").info("PTY termination requested", { event: "terminal.termination_requested", terminalId: this.id });
     this.status = "exited";
+    const pid = this.pid;
+    if (pid !== null) {
+      // SIGTERM the whole tree (children first) so nested builds/servers
+      // die with the shell; a SIGKILL sweep follows for ignorers.
+      killProcessTree(pid, "SIGTERM");
+      setTimeout(() => {
+        try {
+          if (this.process.exitCode === null) killProcessTree(pid, "SIGKILL");
+        } catch {}
+      }, 2000).unref?.();
+    }
     if (this.process.exitCode === null) {
       try {
         this.process.kill();
@@ -286,6 +308,28 @@ export class TerminalManager {
     return true;
   }
 
+  /** Kill every terminal belonging to a workspace (shell + descendants).
+   *  Used before workspace archival/removal so no PTY child outlives the
+   *  worktree directory. Never throws; returns the terminated terminal IDs. */
+  terminateForWorkspace(workspaceId: string): string[] {
+    const ids: string[] = [];
+    for (const term of this.terminals.values()) {
+      if (term.workspaceId === workspaceId) ids.push(term.id);
+    }
+    for (const id of ids) {
+      try {
+        this.terminals.get(id)?.kill();
+      } catch (error) {
+        logger("terminal").warn("Workspace terminal termination failed", { event: "terminal.workspace_termination_failed", terminalId: id, workspaceId, ...errorFields(error) });
+      }
+      this.terminals.delete(id);
+    }
+    if (ids.length > 0) {
+      logger("terminal").info("Terminals terminated for workspace", { event: "terminal.workspace_terminated", workspaceId, count: ids.length });
+    }
+    return ids;
+  }
+
   attach(terminalId: string, subscriber: TerminalSubscriber): boolean {
     const term = this.terminals.get(terminalId);
     if (!term) return false;
@@ -312,4 +356,65 @@ export class TerminalManager {
     const term = this.terminals.get(terminalId);
     term?.takeLease(clientId);
   }
+}
+
+/** Best-effort parent→children map from /proc (Linux only). */
+async function readParentMap(): Promise<Map<number, number[]> | null> {
+  if (process.platform !== "linux") return null;
+  let entries: string[];
+  try {
+    entries = await readdir("/proc");
+  } catch {
+    return null;
+  }
+  const children = new Map<number, number[]>();
+  await Promise.all(entries.filter((e) => /^\d+$/.test(e)).slice(0, 4096).map(async (pid) => {
+    let status: string;
+    try {
+      status = await readFile(`/proc/${pid}/status`, "utf8");
+    } catch {
+      return;
+    }
+    const match = /^PPid:\s*(\d+)/m.exec(status);
+    if (!match) return;
+    const ppid = Number(match[1]);
+    const child = Number(pid);
+    if (!Number.isSafeInteger(ppid) || !Number.isSafeInteger(child)) return;
+    const list = children.get(ppid);
+    if (list) list.push(child);
+    else children.set(ppid, [child]);
+  }));
+  return children;
+}
+
+function signalPid(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal);
+  } catch {}
+}
+
+/** Signal a process tree (descendants first, then the root). Best-effort:
+ *  uses /proc on Linux; elsewhere signals only the root. Never throws. */
+export function killProcessTree(rootPid: number, signal: NodeJS.Signals): void {
+  if (!Number.isSafeInteger(rootPid) || rootPid <= 0) return;
+  void (async () => {
+    try {
+      const parentMap = await readParentMap();
+      if (!parentMap) {
+        signalPid(rootPid, signal);
+        return;
+      }
+      const descendants: number[] = [];
+      const queue = [...(parentMap.get(rootPid) ?? [])];
+      while (queue.length > 0) {
+        const pid = queue.pop()!;
+        descendants.push(pid);
+        for (const child of parentMap.get(pid) ?? []) queue.push(child);
+      }
+      for (const pid of descendants) signalPid(pid, signal);
+      signalPid(rootPid, signal);
+    } catch {
+      signalPid(rootPid, signal);
+    }
+  })();
 }

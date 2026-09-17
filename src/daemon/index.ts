@@ -151,10 +151,36 @@ app.get("/api/daemon/snapshot", (context) => context.json({
   protocolVersion: PROTOCOL_VERSION,
   metadataSchemaVersion: metadata.schemaVersion,
 }));
-app.route("/", createWorkspaceRoutes(workspaceService, { onArchiveWorkspace: (workspaceId) => previewManager.stopForWorkspace(workspaceId) }, workspaceEvents));
+/** Stop everything bound to a workspace before it is archived/removed:
+ *  running setup actions, PTY terminals (+ children), live Pi processes,
+ *  and agent-browser preview sessions (+ their chromium). Never throws so
+ *  a teardown failure can't block the archival/removal itself. */
+const teardownWorkspace = async (workspaceId: string): Promise<void> => {
+  try {
+    workspaceActionsService.cancelForWorkspace(workspaceId);
+  } catch (error) {
+    log.warn("Workspace action teardown failed", { event: "daemon.workspace_teardown_actions_failed", workspaceId, ...errorFields(error) });
+  }
+  try {
+    terminalManager.terminateForWorkspace(workspaceId);
+  } catch (error) {
+    log.warn("Workspace terminal teardown failed", { event: "daemon.workspace_teardown_terminals_failed", workspaceId, ...errorFields(error) });
+  }
+  await Promise.allSettled([
+    agentService.stopForWorkspace(workspaceId),
+    previewManager.stopForWorkspace(workspaceId),
+  ]).then((results) => {
+    for (const result of results) {
+      if (result.status === "rejected") {
+        log.warn("Workspace teardown step failed", { event: "daemon.workspace_teardown_failed", workspaceId, ...errorFields(result.reason) });
+      }
+    }
+  });
+};
+app.route("/", createWorkspaceRoutes(workspaceService, { onArchiveWorkspace: (workspaceId) => teardownWorkspace(workspaceId) }, workspaceEvents));
 app.route("/", createGitRoutes(workspaceService, gitService, workspaceEvents));
 app.route("/", createFileRoutes(fileService, workspaceEvents));
-app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (workspaceId) => previewManager.stopForWorkspace(workspaceId) }, workspaceEvents));
+app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (workspaceId) => teardownWorkspace(workspaceId) }, workspaceEvents));
 app.route("/", createWorkspaceActionRoutes(workspaceActionsService));
 app.route("/", createTerminalRoutes(terminalManager));
 app.route("/", createPreviewRoutes(previewManager, workspaceEvents));

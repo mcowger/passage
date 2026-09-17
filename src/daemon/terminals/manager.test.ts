@@ -91,4 +91,20 @@ describe("TerminalManager", () => {
 
     f.store.close();
   });
+
+  test("terminateForWorkspace kills only that workspace's terminals", async () => {
+    const f = await fixture();
+    const other = await f.workspaces.createDirectoryWorkspace(f.project.id, { displayLabel: "Other" });
+    const a = await f.manager.create(f.workspace.id, { title: "A" });
+    const b = await f.manager.create(f.workspace.id, { title: "B" });
+    const c = await f.manager.create(other.id, { title: "C" });
+    const killed = f.manager.terminateForWorkspace(f.workspace.id);
+    expect(new Set(killed)).toEqual(new Set([a.id, b.id]));
+    expect(f.manager.get(a.id)).toBeNull();
+    expect(f.manager.get(b.id)).toBeNull();
+    expect(f.manager.get(c.id)?.status).toBe("running");
+    expect(f.manager.terminateForWorkspace(f.workspace.id)).toEqual([]);
+    f.manager.terminate(c.id);
+    f.store.close();
+  });
 });

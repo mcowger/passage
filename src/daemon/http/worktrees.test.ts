@@ -126,6 +126,43 @@ describe("worktrees HTTP API", () => {
     expect(f.repos.workspaces.get(workspace.id)).toBeUndefined();
     f.store.close();
   });
+  test("invokes onRemoveWorkspace teardown hook before removal", async () => {
+    const f = await fixture();
+    const project = projectSchema.parse({
+      id: "prj_teardown_hook",
+      configuredRootPath: f.root,
+      canonicalRootPath: f.root,
+      displayLabel: "Teardown Hook",
+      archivedAt: null,
+    });
+    f.repos.projects.save(project);
+    const workspace = workspaceSchema.parse({
+      id: "wsp_teardown_hook",
+      projectId: project.id,
+      kind: "worktree",
+      cwd: join(f.root, "gone-teardown"),
+      checkoutRoot: join(f.root, "gone-teardown"),
+      mainRepositoryRoot: f.root,
+      branchRef: "feature/gone",
+      displayLabel: "Gone",
+      locationId: null,
+      ownershipState: "owned",
+      markerId: null,
+      markerPath: null,
+      repairDetail: null,
+      archivedAt: null,
+    });
+    f.repos.workspaces.save(workspace);
+    const tornDown: string[] = [];
+    const hub = new WorkspaceEventHub();
+    const service = new WorktreeService(f.repos, undefined, new MetadataGenerator(50, { executable: "/does/not/exist" }));
+    const app = createWorktreeRoutes(service, { onRemoveWorkspace: async (id) => { tornDown.push(id); } }, hub);
+    const res = await app.fetch(request(`/api/workspaces/${workspace.id}/worktree/remove`, { method: "POST", body: JSON.stringify({}) }));
+    expect(res.status).toBe(200);
+    expect(tornDown).toEqual([workspace.id]);
+    expect(f.repos.workspaces.get(workspace.id)).toBeUndefined();
+    f.store.close();
+  });
   test("rejects remove with invalid body with 400 invalid-request", async () => {
     const f = await fixture();
     const res = await f.app.fetch(

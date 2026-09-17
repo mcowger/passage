@@ -617,6 +617,40 @@ export class AgentService {
     await this.manager.stop(agentId);
   }
 
+  /** Stop every live Pi process in a workspace (agent-browser/preview
+   *  sessions are owned by WebPreviewManager, terminals by
+   *  TerminalManager). Used before workspace archival/removal so no `pi
+   *  --mode rpc` process outlives the worktree directory. Never throws. */
+  async stopForWorkspace(workspaceId: string): Promise<string[]> {
+    const log = logger("agent");
+    let agents: { id: string }[];
+    try {
+      agents = this.repositories.agents.listForWorkspace(workspaceId, this.listLimit);
+    } catch (error) {
+      log.warn("Workspace agent lookup failed", { event: "agent.workspace_stop_lookup_failed", workspaceId, ...errorFields(error) });
+      return [];
+    }
+    const stopped: string[] = [];
+    await Promise.all(agents.map(async (agent) => {
+      try {
+        // Serialize behind a still-booting create() so the background
+        // start can't leak a process around the teardown.
+        await this.awaitPendingStart(agent.id);
+        this.detach(agent.id);
+        this.cancellations.delete(agent.id);
+        this.runStartedAt.delete(agent.id);
+        await this.manager.stop(agent.id);
+        stopped.push(agent.id);
+      } catch (error) {
+        log.warn("Workspace agent stop failed", { event: "agent.workspace_stop_failed", agentId: agent.id, workspaceId, ...errorFields(error) });
+      }
+    }));
+    if (stopped.length > 0) {
+      log.info("Agents stopped for workspace", { event: "agent.workspace_stopped", workspaceId, count: stopped.length });
+    }
+    return stopped;
+  }
+
   async shutdown(): Promise<void> {
     // Let create()'s background boots finish (they clean up their own map
     // entries) so they never write to a closed database after this returns.

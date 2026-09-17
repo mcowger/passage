@@ -222,6 +222,22 @@ export class WorkspaceActionsService {
     return snapshot(entry.record);
   }
 
+  /** Abort every running action in a workspace. Used before workspace
+   *  archival/removal so setup runs don't outlive the worktree. Never
+   *  throws; returns the cancelled run IDs. */
+  cancelForWorkspace(workspaceId: string): string[] {
+    const cancelled: string[] = [];
+    for (const [id, entry] of this.runs) {
+      if (entry.record.workspaceId === workspaceId && entry.record.status === "running") {
+        try {
+          entry.controller.abort();
+          cancelled.push(id);
+        } catch {}
+      }
+    }
+    return cancelled;
+  }
+
   /** Signal cancellation and return the current snapshot. The run settles to
    *  `cancelled` shortly after; already-settled runs are returned as-is. */
   cancel(workspaceId: string, runId: string): WorkspaceActionRun {
