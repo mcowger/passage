@@ -64,7 +64,12 @@ const UNKNOWN_REQUEST_ID = "unknown";
 await configureLogging();
 const log = logger("daemon");
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
-const defaultDataRoot = join(import.meta.dir, "..", "..", ".data");
+const isStandaloneExecutable = (Bun as { isStandaloneExecutable?: boolean }).isStandaloneExecutable === true;
+// Standalone binaries are portable: keep their data beside the working
+// directory instead of resolving relative to the source tree layout.
+const defaultDataRoot = isStandaloneExecutable
+  ? join(process.cwd(), ".data")
+  : join(import.meta.dir, "..", "..", ".data");
 const metadataPath = process.env.PASSAGE_DB_PATH ?? join(defaultDataRoot, "passage.sqlite");
 mkdirSync(dirname(metadataPath), { recursive: true });
 
