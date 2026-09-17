@@ -25,8 +25,10 @@ no raw Pi JSON, consistent with the allowlist-only constraint.
   snippets (removed — Pi has no such concept, do not build).
 
 Current state: `AgentComposerInner` (`src/web/components/AgentPanel.tsx`)
-is a plain `<textarea>` whose placeholder advertises behavior that does not
-exist yet. This plan fills the `@` + `/` gap without violating invariants.
+uses a controlled `contenteditable` editor adapter. The draft remains raw text,
+while completed file refs are rendered as atomic icon-bearing chips; this keeps
+the Pi boundary and autosave format unchanged without adopting a full rich-text
+document model. This plan fills the `@` + `/` gap without violating invariants.
 
 Consequential cleanup: update the composer placeholder from
 `"@ for files/agents; / for commands and skills; ! for shell; # for snippets"`
