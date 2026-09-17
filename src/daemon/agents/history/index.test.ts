@@ -176,6 +176,71 @@ describe("Pi history projection", () => {
     expect(history.timeline[3]).toMatchObject({ id: "tool-1", status: "running" });
   });
 
+  test("suppresses the aborted run Pi compacted over, keeping the summary", () => {
+    const source = [
+      line(header),
+      line({ type: "message", id: "u1", parentId: null, timestamp: "t", message: { role: "user", content: "Work" } }),
+      line({ type: "message", id: "a1", parentId: "u1", timestamp: "t", message: { role: "assistant", content: [], stopReason: "aborted", errorMessage: "Request aborted" } }),
+      line({ type: "compaction", id: "c1", parentId: "a1", timestamp: "t", summary: "Compact", firstKeptEntryId: "u1", tokensBefore: 115972, details: { reason: "manual", compactor: "pi-vcc" } }),
+      line({ type: "message", id: "u2", parentId: "c1", timestamp: "t", message: { role: "user", content: "After" } }),
+    ].join("");
+    const history = parsePiJsonl(source, revision(source));
+    expect(history.timeline.map((item) => item.kind)).toEqual(["summary", "user", "user"]);
+    expect(history.timeline[0]).toMatchObject({ kind: "summary", summaryType: "compaction", text: "Compact", tokensBefore: 115972, compactionReason: "manual" });
+    expect(history.agentErrorCount).toBe(0);
+  });
+
+  test("keeps a user-initiated stop notice even when compacted over", () => {
+    const source = [
+      line(header),
+      line({ type: "message", id: "u1", parentId: null, timestamp: "t", message: { role: "user", content: "Work" } }),
+      line({ type: "message", id: "a1", parentId: "u1", timestamp: "t", message: { role: "assistant", content: [], stopReason: "aborted", errorMessage: "Request was aborted" } }),
+      line({ type: "compaction", id: "c1", parentId: "a1", timestamp: "t", summary: "Compact", firstKeptEntryId: "u1", tokensBefore: 50, details: { reason: "manual" } }),
+    ].join("");
+    const history = parsePiJsonl(source, revision(source));
+    expect(history.timeline.map((item) => item.kind)).toEqual(["summary", "user", "assistant"]);
+    expect(history.timeline.at(-1)).toMatchObject({ error: "Request was aborted" });
+    expect(history.agentErrorCount).toBe(1);
+  });
+
+  test("keeps genuine model errors even when compacted over", () => {
+    const source = [
+      line(header),
+      line({ type: "message", id: "u1", parentId: null, timestamp: "t", message: { role: "user", content: "Work" } }),
+      line({ type: "message", id: "a1", parentId: "u1", timestamp: "t", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Model unavailable" } }),
+      line({ type: "compaction", id: "c1", parentId: "a1", timestamp: "t", summary: "Compact", firstKeptEntryId: "u1", tokensBefore: 50, details: { reason: "manual" } }),
+    ].join("");
+    const history = parsePiJsonl(source, revision(source));
+    expect(history.timeline.map((item) => item.kind)).toEqual(["summary", "user", "assistant"]);
+    expect(history.timeline.at(-1)).toMatchObject({ error: "Model unavailable" });
+    expect(history.agentErrorCount).toBe(1);
+  });
+
+  test("keeps an aborted run that compaction did not directly parent", () => {
+    const source = [
+      line(header),
+      line({ type: "message", id: "u1", parentId: null, timestamp: "t", message: { role: "user", content: "Work" } }),
+      line({ type: "message", id: "a1", parentId: "u1", timestamp: "t", message: { role: "assistant", content: [], stopReason: "aborted", errorMessage: "Request aborted" } }),
+      line({ type: "message", id: "u2", parentId: "a1", timestamp: "t", message: { role: "user", content: "Retry" } }),
+      line({ type: "compaction", id: "c1", parentId: "u2", timestamp: "t", summary: "Compact", firstKeptEntryId: "u1", tokensBefore: 50, details: { reason: "threshold" } }),
+    ].join("");
+    const history = parsePiJsonl(source, revision(source));
+    expect(history.timeline.map((item) => item.kind)).toEqual(["summary", "user", "assistant", "user"]);
+    expect(history.timeline[2]).toMatchObject({ error: "Request aborted" });
+    expect(history.timeline[0]).toMatchObject({ kind: "summary", compactionReason: "auto" });
+    expect(history.agentErrorCount).toBe(1);
+  });
+
+  test("omits compaction metadata the journal entry does not carry", () => {
+    const source = [
+      line(header),
+      line({ type: "message", id: "u1", parentId: null, timestamp: "t", message: { role: "user", content: "Work" } }),
+      line({ type: "compaction", id: "c1", parentId: "u1", timestamp: "t", summary: "Compact", firstKeptEntryId: "u1" }),
+    ].join("");
+    const history = parsePiJsonl(source, revision(source));
+    expect(history.timeline[0]).toEqual({ kind: "summary", id: "c1", summaryType: "compaction", text: "Compact" });
+  });
+
   test("detects append versus rewrite using the previous content fingerprint", async () => {
     const directory = await mkdtemp(join(tmpdir(), "passage-history-"));
     directories.push(directory);

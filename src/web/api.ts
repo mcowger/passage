@@ -9,7 +9,7 @@ import {
   type WorkspaceSnapshot,
   type WorktreeLocation,
 } from "../shared/domain/workspaces.ts";
-import { agentCapabilitiesSchema, agentHistoryResponseSchema, agentHistorySchema, agentSummarySchema, type AgentCapabilities, type AgentHistory, type AgentHistoryResponse, type AgentSummary } from "../shared/domain/agents.ts";
+import { agentCapabilitiesSchema, agentHistoryResponseSchema, agentHistorySchema, agentSummarySchema, compactResponseSchema, type AgentCapabilities, type AgentHistory, type AgentHistoryResponse, type AgentSummary, type CompactResponse } from "../shared/domain/agents.ts";
 import { terminalSummarySchema, type CreateTerminalInput, type TerminalSummary } from "../shared/domain/terminals.ts";
 import { workspaceLayoutSchema, type WorkspaceLayout } from "../shared/domain/layout.ts";
 import { workspaceSettingsSchema, type WorkspaceSettings } from "../shared/domain/settings.ts";
@@ -32,6 +32,9 @@ const okResponseSchema = z.object({ ok: z.literal(true) }).strict();
  *  deadline instead of being aborted mid-flight. */
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MUTATION_REQUEST_TIMEOUT_MS = 120_000;
+/** Compaction summarizes the whole session in one model call; giant
+ *  sessions can need minutes, and the daemon allows up to 5. */
+const COMPACT_REQUEST_TIMEOUT_MS = 320_000;
 
 export type WorkspaceApi = ReturnType<typeof createWorkspaceApi>;
 
@@ -247,7 +250,7 @@ export function createWorkspaceApi(
     /** Raw workspace image bytes (model-read preview). Path is workspace-relative. */
     workspaceImageUrl(workspaceId: string, path: string): string { return `/api/workspaces/${encodeURIComponent(workspaceId)}/files/raw?path=${encodeURIComponent(path)}`; },
     async abort(id: string) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/abort`, { method: "POST" })); },
-    async compact(id: string, customInstructions?: string) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/compact`, { method: "POST", body: JSON.stringify(customInstructions ? { customInstructions } : {}) })); },
+    async compact(id: string, customInstructions?: string): Promise<CompactResponse> { return compactResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/compact`, { method: "POST", body: JSON.stringify(customInstructions ? { customInstructions } : {}) }, COMPACT_REQUEST_TIMEOUT_MS)); },
     async searchFiles(workspaceId: string, q: string, limit = 20) {
       const query = new URLSearchParams({ q, limit: String(Math.min(Math.max(limit, 1), 50)) });
       return filesSearchResponseSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/search?${query}`));

@@ -44,6 +44,7 @@ import { RECEIVING_ACTIVITY_WINDOW_MS, STREAM_PHASE_LABELS, emptyStreamActivity,
 import {
   Clock,
   CircleAlert,
+  Scissors,
   Square,
   ArrowUp,
   Plus,
@@ -1087,6 +1088,7 @@ function AgentComposerInner({
   const draftKey = `passage:agent:${agentId}:draft`;
   const [draft, setDraft] = useState(() => localStorage.getItem(draftKey) ?? "");
   const [composerError, setComposerError] = useState("");
+  const [composerNotice, setComposerNotice] = useState<{ tone: "info" | "success"; text: string } | null>(null);
   const [images, setImages] = useState<Array<AgentImage & { name: string }>>([]);
   const [uploadFiles, setUploadFiles] = useState<AgentFile[]>([]);
   const [ctxDetailsOpen, setCtxDetailsOpen] = useState(false);
@@ -1233,6 +1235,7 @@ function AgentComposerInner({
   ) => {
     setBusy(true);
     setComposerError("");
+    setComposerNotice(null);
     try {
       await action();
       if (clearDraft) {
@@ -1606,6 +1609,11 @@ function AgentComposerInner({
             <span>⚠️ {composerError}</span>
           </div>
         )}
+        {composerNotice && (
+          <div className={`composer-notice-alert composer-notice-${composerNotice.tone}`} role="status">
+            <span>{composerNotice.tone === "info" ? "ⓘ" : "✓"} {composerNotice.text}</span>
+          </div>
+        )}
         {images.length > 0 && (
           <div className="attachment-list" aria-label="Attached images">
             {images.map((image) => (
@@ -1809,7 +1817,7 @@ function AgentComposerInner({
             <AlertDialogTitle>Compact conversation context?</AlertDialogTitle>
             <AlertDialogDescription>
               Pi will summarize the transcript to free context. The summary replaces earlier history in the
-              working session. This cannot be undone.
+              working session. This cannot be undone. If the agent is mid-run, its current run is stopped first.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1817,7 +1825,24 @@ function AgentComposerInner({
             <AlertDialogAction
               onClick={() => {
                 setCompactConfirmOpen(false);
-                void run(() => api.compact(agentId), false, true);
+                void run(async () => {
+                  const result = await api.compact(agentId);
+                  if (result.compacted) {
+                    setComposerNotice({
+                      tone: "success",
+                      text: result.tokensBefore !== undefined
+                        ? `Session compacted \u2014 compacted from ${result.tokensBefore.toLocaleString("en-US")} tokens.`
+                        : "Session compacted.",
+                    });
+                  } else {
+                    setComposerNotice({
+                      tone: "info",
+                      text: result.reason === "already-compacted"
+                        ? "Already compacted \u2014 nothing to do."
+                        : "Nothing to compact yet \u2014 the session is too short.",
+                    });
+                  }
+                }, false, true);
               }}
             >
               Compact
@@ -1903,10 +1928,38 @@ export const TimelineRow = memo(function TimelineRow({
     );
   }
   if (item.kind === "summary") {
+    if (item.summaryType === "branch") {
+      return (
+        <article className="timeline-row summary">
+          <strong>Branch summary</strong>
+          <p>{item.text}</p>
+        </article>
+      );
+    }
+    const label = item.compactionReason === "manual"
+      ? "Context manually compacted"
+      : item.compactionReason === "auto"
+        ? "Context auto-compacted"
+        : "Context compacted";
     return (
-      <article className="timeline-row summary">
-        <strong>{item.summaryType === "compaction" ? "Compacted context" : "Branch summary"}</strong>
-        <p>{item.text}</p>
+      <article className="timeline-row compaction-divider" aria-label={label}>
+        <div className="compaction-divider-rule">
+          <span className="compaction-divider-line" aria-hidden="true" />
+          <span className="compaction-divider-label">
+            <Scissors size={13} aria-hidden="true" />
+            <span>{label}</span>
+          </span>
+          <span className="compaction-divider-line" aria-hidden="true" />
+        </div>
+        {item.tokensBefore !== undefined && (
+          <p className="compaction-divider-subtext">Compacted from {item.tokensBefore.toLocaleString("en-US")} tokens</p>
+        )}
+        {item.text && (
+          <details className="compaction-divider-details">
+            <summary>Show summary</summary>
+            <p>{item.text}</p>
+          </details>
+        )}
       </article>
     );
   }

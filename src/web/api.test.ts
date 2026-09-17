@@ -92,12 +92,15 @@ test("client searches workspace files and compacts agents", async () => {
     if (String(input).includes("/files/search")) {
       return Response.json({ query: "rea", entries: [{ path: "README.md", kind: "file" }], truncated: false });
     }
+    if (String(input).includes("/compact")) {
+      return Response.json({ accepted: true, compacted: true, tokensBefore: 115972 });
+    }
     return Response.json({ accepted: true });
   });
   const result = await api.searchFiles("workspace-1", "rea");
   expect(result.entries).toEqual([{ path: "README.md", kind: "file" }]);
   expect(calls[0]).toContain("/api/workspaces/workspace-1/files/search?q=rea");
-  await api.compact("agent-1");
+  await expect(api.compact("agent-1")).resolves.toEqual({ accepted: true, compacted: true, tokensBefore: 115972 });
   expect(calls[1]).toContain("/api/agents/agent-1/compact");
 });
 

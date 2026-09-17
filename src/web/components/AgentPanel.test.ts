@@ -154,6 +154,59 @@ describe("TimelineRow", () => {
     expect(html).not.toContain("assistant-prose");
   });
 
+  test("renders a manual compaction as a divider with token counts", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
+        item: { kind: "summary", id: "c1", summaryType: "compaction", text: "Long summary", tokensBefore: 119521, compactionReason: "manual" },
+      }),
+    );
+
+    expect(html).toContain("compaction-divider");
+    expect(html).toContain("Context manually compacted");
+    expect(html).toContain("Compacted from 119,521 tokens");
+    expect(html).toContain("Show summary");
+    expect(html).toContain("Long summary");
+    expect(html).not.toContain("Compacted context");
+    expect(html).not.toContain("Pi error");
+  });
+
+  test("renders auto compactions and reason-less entries with neutral labels", () => {
+    const auto = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
+        item: { kind: "summary", id: "c2", summaryType: "compaction", text: "Auto", compactionReason: "auto" },
+      }),
+    );
+    expect(auto).toContain("Context auto-compacted");
+    expect(auto).not.toContain("Compacted from");
+
+    const unknown = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
+        item: { kind: "summary", id: "c3", summaryType: "compaction", text: "Legacy" },
+      }),
+    );
+    expect(unknown).toContain("Context compacted");
+    expect(unknown).not.toContain("manually");
+  });
+
+  test("keeps branch summaries on the legacy card", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
+        item: { kind: "summary", id: "b1", summaryType: "branch", text: "Branch point" },
+      }),
+    );
+    expect(html).toContain("Branch summary");
+    expect(html).toContain("Branch point");
+    expect(html).not.toContain("compaction-divider");
+  });
+
   test("renders thinking block with open attribute when expanded", () => {
     const htmlOpen = ReactDOMServer.renderToStaticMarkup(
       React.createElement(TimelineRow, {

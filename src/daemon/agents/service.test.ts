@@ -8,12 +8,12 @@ import { PiRpcManager } from "./rpc/index.ts";
 
 const script = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'||r.type==='steer'||r.type==='follow_up')process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');const data=r.type==='get_available_models'?{models:[{provider:'test',id:'model',name:'Model',api:'test',input:['text'],authenticated:true,supportedThinkingLevels:['medium','high']}]}:r.type==='get_available_thinking_levels'?{levels:['medium','high']}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
 const roots: string[] = [];
-const make = async (limit = 10) => {
+const make = async (limit = 10, executableArgs?: string[]) => {
   const root = await mkdtemp(join("/tmp", "passage-agent-")); roots.push(root);
   const store = new MetadataStore(join(root, "meta.sqlite")); const repos = new MetadataRepositories(store.db);
   repos.projects.save({ id: "p", configuredRootPath: root, canonicalRootPath: root, displayLabel: "p", archivedAt: null });
   const workspace: Workspace = { id: "w", projectId: "p", kind: "directory", cwd: root, checkoutRoot: root, mainRepositoryRoot: root, branchRef: null, displayLabel: "w", locationId: null, ownershipState: "not-owned", archivedAt: null }; repos.workspaces.save(workspace);
-  const manager = new PiRpcManager(4); const service = new AgentService(repos, { sessionsRoot: join(root, "sessions"), manager, listLimit: limit, pi: { executable: process.execPath, executableArgs: ["-e", script] } });
+  const manager = new PiRpcManager(4); const service = new AgentService(repos, { sessionsRoot: join(root, "sessions"), manager, listLimit: limit, pi: { executable: process.execPath, executableArgs: executableArgs ?? ["-e", script] } });
   return { root, store, repos, manager, service };
 };
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -425,6 +425,38 @@ describe("agent-side git invalidations (merge button freshness)", () => {
     expect(events).toContain("settled");
     expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
     await service.shutdown();
+    f.store.close();
+  });
+
+  test("compact reports token counts from the Pi response", async () => {
+    const compactScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);const data=r.type==='compact'?{summary:'S',firstKeptEntryId:'k',tokensBefore:115972,estimatedTokensAfter:19181}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,command:r.type,success:true,data})+'\\n')}})`;
+    const f = await make(10, ["-e", compactScript]);
+    const agent = await f.service.create("w");
+    await expect(f.service.compact(agent.id)).resolves.toEqual({ compacted: true, tokensBefore: 115972 });
+    await f.service.shutdown();
+    f.store.close();
+  });
+
+  test("compact maps benign Pi refusals to reasons instead of throwing", async () => {
+    const refusalScript = (message: string) => ["-e", `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='compact'){process.stdout.write(JSON.stringify({type:'response',id:r.id,command:r.type,success:false,error:${JSON.stringify(message)}})+'\\n')}else{process.stdout.write(JSON.stringify({type:'response',id:r.id,command:r.type,success:true,data:{}})+'\\n')}}})`];
+    const short = await make(10, refusalScript("Nothing to compact (session too small)"));
+    const shortAgent = await short.service.create("w");
+    await expect(short.service.compact(shortAgent.id)).resolves.toEqual({ compacted: false, reason: "session-too-short" });
+    await short.service.shutdown();
+    short.store.close();
+    const done = await make(10, refusalScript("Already compacted"));
+    const doneAgent = await done.service.create("w");
+    await expect(done.service.compact(doneAgent.id)).resolves.toEqual({ compacted: false, reason: "already-compacted" });
+    await done.service.shutdown();
+    done.store.close();
+  });
+
+  test("compact rethrows genuine Pi failures", async () => {
+    const failingScript = ["-e", `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='compact'){process.stdout.write(JSON.stringify({type:'response',id:r.id,command:r.type,success:false,error:'Request aborted'})+'\\n')}else{process.stdout.write(JSON.stringify({type:'response',id:r.id,command:r.type,success:true,data:{}})+'\\n')}}})`];
+    const f = await make(10, failingScript);
+    const agent = await f.service.create("w");
+    await expect(f.service.compact(agent.id)).rejects.toThrow("Request aborted");
+    await f.service.shutdown();
     f.store.close();
   });
 });

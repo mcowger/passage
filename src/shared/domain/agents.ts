@@ -129,7 +129,7 @@ export type TimelineItem =
   | { kind: "user"; id: string; text: string; images?: UserImageRef[]; files?: UserFileRef[]; lazy?: boolean; error?: string }
   | { kind: "assistant" | "thinking"; id: string; text: string; lazy?: boolean; error?: string }
   | ToolActivity
-  | { kind: "summary"; id: string; summaryType: "compaction" | "branch"; text: string }
+  | { kind: "summary"; id: string; summaryType: "compaction" | "branch"; text: string; tokensBefore?: number; compactionReason?: "manual" | "auto" }
   /** Daemon/process-level failure (crash, RPC error, permission denial). Not
    *  journaled -- positioned chronologically in the live transcript so it
    *  survives a browser reconnect but not a daemon restart. */
@@ -188,11 +188,24 @@ const timelineItemSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("user"), id: z.string(), text: z.string(), images: z.array(userImageRefSchema).max(2).optional(), files: z.array(userFileRefSchema).max(5).optional(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
   z.object({ kind: z.enum(["assistant", "thinking"]), id: z.string(), text: z.string(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
   toolActivitySchema,
-  z.object({ kind: z.literal("summary"), id: z.string(), summaryType: z.enum(["compaction", "branch"]), text: z.string() }).strict(),
+  z.object({ kind: z.literal("summary"), id: z.string(), summaryType: z.enum(["compaction", "branch"]), text: z.string(), tokensBefore: z.number().int().nonnegative().optional(), compactionReason: z.enum(["manual", "auto"]).optional() }).strict(),
   z.object({ kind: z.literal("error"), id: z.string(), text: z.string() }).strict(),
   z.object({ kind: z.literal("unknown"), id: z.string(), entryType: z.string() }).strict(),
 ]);
 export const timelineItemPayloadSchema = timelineItemSchema;
+
+/** Result of `POST /api/agents/:agentId/compact`. A successful compaction
+ *  carries the pre-compaction token count for the success notice; a
+ *  refused one (session too short or already compacted) is not an error
+ *  from the user's perspective, so it stays a 202 with `compacted: false`
+ *  instead of a failure status. */
+export const compactResponseSchema = z.object({
+  accepted: z.literal(true),
+  compacted: z.boolean(),
+  reason: z.enum(["session-too-short", "already-compacted"]).optional(),
+  tokensBefore: z.number().int().nonnegative().optional(),
+}).strict();
+export type CompactResponse = z.infer<typeof compactResponseSchema>;
 
 export const agentHistorySchema: z.ZodType<AgentHistory> = z.object({
   sessionId: z.string(),

@@ -98,6 +98,25 @@ function usageTotalTokens(value: unknown): number {
   return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
 }
 
+/** True for the tombstone of a run Pi aborted in order to compact: an
+ *  assistant message with an abort stop reason that a compaction entry
+ *  directly parented. The abort was Pi's own doing on the compact path,
+ *  not a failure the user needs an error card for -- the compaction
+ *  summary row covers it. User-initiated stops ("Request was aborted")
+ *  keep their gentle notice, genuine model errors are untouched, and
+ *  tombstones retaining unexecuted tool calls are kept so their tool rows
+ *  still resolve against the journal. */
+function isCompactAbortedRun(entry: ObjectValue, compactedParents: Set<string>): boolean {
+  const message = object(entry.message);
+  if (string(message?.role) !== "assistant") return false;
+  if (string(message?.stopReason) !== "aborted") return false;
+  const error = string(message?.errorMessage);
+  if (!error || error === "Request was aborted") return false;
+  if (!compactedParents.has(string(entry.id) ?? "")) return false;
+  const blocks = Array.isArray(message?.content) ? message.content : [];
+  return !blocks.some((value) => object(value)?.type === "toolCall");
+}
+
 function activeEntryIds(entries: ObjectValue[], leafId?: string): Set<string> {
   const byId = new Map(entries.map((entry) => [string(entry.id), entry]).filter((pair): pair is [string, ObjectValue] => pair[0] !== undefined));
   const active = new Set<string>();
@@ -160,10 +179,26 @@ function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "s
     if (entry.type === "compaction" || entry.type === "branch_summary") addUsage(usage, entry.usage);
   }
 
+  // Parents of compaction entries: Pi's compact aborts any in-flight run
+  // first and appends the compaction entry directly onto the killed run's
+  // tombstone message, so each victim is exactly its compaction's parent.
+  const compactedParents = new Set<string>();
+  for (const entry of activeEntries) {
+    if (entry.type !== "compaction") continue;
+    const parentId = string(entry.parentId);
+    if (parentId) compactedParents.add(parentId);
+  }
+
   for (const entry of activeEntries) {
     const entryId = string(entry.id) ?? "missing-id";
     const entryType = string(entry.type) ?? "unknown";
     if (entryType === "message") {
+      // Suppress the tombstone of a run compact itself killed: the abort
+      // was Pi's doing, not a failure, and the compaction summary row right
+      // after it already tells the user what happened. Genuine model
+      // errors, user-initiated stops ("Request was aborted"), and
+      // tombstones retaining unexecuted tool calls are never suppressed.
+      if (isCompactAbortedRun(entry, compactedParents)) continue;
       const message = object(entry.message);
       const role = string(message?.role);
       if (role === "toolResult") {
@@ -240,12 +275,20 @@ function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "s
     }
 
     if (entryType === "compaction" || entryType === "branch_summary") {
-      timeline.push({
+      const summary: Extract<TimelineItem, { kind: "summary" }> = {
         kind: "summary",
         id: entryId,
         summaryType: entryType === "compaction" ? "compaction" : "branch",
         text: string(entry.summary) ?? "",
-      });
+      };
+      if (entryType === "compaction") {
+        if (typeof entry.tokensBefore === "number" && Number.isFinite(entry.tokensBefore) && entry.tokensBefore > 0) {
+          summary.tokensBefore = Math.floor(entry.tokensBefore);
+        }
+        const reason = string(object(entry.details)?.reason);
+        if (reason !== undefined) summary.compactionReason = reason === "manual" ? "manual" : "auto";
+      }
+      timeline.push(summary);
     } else if (entryType === "model_change") {
       const provider = string(entry.provider);
       const modelId = string(entry.modelId);

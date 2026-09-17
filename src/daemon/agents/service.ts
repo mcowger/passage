@@ -27,6 +27,13 @@ const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_SHORT_VALUE_LENGTH = 256;
 const MAX_RUNTIME_DIAGNOSTICS = 100;
 const DEFAULT_ABORT_TIMEOUT_MS = 30_000;
+/** Summarizing a large session is a single LLM call that can run for
+ *  minutes; the default 10s RPC admission timeout would false-fail it. */
+const COMPACT_TIMEOUT_MS = 300_000;
+/** Matches Pi's "session too small" compact refusal. */
+const COMPACTION_TOO_SHORT_PATTERN = /nothing to compact/i;
+/** Matches Pi's "already compacted" compact refusal. */
+const COMPACTION_ALREADY_DONE_PATTERN = /already compacted/i;
 /** Upper bound on the tool payload text scanned for a `git commit` invocation. */
 const MAX_GIT_SCAN_BYTES = 8192;
 /** Matches a `git commit` invocation inside a shell command (allowing global
@@ -78,6 +85,19 @@ export type AgentServiceEvent = {
   payload?: Record<string, unknown>;
 };
 
+export type CompactResult =
+  | { compacted: true; tokensBefore?: number }
+  | { compacted: false; reason: "session-too-short" | "already-compacted" };
+
+/** Maps Pi's benign compact refusals to stable reasons. Anything else
+ *  (genuine failures, aborts of the compaction itself) stays an error. */
+function compactRefusalReason(cause: unknown): "session-too-short" | "already-compacted" | undefined {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  if (COMPACTION_ALREADY_DONE_PATTERN.test(message)) return "already-compacted";
+  if (COMPACTION_TOO_SHORT_PATTERN.test(message)) return "session-too-short";
+  return undefined;
+}
+
 export type AgentHistoryResult = HistoryPage | { unpersisted: true; history: null };
 
 export class AgentError extends Error {
@@ -119,6 +139,11 @@ export class AgentService {
   private readonly pendingUiRequests = new Map<string, Record<string, unknown>>();
   private readonly cancellations = new Map<string, Cancellation>();
   private readonly runStartedAt = new Map<string, number>();
+  /** Agents with a compact RPC currently in flight. While set, reconcile
+   *  must not promote the killed run's abort tombstone to an error
+   *  status/row: the tombstone is expected, and the compaction entry
+   *  landing right after it supersedes it. */
+  private readonly compacting = new Set<string>();
   private readonly eventChains = new Map<string, Promise<void>>();
   /** Background boot kicked off by create(): lets the POST return (and the
    *  New Agent pane open) without waiting for Pi spawn + reconcile, while
@@ -431,17 +456,38 @@ export class AgentService {
     });
   }
 
-  async compact(agentId: string, customInstructions?: string): Promise<void> {
+  async compact(agentId: string, customInstructions?: string): Promise<CompactResult> {
     if (customInstructions !== undefined) this.validateShortValue(customInstructions, "instructions");
     this.rejectWhileStopping(this.requireAgent(agentId));
     const process = await this.ensureProcess(agentId);
-    await process.request(customInstructions ? { type: "compact", customInstructions } : { type: "compact" });
+    // Pi aborts any in-flight run before summarizing; a too-short session
+    // is a benign refusal, not an error, so map it to a reason instead of
+    // throwing (the UI shows an info notice for it).
+    this.compacting.add(agentId);
+    let tokensBefore: number | undefined;
+    try {
+      const response = await process.request(
+        customInstructions ? { type: "compact", customInstructions } : { type: "compact" },
+        COMPACT_TIMEOUT_MS,
+      );
+      const data = responseData<{ tokensBefore?: unknown }>(response);
+      if (typeof data?.tokensBefore === "number" && Number.isFinite(data.tokensBefore) && data.tokensBefore > 0) {
+        tokensBefore = Math.floor(data.tokensBefore);
+      }
+    } catch (cause) {
+      const reason = compactRefusalReason(cause);
+      if (reason === undefined) throw cause;
+      return { compacted: false, reason };
+    } finally {
+      this.compacting.delete(agentId);
+    }
     // Compaction rewrites which journal entries are active, which invalidates
     // every row identity the current TranscriptState was built from -- unlike
     // every other mutation, this is a legitimate full reset, not an
     // incremental delta. Force a fresh seed on next access and tell the
     // client to refetch and replace its local timeline instead of merging.
     this.resetTranscript(agentId);
+    return { compacted: true, ...(tokensBefore === undefined ? {} : { tokensBefore }) };
   }
 
   async model(agentId: string, provider: string, modelId: string): Promise<void> {
@@ -553,6 +599,7 @@ export class AgentService {
     this.previousRevisions.clear();
     this.leaves.clear();
     this.diagnostics.clear();
+    this.compacting.clear();
     this.runStartedAt.clear();
     this.eventChains.clear();
     this.transcripts.clear();
@@ -823,7 +870,11 @@ export class AgentService {
         for (const row of state.refreshFromJournal(history)) this.emitRowUpsert(agentId, row);
       }
       const latestItem = history.timeline.at(-1);
-      const hasActiveError = latestItem && "error" in latestItem && Boolean(latestItem.error);
+      // A compact in flight just killed the current run on purpose (see
+      // `compacting`): its abort tombstone is expected, and the compaction
+      // entry landing right after it supersedes it, so don't flash an
+      // error status/row for intentional behavior.
+      const hasActiveError = !this.compacting.has(agentId) && latestItem && "error" in latestItem && Boolean(latestItem.error);
       const currentStatus = this.requireAgent(agentId).lastKnownStatus as AgentStatus;
       if (currentStatus === "needs-attention") return;
       if (currentStatus === "stopping" && !allowStoppingToSettle) return;

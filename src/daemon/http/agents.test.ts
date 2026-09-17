@@ -241,7 +241,7 @@ describe("agent HTTP API", () => {
     const agentId = String(created.id);
     const compact = await app.fetch(request(`/api/agents/${agentId}/compact`, { method: "POST" }));
     expect(compact.status).toBe(202);
-    expect(await compact.json()).toEqual({ accepted: true });
+    expect(await compact.json()).toEqual({ accepted: true, compacted: true });
     const capabilities = await json(await app.fetch(request(`/api/agents/${agentId}/capabilities`)));
     const slashCommands = (capabilities as { slashCommands: Array<{ name: string; kind: string }> }).slashCommands;
     expect((capabilities as { skillsAvailable: boolean }).skillsAvailable).toBe(true);

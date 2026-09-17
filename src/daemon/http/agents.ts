@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { agentCapabilitiesSchema, agentStatusSchema, type AgentSummary } from "../../shared/domain/agents.ts";
+import { agentCapabilitiesSchema, agentStatusSchema, compactResponseSchema, type AgentSummary } from "../../shared/domain/agents.ts";
 import { opaqueDomainIdSchema } from "../../shared/domain/workspaces.ts";
 import { AgentError, type AgentService, type AgentSnapshot } from "../agents/service.ts";
 import { HttpInputError, readJsonBody } from "./body.ts";
@@ -175,8 +175,8 @@ export function createAgentRoutes(service: AgentService): Hono {
         if (error instanceof HttpInputError && error.code === "invalid-json") customInstructions = undefined;
         else throw error;
       }
-      await service.compact(agentId, customInstructions);
-      return success(acceptedResponseSchema.parse({ accepted: true }), 202);
+      const result = await service.compact(agentId, customInstructions);
+      return success(compactResponseSchema.parse({ accepted: true, ...result }), 202);
     }
     catch (error) { return errorResponse(error); }
   });
