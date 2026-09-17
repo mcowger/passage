@@ -14,6 +14,7 @@
     "build": "bun run scripts/build.ts",
     "start": "bun --cwd dist run ./index.js",
     "package": "bun run scripts/build.ts --compile",
+    "build:linux": "bun run scripts/build.ts --compile --target=bun-linux-x64-modern --outfile=./dist/passage-linux-x64",
     "test": "bun test",
     "test:gate": "bun run tests/gate.ts",
     "test:pi-rpc": "bun test tests/pi-rpc",

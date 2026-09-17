@@ -1,12 +1,24 @@
 import tailwind from "bun-plugin-tailwind";
+import { parseArgs } from "node:util";
 
-const isCompile = process.argv.includes("--compile");
+const { values } = parseArgs({
+  args: Bun.argv.slice(2),
+  options: {
+    compile: { type: "boolean", default: false },
+    target: { type: "string" },
+    outfile: { type: "string", default: "./dist/passage" },
+  },
+  strict: true,
+});
+
+const isCompile = values.compile;
 
 const result = isCompile
   ? await Bun.build({
       entrypoints: ["./src/daemon/index.ts"],
       compile: {
-        outfile: "./dist/passage",
+        outfile: values.outfile,
+        ...(values.target ? { target: values.target as Bun.Build.Target } : {}),
       },
       target: "bun",
       minify: true,
