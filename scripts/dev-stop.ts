@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 const DEFAULT_PID_FILE = join(import.meta.dir, "..", ".data", "dev.pid");
 
@@ -10,6 +10,16 @@ export function resolvePidFile(env: Record<string, string | undefined> = process
     return isAbsolute(custom) ? custom : join(process.cwd(), custom);
   }
   return DEFAULT_PID_FILE;
+}
+
+export function portFileForPidFile(pidFile: string): string {
+  return join(dirname(pidFile), "dev.port");
+}
+
+// Removes the pidfile and its sibling recorded-port file, ignoring errors.
+export function removePidArtifacts(pidFile: string): void {
+  try { unlinkSync(pidFile); } catch {}
+  try { unlinkSync(portFileForPidFile(pidFile)); } catch {}
 }
 
 export function isProcessAlive(pid: number): boolean {
@@ -35,12 +45,12 @@ export async function stopDevServer(pidFile = resolvePidFile()): Promise<{ stopp
 
   const pid = Number(raw);
   if (!Number.isInteger(pid) || pid <= 0) {
-    try { unlinkSync(pidFile); } catch {}
+    removePidArtifacts(pidFile);
     return { stopped: false, message: "Removed invalid pidfile." };
   }
 
   if (!isProcessAlive(pid)) {
-    try { unlinkSync(pidFile); } catch {}
+    removePidArtifacts(pidFile);
     return { stopped: false, pid, message: `Dev server (PID ${pid}) is not running (cleaned up stale pidfile).` };
   }
 
@@ -53,7 +63,7 @@ export async function stopDevServer(pidFile = resolvePidFile()): Promise<{ stopp
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     if (!isProcessAlive(pid)) {
-      try { unlinkSync(pidFile); } catch {}
+      removePidArtifacts(pidFile);
       return { stopped: true, pid, message: `Stopped dev server (PID ${pid}).` };
     }
     await Bun.sleep(50);
@@ -66,7 +76,7 @@ export async function stopDevServer(pidFile = resolvePidFile()): Promise<{ stopp
   const killDeadline = Date.now() + 1000;
   while (Date.now() < killDeadline) {
     if (!isProcessAlive(pid)) {
-      try { unlinkSync(pidFile); } catch {}
+      removePidArtifacts(pidFile);
       return { stopped: true, pid, message: `Force stopped dev server (PID ${pid}).` };
     }
     await Bun.sleep(50);
