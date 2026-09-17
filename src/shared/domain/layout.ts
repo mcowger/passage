@@ -237,6 +237,19 @@ export function getFirstTabGroup(node: LayoutNode): TabGroupNode | null {
   return null;
 }
 
+export function getTabGroupIdsInOrder(node: LayoutNode): string[] {
+  const ids: string[] = [];
+  const visit = (current: LayoutNode) => {
+    if (current.type === "tabs") {
+      ids.push(current.id);
+      return;
+    }
+    current.children.forEach(visit);
+  };
+  visit(node);
+  return ids;
+}
+
 export function setActiveTabInTree(
   root: LayoutNode,
   groupId: string,
@@ -304,10 +317,15 @@ export function splitTabGroup(
   newTab: PaneTab,
   position: "before" | "after" = "after"
 ): LayoutNode {
-  // First remove newTab from anywhere it might already exist
+  // First remove newTab from anywhere it might already exist (drag-move).
   let currentRoot = root;
   const existing = findTab(currentRoot, newTab.id);
   if (existing) {
+    // Splitting a single-tab group with its own tab would either delete the
+    // tab or duplicate it — both wrong. Treat it as a no-op.
+    if (existing.node.id === targetGroupId && existing.node.tabs.length === 1) {
+      return root;
+    }
     const cleaned = removeTabFromTree(currentRoot, newTab.id);
     if (cleaned) currentRoot = cleaned;
   }

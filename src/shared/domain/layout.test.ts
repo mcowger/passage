@@ -7,6 +7,7 @@ import {
   findFirstDeadTerminalTab,
   findNode,
   findTab,
+  getTabGroupIdsInOrder,
   migrateLayout,
   moveTab,
   normalizeTree,
@@ -81,8 +82,7 @@ describe("split-tree layout domain operations", () => {
     }
   });
 
-  test("moves a tab between groups", () => {
-    const layout = createDefaultLayout("ws_1");
+  test("moves a tab between groups", () => {    const layout = createDefaultLayout("ws_1");
     const terminalTab: PaneTab = { id: "term-1", kind: "terminal", title: "Terminal 1" };
     const editorTab: PaneTab = { id: "editor-1", kind: "editor", title: "index.ts" };
 
@@ -188,5 +188,69 @@ describe("split-tree layout domain operations", () => {
 
     const allLiveSet = new Set(["trm_dead", "trm_live"]);
     expect(findFirstDeadTerminalTab(root, allLiveSet)).toBeNull();
+  });
+
+  test("splitting a single-tab group with its own tab is a no-op", () => {
+    const layout = createDefaultLayout("ws_1");
+    const groupId = layout.root.id;
+    const ownTab: PaneTab = { id: "overview-ws_1", kind: "overview", title: "Overview" };
+    const nextRoot = splitTabGroup(layout.root, groupId, "horizontal", ownTab, "after");
+    // No duplicate created, no tab lost.
+    expect(nextRoot).toEqual(layout.root);
+    expect(workspaceLayoutSchema.safeParse({ version: 1, root: nextRoot }).success).toBe(true);
+  });
+
+  test("splitting a multi-tab group with its own tab extracts it without duplicating", () => {
+    const layout = createDefaultLayout("ws_1");
+    const editorTab: PaneTab = { id: "editor-1", kind: "editor", title: "index.ts" };
+    const rootWithTwo = addTabToGroup(layout.root, layout.root.id, editorTab);
+    const splitRoot = splitTabGroup(rootWithTwo, layout.root.id, "horizontal", editorTab, "after");
+
+    expect(splitRoot.type).toBe("split");
+    // Tab exists exactly once.
+    let occurrences = 0;
+    const visit = (node: typeof splitRoot) => {
+      if (node.type === "tabs") {
+        for (const t of node.tabs) if (t.id === "editor-1") occurrences++;
+        return;
+      }
+      node.children.forEach(visit);
+    };
+    visit(splitRoot);
+    expect(occurrences).toBe(1);
+    expect(findTab(splitRoot, "overview-ws_1")).not.toBeNull();
+    expect(workspaceLayoutSchema.safeParse({ version: 1, root: splitRoot }).success).toBe(true);
+  });
+
+  test("moveTab reorders within a group and appends across groups", () => {
+    const layout = createDefaultLayout("ws_1");
+    const a: PaneTab = { id: "a", kind: "editor", title: "a" };
+    const b: PaneTab = { id: "b", kind: "editor", title: "b" };
+    const c: PaneTab = { id: "term-1", kind: "terminal", title: "Terminal 1" };
+    let root = addTabToGroup(layout.root, layout.root.id, a);
+    root = addTabToGroup(root, layout.root.id, b);
+    // Reorder b to front (post-removal index 0 among remaining).
+    root = moveTab(root, "b", layout.root.id, 0);
+    if (root.type !== "tabs") throw new Error("expected single tab group");
+    expect(root.tabs.map((t) => t.id)).toEqual(["b", "overview-ws_1", "a"]);
+    expect(root.activeTabId).toBe("b");
+
+    // Move across groups via split then move.
+    const splitRoot = splitTabGroup(root, layout.root.id, "horizontal", c, "after");
+    const targetGroup = findTab(splitRoot, "term-1")!.node.id;
+    const movedRoot = moveTab(splitRoot, "a", targetGroup, 0);
+    const found = findTab(movedRoot, "a");
+    expect(found?.node.id).toBe(targetGroup);
+    expect(found?.node.tabs[0].id).toBe("a");
+  });
+
+  test("getTabGroupIdsInOrder lists groups depth-first", () => {
+    const layout = createDefaultLayout("ws_1");
+    expect(getTabGroupIdsInOrder(layout.root)).toEqual([layout.root.id]);
+    const c: PaneTab = { id: "term-1", kind: "terminal", title: "Terminal 1" };
+    const splitRoot = splitTabGroup(layout.root, layout.root.id, "horizontal", c, "after");
+    const order = getTabGroupIdsInOrder(splitRoot);
+    expect(order).toHaveLength(2);
+    expect(order[0]).toBe(layout.root.id);
   });
 });
