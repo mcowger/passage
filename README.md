@@ -33,7 +33,9 @@ bun run dev
 
 The daemon picks a stable per-worktree port in `3000`–`3999` via
 `scripts/dev-port.ts` (hashed from the worktree path).
-Set `PORT` to override it.
+Generic `PORT` is ignored so an inherited value cannot leak another
+worktree's port; the hash is authoritative (Paseo sets `PASEO_PORT` when it
+routes traffic).
 
 Useful checks:
 

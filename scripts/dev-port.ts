@@ -19,9 +19,12 @@
 //   than pick a different port.
 //
 // Two modes:
-// - Manual (`bun run dev`): precedence for the intended port is explicit
-//   PORT, then PASEO_PORT (set by the Paseo worktree runner, which routes
-//   traffic to it), then the stable hash.
+// - Manual (`bun run dev`): the intended port is the stable hash of the
+//   worktree root. PASEO_PORT (set by the Paseo worktree runner, which routes
+//   traffic to it) takes precedence when present. The generic PORT variable
+//   is deliberately ignored: it is commonly inherited from a shell or parent
+//   process belonging to a different worktree, so honoring it would break
+//   per-worktree isolation.
 // - Paseo portScript (`worktree.servicePorts.portScript` in paseo.json):
 //   Paseo executes this file directly (shebang, no shell) with four
 //   positional args -- service name, workspace ID, branch name (empty when
@@ -74,12 +77,11 @@ export function worktreeRoot(cwd: string = process.cwd()): string {
 }
 
 export function resolveStart(env: Record<string, string | undefined>): number {
-  for (const key of ["PORT", "PASEO_PORT"] as const) {
-    const raw = env[key]?.trim();
-    if (raw === undefined || raw === "") continue;
+  const raw = env.PASEO_PORT?.trim();
+  if (raw !== undefined && raw !== "") {
     const parsed = Number(raw);
     if (Number.isInteger(parsed) && parsed > 0 && parsed < 65536) return parsed;
-    console.error(`dev-port: ignoring invalid ${key}=${JSON.stringify(raw)}`);
+    console.error(`dev-port: ignoring invalid PASEO_PORT=${JSON.stringify(raw)}`);
   }
   return stableBasePort(worktreeRoot());
 }
