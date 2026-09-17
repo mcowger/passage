@@ -15,6 +15,8 @@ export const agentSummarySchema = z.object({
   persisted: z.boolean(),
   generation: z.number().int().positive().safe().optional(),
   pendingUiRequest: z.record(z.string(), z.unknown()).optional(),
+  /** Epoch ms when Passage observed the current run start; absent when no run is active. */
+  runStartedAt: z.number().int().nonnegative().safe().optional(),
 }).strict();
 export type AgentSummary = z.infer<typeof agentSummarySchema>;
 

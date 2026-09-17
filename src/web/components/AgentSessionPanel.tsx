@@ -150,19 +150,31 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
     const subscription = subscribeAgent(
       initialAgent.id,
       (value, state) => {
+        const envelopePayload = value && typeof value === "object" && "payload" in value && typeof (value as { payload?: unknown }).payload === "object"
+          ? (value as { payload: Record<string, unknown> }).payload
+          : undefined;
+        const runStartedAt = typeof envelopePayload?.runStartedAt === "number"
+          && Number.isSafeInteger(envelopePayload.runStartedAt)
+          && envelopePayload.runStartedAt > 0
+          ? envelopePayload.runStartedAt
+          : undefined;
         if (state.status) {
           statusRef.current = state.status;
+        }
+        if (state.status || runStartedAt !== undefined) {
           setAgent((current) => {
-            const next = { ...current, status: state.status! };
+            const next = {
+              ...current,
+              ...(state.status ? { status: state.status } : {}),
+              ...(runStartedAt !== undefined ? { runStartedAt } : {}),
+            };
             onAgentChangedRef.current?.(next);
             return next;
           });
         }
         if (value && typeof value === "object" && "type" in value) {
           const type = (value as { type?: string }).type;
-          const payload = "payload" in value && typeof (value as { payload?: unknown }).payload === "object"
-            ? (value as { payload: Record<string, unknown> }).payload
-            : undefined;
+          const payload = envelopePayload;
           if (type === "attention" && payload?.id) {
             setAgent((current) => {
               const next = { ...current, pendingUiRequest: payload };

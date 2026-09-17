@@ -55,6 +55,8 @@ export type AgentSnapshot = Agent & {
   stderrTruncated?: boolean;
   exitStatus?: string;
   pendingUiRequest?: Record<string, unknown>;
+  /** Epoch ms when Passage observed the current run start; absent when no run is active. */
+  runStartedAt?: number;
 };
 
 export type AgentServiceEvent = {
@@ -83,6 +85,7 @@ export class AgentService {
   private readonly diagnostics = new Map<string, RuntimeDiagnostic>();
   private readonly pendingUiRequests = new Map<string, Record<string, unknown>>();
   private readonly cancellations = new Map<string, Cancellation>();
+  private readonly runStartedAt = new Map<string, number>();
   private readonly eventChains = new Map<string, Promise<void>>();
   private readonly manager: PiRpcManager;
   private readonly listLimit: number;
@@ -137,6 +140,7 @@ export class AgentService {
       live: process !== undefined,
       persisted: agent.piSessionPath !== null,
       ...(pendingUiRequest ? { pendingUiRequest } : {}),
+      ...(this.runStartedAt.has(agentId) ? { runStartedAt: this.runStartedAt.get(agentId)! } : {}),
       ...(process ? {
         generation: process.generation,
         stderr: [...process.stderr],
@@ -152,6 +156,7 @@ export class AgentService {
       ...agent,
       live: this.manager.get(agent.id) !== undefined,
       persisted: agent.piSessionPath !== null,
+      ...(this.runStartedAt.has(agent.id) ? { runStartedAt: this.runStartedAt.get(agent.id)! } : {}),
     }));
   }
 
@@ -210,6 +215,7 @@ export class AgentService {
     }
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
     const process = await this.ensureProcess(agentId);
+    this.beginRun(agentId);
     this.updateStatus(agentId, "running", "status", process.generation);
     try {
       await process.request({ type: "prompt", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
@@ -336,12 +342,14 @@ export class AgentService {
     this.previousRevisions.delete(agentId);
     this.leaves.delete(agentId);
     this.diagnostics.delete(agentId);
+    this.runStartedAt.delete(agentId);
     this.emit({ agentId, type: "status", status: "archived" });
   }
 
   async stop(agentId: string): Promise<void> {
     this.requireAgent(agentId);
     this.detach(agentId);
+    this.runStartedAt.delete(agentId);
     await this.manager.stop(agentId);
   }
 
@@ -351,6 +359,7 @@ export class AgentService {
     this.previousRevisions.clear();
     this.leaves.clear();
     this.diagnostics.clear();
+    this.runStartedAt.clear();
     this.eventChains.clear();
     await this.manager.shutdown();
   }
@@ -456,11 +465,13 @@ export class AgentService {
     if (event.type === "agent_settled") {
       this.pendingUiRequests.delete(agentId);
       await this.reconcile(agentId);
+      this.endRun(agentId);
       const status = this.requireAgent(agentId).lastKnownStatus as AgentStatus;
       this.emit({ agentId, type: "settled", status, generation: event.generation, payload });
     } else if (currentStatus === "stopping") {
       this.emit({ agentId, type: String(event.type ?? "event"), status: currentStatus, generation: event.generation, payload });
     } else if (event.type === "agent_start" || event.type === "turn_start") {
+      this.beginRun(agentId);
       this.updateStatus(agentId, "running", "status", event.generation, undefined, payload);
     } else {
       const dialog = parsePiExtensionUiDialog(event);
@@ -607,8 +618,21 @@ export class AgentService {
   }
 
   private updateStatus(agentId: string, status: AgentStatus, type: AgentServiceEvent["type"], generation?: number, error?: string, payload?: Record<string, unknown>): void {
+    if (status === "idle" || status === "error" || status === "archived") this.endRun(agentId);
     this.repositories.agents.updateStatus(agentId, status);
-    this.emit({ agentId, type, status, ...(generation ? { generation } : {}), ...(error ? { error } : {}), ...(payload ? { payload } : {}) });
+    const runStartedAt = this.runStartedAt.get(agentId);
+    const eventPayload = { ...(payload ?? {}), ...(runStartedAt !== undefined ? { runStartedAt } : {}) };
+    this.emit({ agentId, type, status, ...(generation ? { generation } : {}), ...(error ? { error } : {}), ...(Object.keys(eventPayload).length > 0 ? { payload: eventPayload } : {}) });
+  }
+
+  /** Record the start of the current run. Idempotent per run so repeated
+   *  `agent_start`/`turn_start` events do not move the anchor. */
+  private beginRun(agentId: string): void {
+    if (!this.runStartedAt.has(agentId)) this.runStartedAt.set(agentId, Date.now());
+  }
+
+  private endRun(agentId: string): void {
+    this.runStartedAt.delete(agentId);
   }
 
   private emit(event: AgentServiceEvent): void {

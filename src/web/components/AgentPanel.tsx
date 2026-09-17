@@ -212,6 +212,19 @@ export function resolveStreamActive(status: AgentSummary["status"]): boolean {
   return status === "running";
 }
 
+/**
+ * The elapsed timer anchors to Passage's authoritative run start when the
+ * daemon reports one, so reloading the page mid-run does not reset it to the
+ * moment the transcript was loaded. It only falls back to first observation
+ * when the daemon has no recorded run start (for example, an unpersisted
+ * process whose start Passage never saw).
+ */
+export function resolveStreamStartMs(runStartedAt: number | undefined, observedAt: number): number {
+  return typeof runStartedAt === "number" && Number.isSafeInteger(runStartedAt) && runStartedAt > 0
+    ? runStartedAt
+    : observedAt;
+}
+
 export function isComposerLocked(status: AgentSummary["status"]): boolean {
   return status === "stopping";
 }
@@ -282,19 +295,20 @@ export function AgentPanel({
     }
 
     if (streamingStartedAtRef.current === null) streamingStartedAtRef.current = Date.now();
+    const startedAt = resolveStreamStartMs(agent.runStartedAt, streamingStartedAtRef.current);
     const tick = () => {
       const text = streamingTokenTextRef.current;
       const tokens = estimateUpdatedTokens(streamingTokenCacheRef.current, text);
       streamingTokenCacheRef.current = { text, tokens };
       setStreamingTokens(tokens);
-      const elapsed = (Date.now() - (streamingStartedAtRef.current ?? Date.now())) / 1000;
+      const elapsed = Math.max(0, (Date.now() - startedAt) / 1000);
       setElapsedSeconds(elapsed);
       setStreamingTokensPerSecond(elapsed > 0.5 && tokens > 0 ? tokens / elapsed : null);
     };
     tick();
     const interval = setInterval(tick, STREAMING_STATS_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [streamActive]);
+  }, [streamActive, agent.runStartedAt]);
 
   useEffect(() => {
     if (timelineRef.current) {
