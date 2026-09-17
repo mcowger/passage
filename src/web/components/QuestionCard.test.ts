@@ -125,4 +125,16 @@ describe("QuestionCard", () => {
     );
     expect(html).not.toContain("Other…");
   });
+
+  test("card root cannot shrink in the flex-column timeline", () => {
+    const html = ReactDOMServer.renderToString(
+      React.createElement(QuestionCard, { request: singleRequest(), onRespond: respond })
+    );
+    const cardTag = html.match(/<div[^>]*data-slot="card"[^>]*>/)?.[0] ?? "";
+    // The card sets `overflow-hidden`, which zeroes its automatic minimum
+    // size. Without `shrink-0` the flex-column timeline collapsed it to a
+    // couple of pixels on short (mobile) viewports, hiding the question.
+    expect(cardTag).toContain("overflow-hidden");
+    expect(cardTag).toContain("shrink-0");
+  });
 });

@@ -326,6 +326,11 @@ export function AgentPanel({
     if (!el || !pinnedRef.current) return;
     el.scrollTop = el.scrollHeight;
   };
+  const questionRequest = useMemo(
+    () => resolveActiveQuestionRequest(agent),
+    [agent]
+  );
+  const pinnedQuestionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const el = timelineRef.current;
@@ -348,7 +353,16 @@ export function AgentPanel({
     return () => cancelAnimationFrame(frame);
   }, [streamActive]);
 
+  // A question needing the user's response is always brought into view, even
+  // when the user had scrolled away to read earlier output. Forcing the pin
+  // here (before scrolling, and only when the question changes) means the card
+  // is visible on the commit it mounts rather than one render later.
   useLayoutEffect(() => {
+    const questionId = questionRequest?.id ?? null;
+    if (questionId !== null && pinnedQuestionIdRef.current !== questionId) {
+      pinnedQuestionIdRef.current = questionId;
+      pinnedRef.current = true;
+    }
     scrollToBottomIfPinned();
   });
 
@@ -388,20 +402,10 @@ export function AgentPanel({
     [effectiveHistory?.timeline]
   );
 
-  const questionRequest = useMemo(
-    () => resolveActiveQuestionRequest(agent),
-    [agent]
-  );
   const visibleTimeline = useMemo(
     () => timelineWithoutBlockingTool(timeline, questionRequest !== null),
     [timeline, questionRequest]
   );
-
-  // A question needing the user's response should always be brought into
-  // view even if they had scrolled away to read earlier output.
-  useEffect(() => {
-    if (questionRequest) pinnedRef.current = true;
-  }, [questionRequest]);
 
   const [stickyExpandedIds, setStickyExpandedIds] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {

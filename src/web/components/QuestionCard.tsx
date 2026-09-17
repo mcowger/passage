@@ -232,7 +232,7 @@ export function QuestionCard({ request, onRespond }: QuestionCardProps) {
   const acceptsCustomAnswer = request.method === "input" || request.method === "editor" || activeQuestion?.allowOther === true;
 
   return (
-    <Card className="w-full my-2 text-sm gap-0 py-0 overflow-hidden border border-border/40 shadow-xs">
+    <Card className="w-full my-2 shrink-0 text-sm gap-0 py-0 overflow-hidden border border-border/40 shadow-xs">
       {/* Header */}
       <CardHeader className="px-3 py-2 flex flex-row items-center gap-2 border-b border-border/20 bg-muted/20">
         <HelpCircle className="h-4 w-4 text-amber-500 shrink-0" />
