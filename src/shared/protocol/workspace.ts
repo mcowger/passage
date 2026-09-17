@@ -69,7 +69,7 @@ export const directorySuggestResponseSchema = z.object({
 export type DirectorySuggestResponse = z.infer<typeof directorySuggestResponseSchema>;
 
 export const gitStatusChangedReasonSchema = z.enum([
-  "stage", "unstage", "stage-all", "unstage-all", "discard", "commit", "pull", "fetch",
+  "stage", "unstage", "stage-all", "unstage-all", "discard", "commit", "pull", "fetch", "merge",
 ]);
 export type GitStatusChangedReason = z.infer<typeof gitStatusChangedReasonSchema>;
 

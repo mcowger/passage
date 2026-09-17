@@ -143,6 +143,12 @@ export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, e
       return await mutate(workspaceId, "fetch", (cwd) => git.fetch(cwd));
     } catch (e) { return error(e); }
   });
+  app.post("/api/workspaces/:workspaceId/git/merge", async (c) => {
+    try {
+      const workspaceId = id(c.req.param("workspaceId"));
+      return await mutate(workspaceId, "merge", (cwd) => git.mergeIntoMain(cwd));
+    } catch (e) { return error(e); }
+  });
   return app;
 }
 

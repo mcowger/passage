@@ -29,6 +29,29 @@ test("client serializes mutations", async () => {
   expect(await request?.json()).toEqual({ configuredRootPath: "/repo", displayLabel: "Repo" });
 });
 
+test("client requests a merge into main", async () => {
+  let request: Request | undefined;
+  const api = createWorkspaceApi(async (input, init) => {
+    request = new Request(new URL(input.toString(), "http://localhost"), init);
+    return Response.json({
+      checkoutRoot: "/worktrees/feature",
+      mainCheckoutRoot: "/repo",
+      repositoryRoot: "/repo",
+      branchRef: "feature",
+      detached: false,
+      ahead: 0,
+      behind: 0,
+      dirty: false,
+      conflicted: false,
+      truncated: false,
+      files: [],
+    });
+  });
+  await api.gitMergeIntoMain("wsp_feature");
+  expect(request?.method).toBe("POST");
+  expect(request?.url).toContain("/api/workspaces/wsp_feature/git/merge");
+});
+
 test("client validates typed agent responses and serializes commands", async () => {
   const calls: Request[] = [];
   const agent = {
