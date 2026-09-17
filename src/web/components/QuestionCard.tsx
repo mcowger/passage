@@ -11,18 +11,17 @@ import {
   CheckCheck,
 } from "lucide-react";
 import { cn } from "../lib/utils.ts";
+import { copyTextToClipboard } from "../lib/clipboard.ts";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./ui/card.tsx";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs.tsx";
-import { RadioGroup, RadioGroupItem } from "./ui/radio-group.tsx";
-import { Checkbox } from "./ui/checkbox.tsx";
 import { Textarea } from "./ui/textarea.tsx";
-import { Label } from "./ui/label.tsx";
 import { Button } from "./ui/button.tsx";
 import { Badge } from "./ui/badge.tsx";
 
 export interface QuestionOption {
   label: string;
   description?: string;
+  preview?: string;
 }
 
 export interface QuestionInfo {
@@ -186,21 +185,33 @@ export function QuestionCard({ request, onRespond }: QuestionCardProps) {
   };
 
   const handleCopyMarkdown = async () => {
-    const md = questions
-      .map((q, i) => {
-        const options = q.options.map((o) => `- ${o.label}${o.description ? `: ${o.description}` : ""}`).join("\n");
-        return `### ${q.header || `Question ${i + 1}`}\n${q.question}\n\n${options}`;
-      })
-      .join("\n\n");
-    await navigator.clipboard.writeText(md);
-    setCopiedMd(true);
-    setTimeout(() => setCopiedMd(false), 2000);
+    try {
+      const md = questions
+        .map((q, i) => {
+          const options = q.options.map((o) => `- ${o.label}${o.description ? `: ${o.description}` : ""}`).join("\n");
+          return `### ${q.header || `Question ${i + 1}`}\n${q.question}\n\n${options}`;
+        })
+        .join("\n\n");
+      const ok = await copyTextToClipboard(md);
+      if (ok) {
+        setCopiedMd(true);
+        setTimeout(() => setCopiedMd(false), 2000);
+      }
+    } catch (err) {
+      console.warn("Failed to copy markdown:", err);
+    }
   };
 
   const handleCopyJson = async () => {
-    await navigator.clipboard.writeText(JSON.stringify(request, null, 2));
-    setCopiedJson(true);
-    setTimeout(() => setCopiedJson(false), 2000);
+    try {
+      const ok = await copyTextToClipboard(JSON.stringify(request, null, 2));
+      if (ok) {
+        setCopiedJson(true);
+        setTimeout(() => setCopiedJson(false), 2000);
+      }
+    } catch (err) {
+      console.warn("Failed to copy JSON:", err);
+    }
   };
 
   if (hasResponded || questions.length === 0) {
@@ -212,8 +223,9 @@ export function QuestionCard({ request, onRespond }: QuestionCardProps) {
   const isMultiple = Boolean(activeQuestion?.multiple);
 
   return (
-    <Card className="w-full my-2 text-sm gap-0 py-0 overflow-hidden">
-      <CardHeader className="px-3 py-2 flex-row items-center gap-2 border-b border-border/20 bg-muted/20">
+    <Card className="w-full my-2 text-sm gap-0 py-0 overflow-hidden border border-border/40 shadow-xs">
+      {/* Header */}
+      <CardHeader className="px-3 py-2 flex flex-row items-center gap-2 border-b border-border/20 bg-muted/20">
         <HelpCircle className="h-4 w-4 text-amber-500 shrink-0" />
         <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           Input needed
@@ -305,111 +317,91 @@ export function QuestionCard({ request, onRespond }: QuestionCardProps) {
               <div className="text-xs text-muted-foreground mb-2">Select multiple options</div>
             )}
 
-            {isMultiple ? (
-              <div className="space-y-1">
-                {activeQuestion.options.map((option, index) => {
-                  const selected = selectedForActive.includes(option.label);
-                  const recommended = /\(recommended\)/i.test(option.label);
-                  const optionId = `q${activeIndex}-opt${index}`;
+            {/* Options List */}
+            <div className="space-y-1.5" role={isMultiple ? "group" : "radiogroup"}>
+              {activeQuestion.options.map((option, index) => {
+                const selected = selectedForActive.includes(option.label);
+                const recommended = /\(recommended\)/i.test(option.label);
 
-                  return (
-                    <Label
-                      key={`${index}:${option.label}`}
-                      htmlFor={optionId}
-                      className={cn(
-                        "w-full px-2.5 py-2 rounded-lg transition-all border flex items-start gap-2.5 cursor-pointer",
-                        selected
-                          ? "bg-accent/25 border-border/50"
-                          : "hover:bg-muted/30 border-transparent",
-                        isResponding && "opacity-60 cursor-not-allowed"
-                      )}
-                    >
-                      <Checkbox
-                        id={optionId}
-                        checked={selected}
-                        disabled={isResponding}
-                        onCheckedChange={() => handleToggleOption(option.label)}
-                        className="mt-0.5 shrink-0"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-1.5 flex-wrap">
-                          <span className={cn("text-sm break-words", selected ? "text-foreground font-medium" : "text-foreground/85")}>
-                            {option.label}
-                          </span>
-                          {recommended && (
-                            <Badge variant="outline" className="text-[10px] text-primary/90 px-1.5 py-0 rounded bg-primary/10 border-primary/20">
-                              recommended
-                            </Badge>
+                return (
+                  <button
+                    key={`${index}:${option.label}`}
+                    type="button"
+                    role={isMultiple ? "checkbox" : "radio"}
+                    aria-checked={selected}
+                    disabled={isResponding}
+                    onClick={() => handleToggleOption(option.label)}
+                    className={cn(
+                      "w-full px-2.5 py-2 rounded-lg transition-all border flex items-start gap-2.5 text-left cursor-pointer",
+                      selected
+                        ? "bg-accent/25 border-border/60 shadow-2xs"
+                        : "hover:bg-muted/30 border-transparent",
+                      isResponding && "opacity-60 cursor-not-allowed"
+                    )}
+                  >
+                    {/* Radio / Checkbox indicator */}
+                    <div className="mt-0.5 shrink-0">
+                      {isMultiple ? (
+                        <div
+                          className={cn(
+                            "size-4 rounded border flex items-center justify-center transition-colors",
+                            selected
+                              ? "bg-primary border-primary text-primary-foreground"
+                              : "border-muted-foreground/40 bg-transparent"
                           )}
-                        </span>
-                        {option.description && (
-                          <span className="block text-xs text-muted-foreground mt-0.5 break-words">
-                            {option.description}
-                          </span>
-                        )}
-                      </span>
-                    </Label>
-                  );
-                })}
-              </div>
-            ) : (
-              <RadioGroup
-                value={selectedForActive[0] ?? ""}
-                onValueChange={handleToggleOption}
-                disabled={isResponding}
-                className="gap-1"
-              >
-                {activeQuestion.options.map((option, index) => {
-                  const selected = selectedForActive.includes(option.label);
-                  const recommended = /\(recommended\)/i.test(option.label);
-                  const optionId = `q${activeIndex}-opt${index}`;
-
-                  return (
-                    <Label
-                      key={`${index}:${option.label}`}
-                      htmlFor={optionId}
-                      className={cn(
-                        "w-full px-2.5 py-2 rounded-lg transition-all border flex items-start gap-2.5 cursor-pointer",
-                        selected
-                          ? "bg-accent/25 border-border/50"
-                          : "hover:bg-muted/30 border-transparent",
-                        isResponding && "opacity-60 cursor-not-allowed"
-                      )}
-                    >
-                      <RadioGroupItem id={optionId} value={option.label} className="mt-0.5 shrink-0" />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-1.5 flex-wrap">
-                          <span className={cn("text-sm break-words", selected ? "text-foreground font-medium" : "text-foreground/85")}>
-                            {option.label}
-                          </span>
-                          {recommended && (
-                            <Badge variant="outline" className="text-[10px] text-primary/90 px-1.5 py-0 rounded bg-primary/10 border-primary/20">
-                              recommended
-                            </Badge>
+                        >
+                          {selected && <Check className="size-3 stroke-[2.5]" />}
+                        </div>
+                      ) : (
+                        <div
+                          className={cn(
+                            "size-4 rounded-full border flex items-center justify-center transition-colors",
+                            selected
+                              ? "border-primary"
+                              : "border-muted-foreground/40 bg-transparent"
                           )}
-                        </span>
-                        {option.description && (
-                          <span className="block text-xs text-muted-foreground mt-0.5 break-words">
-                            {option.description}
-                          </span>
-                        )}
-                      </span>
-                    </Label>
-                  );
-                })}
-              </RadioGroup>
-            )}
+                        >
+                          {selected && <div className="size-2 rounded-full bg-primary" />}
+                        </div>
+                      )}
+                    </div>
 
-            <div className="space-y-1 mt-1">
+                    {/* Option Text & Description */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={cn("text-sm break-words", selected ? "text-foreground font-semibold" : "text-foreground/90")}>
+                          {option.label}
+                        </span>
+                        {recommended && (
+                          <Badge variant="outline" className="text-[10px] text-primary/90 px-1.5 py-0 rounded bg-primary/10 border-primary/20 font-medium">
+                            recommended
+                          </Badge>
+                        )}
+                      </div>
+                      {option.description && (
+                        <span className="block text-xs text-muted-foreground mt-0.5 break-words leading-normal">
+                          {option.description}
+                        </span>
+                      )}
+                      {option.preview && (
+                        <pre className="mt-1.5 p-2 rounded bg-muted/40 border border-border/20 text-xs font-mono text-muted-foreground overflow-x-auto whitespace-pre">
+                          <code>{option.preview}</code>
+                        </pre>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+
               {/* Custom "Other..." option */}
               <button
                 type="button"
                 onClick={handleSelectCustom}
                 disabled={isResponding}
                 className={cn(
-                  "w-full px-2.5 py-2 text-left rounded-lg transition-all border",
+                  "w-full px-2.5 py-2 text-left rounded-lg transition-all border cursor-pointer",
                   isCustomActive ? "bg-accent/20 border-border/40" : "hover:bg-muted/30 border-transparent",
-                  isResponding ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
+                  isResponding && "opacity-60 cursor-not-allowed"
                 )}
               >
                 <div className="flex items-center gap-2">
@@ -425,7 +417,7 @@ export function QuestionCard({ request, onRespond }: QuestionCardProps) {
                   <Textarea
                     value={customText[activeIndex] ?? ""}
                     onChange={(e) => handleCustomChange(e.target.value)}
-                    placeholder="Your answer..."
+                    placeholder="Type your answer..."
                     disabled={isResponding}
                     rows={2}
                     className="min-h-[56px] resize-y"
@@ -438,25 +430,31 @@ export function QuestionCard({ request, onRespond }: QuestionCardProps) {
         ) : null}
       </CardContent>
 
-      {/* Footer Actions */}
-      <CardFooter className="px-3 py-2 border-t border-border/20 bg-muted/20 gap-2">
+      {/* Footer Actions — always rendered and clearly visible */}
+      <CardFooter className="px-3 py-2 border-t border-border/20 bg-muted/20 flex items-center gap-2">
         <Button
           type="button"
           size="sm"
           onClick={handleNextOrSubmit}
           disabled={isResponding || (!requiredSatisfied && isSingleQuestion)}
-          className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20"
+          className={cn(
+            "font-medium gap-1.5",
+            requiredSatisfied || isSingleQuestion
+              ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25"
+              : "opacity-50 cursor-not-allowed"
+          )}
         >
           {requiredSatisfied || isSingleQuestion ? <Check className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-          {requiredSatisfied || isSingleQuestion ? "Submit" : "Next"}
+          {requiredSatisfied || isSingleQuestion ? "Submit answer" : "Next question"}
         </Button>
 
         <Button
           type="button"
           size="sm"
+          variant="ghost"
           onClick={handleDismiss}
           disabled={isResponding}
-          className="bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20"
+          className="text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 gap-1"
         >
           <X className="h-3.5 w-3.5" />
           Dismiss

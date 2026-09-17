@@ -31,8 +31,41 @@ describe("QuestionCard", () => {
     expect(html).toContain("Pick a color");
     expect(html).toContain("Red");
     expect(html).toContain("recommended");
-    expect(html).toContain("Submit");
+    expect(html).toContain("Submit answer");
     expect(html).toContain("Dismiss");
+  });
+
+  test("renders all options, descriptions, and previews", () => {
+    const request: QuestionRequest = {
+      id: "q-all",
+      questions: [
+        {
+          question: "Which option should we focus on next?",
+          header: "Next topic",
+          options: [
+            { label: "Project status", description: "Get a concise update on the workspace." },
+            { label: "Code review", description: "Review files and run tests." },
+            { label: "Documentation", description: "Plan and refine guides." },
+            { label: "New idea", description: "Brainstorm something new.", preview: "ASCII diagram here" },
+          ],
+        },
+      ],
+    };
+    const html = ReactDOMServer.renderToString(
+      React.createElement(QuestionCard, { request, onRespond: respond })
+    );
+    expect(html).toContain("Project status");
+    expect(html).toContain("Get a concise update on the workspace.");
+    expect(html).toContain("Code review");
+    expect(html).toContain("Review files and run tests.");
+    expect(html).toContain("Documentation");
+    expect(html).toContain("Plan and refine guides.");
+    expect(html).toContain("New idea");
+    expect(html).toContain("Brainstorm something new.");
+    expect(html).toContain("ASCII diagram here");
+    expect(html).toContain("Submit answer");
+    expect(html).toContain("Dismiss");
+    expect(html).toContain("Other…");
   });
 
   test("multi-select renders checkboxes", () => {

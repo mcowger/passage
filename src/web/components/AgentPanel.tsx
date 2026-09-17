@@ -74,7 +74,11 @@ export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: Tim
             ? q.options.map((o: any) =>
                 typeof o === "string"
                   ? { label: o }
-                  : { label: String(o.label || ""), description: o.description ? String(o.description) : undefined }
+                  : {
+                      label: String(o.label || ""),
+                      description: o.description ? String(o.description) : undefined,
+                      preview: o.preview ? String(o.preview) : undefined,
+                    }
               )
             : [],
           multiple: Boolean(q.multiple || q.multiSelect),
@@ -82,7 +86,7 @@ export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: Tim
       };
     }
 
-    if (pending.method === "select") {
+    if (pending.method === "select" || (Array.isArray(pending.options) && pending.options.length > 0)) {
       let header = "Select";
       let question = String(pending.title || "Choose an option");
       const titleMatch = question.match(/^\[(.*?)\]\s*(.*)$/);
@@ -93,7 +97,20 @@ export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: Tim
 
       const rawOptions = Array.isArray(pending.options) ? pending.options : [];
       const options: QuestionOption[] = rawOptions.flatMap((opt: unknown) => {
-        const raw = typeof opt === "string" ? opt : (opt as any)?.label ? String((opt as any).label) : "";
+        if (!opt) return [];
+        if (typeof opt === "object" && opt !== null && "label" in opt) {
+          const o = opt as { label: string; description?: string; preview?: string };
+          const label = String(o.label || "").trim();
+          if (!label || /^\d+\.\s*(Type something\.|Other\b)/i.test(label) || label === "Type something.") return [];
+          return [
+            {
+              label,
+              description: o.description ? String(o.description) : undefined,
+              preview: o.preview ? String(o.preview) : undefined,
+            },
+          ];
+        }
+        const raw = typeof opt === "string" ? opt.trim() : "";
         if (!raw) return [];
         // Filter out "Type something." sentinel from list because QuestionCard has its own "Other..." row
         if (/^\d+\.\s*(Type something\.|Other\b)/i.test(raw) || raw === "Type something.") {
@@ -103,6 +120,11 @@ export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: Tim
         const matchWithDesc = raw.match(/^\d+\.\s*([^\u2014\u2013-]+?)\s*[\u2014\u2013-]\s*(.*)$/);
         if (matchWithDesc) {
           return [{ label: matchWithDesc[1].trim(), description: matchWithDesc[2].trim() }];
+        }
+        // Check for "Label — Description" without leading numbers
+        const matchNoNumWithDesc = raw.match(/^([^\u2014\u2013-]+?)\s*[\u2014\u2013-]\s*(.*)$/);
+        if (matchNoNumWithDesc) {
+          return [{ label: matchNoNumWithDesc[1].trim(), description: matchNoNumWithDesc[2].trim() }];
         }
         const matchNum = raw.match(/^\d+\.\s*(.*)$/);
         if (matchNum) {
@@ -162,7 +184,7 @@ export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: Tim
       const item = timeline[i];
       if (item.kind === "user") break;
       if (item.kind === "tool" && item.status === "running") {
-        const input = item.input as { questions?: any[] } | undefined;
+        const input = item.input as { questions?: any[]; options?: any[]; question?: string; header?: string } | undefined;
         if (Array.isArray(input?.questions) && input.questions.length > 0) {
           return {
             id: item.id,
@@ -173,11 +195,37 @@ export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: Tim
                 ? q.options.map((o: any) =>
                     typeof o === "string"
                       ? { label: o }
-                      : { label: String(o.label || ""), description: o.description ? String(o.description) : undefined }
+                      : {
+                          label: String(o.label || ""),
+                          description: o.description ? String(o.description) : undefined,
+                          preview: o.preview ? String(o.preview) : undefined,
+                        }
                   )
                 : [],
               multiple: Boolean(q.multiple || q.multiSelect),
             })),
+          };
+        }
+        // Handle flat tool input: { question, header, options }
+        if (Array.isArray(input?.options) && input.options.length > 0) {
+          return {
+            id: item.id,
+            questions: [
+              {
+                question: String(input.question || "Choose an option"),
+                header: input.header ? String(input.header) : undefined,
+                options: input.options.map((o: any) =>
+                  typeof o === "string"
+                    ? { label: o }
+                    : {
+                        label: String(o.label || ""),
+                        description: o.description ? String(o.description) : undefined,
+                        preview: o.preview ? String(o.preview) : undefined,
+                      }
+                ),
+                multiple: false,
+              },
+            ],
           };
         }
       }

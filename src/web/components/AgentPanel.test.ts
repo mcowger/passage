@@ -217,6 +217,70 @@ describe("resolveActiveQuestionRequest", () => {
     expect(req?.questions[0].options).toHaveLength(2);
   });
 
+  test("resolves flat tool input arguments from timeline", () => {
+    const timeline: TimelineItem[] = [
+      {
+        kind: "tool",
+        id: "call-flat",
+        name: "ask_user_question",
+        status: "running",
+        significant: true,
+        input: {
+          question: "Which option should we focus on next?",
+          header: "Next topic",
+          options: [
+            { label: "Project status", description: "Get a concise update." },
+            { label: "Code review", description: "Review files and tests." },
+            { label: "Documentation", description: "Refine docs." },
+            { label: "New idea", description: "Brainstorm new ideas." },
+          ],
+        },
+      },
+    ];
+
+    const req = resolveActiveQuestionRequest(baseAgent, timeline);
+    expect(req).not.toBeNull();
+    expect(req?.id).toBe("call-flat");
+    expect(req?.questions[0].header).toBe("Next topic");
+    expect(req?.questions[0].question).toBe("Which option should we focus on next?");
+    expect(req?.questions[0].options).toHaveLength(4);
+    expect(req?.questions[0].options.map((o) => o.label)).toEqual([
+      "Project status",
+      "Code review",
+      "Documentation",
+      "New idea",
+    ]);
+  });
+
+  test("resolves select dialog with formatted strings and filters sentinels", () => {
+    const agent: AgentSummary = {
+      ...baseAgent,
+      pendingUiRequest: {
+        id: "select-formatted",
+        method: "select",
+        title: "[Next topic] Which option should we focus on next?",
+        options: [
+          "1. Project status — Get a concise update on the current state of the Passage workspace.",
+          "2. Code review — Review files, run tests, or check for issues in the codebase.",
+          "3. Documentation — Plan, create, or refine documentation and guides.",
+          "4. New idea — Brainstorm or prototype something entirely new and experimental.",
+          "5. Type something.",
+        ],
+      },
+    };
+
+    const req = resolveActiveQuestionRequest(agent);
+    expect(req).not.toBeNull();
+    expect(req?.questions[0].header).toBe("Next topic");
+    expect(req?.questions[0].question).toBe("Which option should we focus on next?");
+    expect(req?.questions[0].options).toHaveLength(4);
+    expect(req?.questions[0].options[0].label).toBe("Project status");
+    expect(req?.questions[0].options[0].description).toBe(
+      "Get a concise update on the current state of the Passage workspace."
+    );
+    expect(req?.questions[0].options[3].label).toBe("New idea");
+  });
+
   test("returns null when neither pendingUiRequest nor running question tool exists", () => {
     expect(resolveActiveQuestionRequest(baseAgent, [])).toBeNull();
   });
