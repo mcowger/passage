@@ -1,6 +1,7 @@
 import { realpath, stat, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { DiffHunk, DiffLine, GitChangeKind, GitDiff, GitDiscovery, GitFileStatus, GitStatus } from "../../shared/domain/git.ts";
+import { errorFields, logger } from "../logging.ts";
 
 const DEFAULT_LIMIT = 512 * 1024;
 const DEFAULT_TIMEOUT = 3000;
@@ -8,6 +9,7 @@ const MAX_CONCURRENCY = 4;
 const MAX_UNTRACKED_DIFF_FILES = 20;
 const MAX_UNTRACKED_DIFF_BYTES = 256 * 1024;
 const UNTRACKED_DIFF_CONTEXT = 3;
+const encoder = new TextEncoder();
 type Options = { signal?: AbortSignal; timeoutMs?: number; maxOutputBytes?: number };
 type Result = { stdout: string; stderr: string; code: number; truncated: boolean };
 
@@ -19,13 +21,32 @@ export class GitService {
   constructor(private readonly limit = MAX_CONCURRENCY) { if (limit < 1) throw new RangeError("invalid concurrency"); }
   private async slot() { if (this.active >= this.limit) await new Promise<void>((r) => this.waiting.push(r)); this.active++; return () => { this.active--; this.waiting.shift()?.(); }; }
   private async run(cwd: string, args: string[], options: Options = {}): Promise<Result> {
+    const startedAt = performance.now();
+    const operation = args[0] ?? "unknown";
     const release = await this.slot(); const max = options.maxOutputBytes ?? DEFAULT_LIMIT; const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT;
     let p: Bun.Subprocess;
-    try { p = Bun.spawn(["git", "-C", cwd, ...args], { cwd, env: { ...process.env, LC_ALL: "C" }, stdout: "pipe", stderr: "pipe" }); } catch (error) { release(); throw new GitError("Unable to start Git", String(error)); }
+    try { p = Bun.spawn(["git", "-C", cwd, ...args], { cwd, env: { ...process.env, LC_ALL: "C" }, stdout: "pipe", stderr: "pipe" }); } catch (error) {
+      release();
+      logger("git").error("Git process could not start", { event: "git.start_failed", operation, durationMs: performance.now() - startedAt, ...errorFields(error) });
+      throw new GitError("Unable to start Git", String(error));
+    }
     let stopped = false; const kill = () => { if (p.exitCode === null) { stopped = true; p.kill(); } };
     const timer = setTimeout(kill, timeout); const abort = () => kill(); options.signal?.addEventListener("abort", abort, { once: true });
     const read = async (stream: ReadableStream<Uint8Array>) => { const reader = stream.getReader(); const chunks: Uint8Array[] = []; let size = 0; let truncated = false; try { while (true) { const x = await reader.read(); if (x.done) break; if (size < max) { const part = x.value.slice(0, max - size); chunks.push(part); size += part.length; if (part.length < x.value.length) truncated = true; } else truncated = true; } } finally { reader.releaseLock(); } return { text: new TextDecoder().decode(Buffer.concat(chunks)), truncated }; };
-    try { const [out, err, code] = await Promise.all([read(p.stdout as ReadableStream<Uint8Array>), read(p.stderr as ReadableStream<Uint8Array>), p.exited]); if (stopped || options.signal?.aborted) throw new GitError(options.signal?.aborted ? "Git operation cancelled" : "Git operation timed out"); if (code !== 0) throw new GitError("Git command failed", err.text, code); return { stdout: out.text, stderr: err.text, code, truncated: out.truncated || err.truncated }; } finally { clearTimeout(timer); options.signal?.removeEventListener("abort", abort); if (p.exitCode === null) p.kill(); await p.exited.catch(() => {}); release(); }
+    try {
+      const [out, err, code] = await Promise.all([read(p.stdout as ReadableStream<Uint8Array>), read(p.stderr as ReadableStream<Uint8Array>), p.exited]);
+      const durationMs = performance.now() - startedAt;
+      if (stopped || options.signal?.aborted) {
+        logger("git").warn("Git operation did not complete", { event: options.signal?.aborted ? "git.cancelled" : "git.timed_out", operation, durationMs });
+        throw new GitError(options.signal?.aborted ? "Git operation cancelled" : "Git operation timed out");
+      }
+      if (code !== 0) {
+        logger("git").warn("Git operation failed", { event: "git.failed", operation, durationMs, exitCode: code, stderrBytes: encoder.encode(err.text).byteLength, truncated: out.truncated || err.truncated });
+        throw new GitError("Git command failed", err.text, code);
+      }
+      logger("git").debug("Git operation completed", { event: "git.completed", operation, durationMs, exitCode: code, truncated: out.truncated || err.truncated });
+      return { stdout: out.text, stderr: err.text, code, truncated: out.truncated || err.truncated };
+    } finally { clearTimeout(timer); options.signal?.removeEventListener("abort", abort); if (p.exitCode === null) p.kill(); await p.exited.catch(() => {}); release(); }
   }
   async discover(cwd: string, options?: Options): Promise<GitDiscovery> {
     const out = await this.run(cwd, ["rev-parse", "--show-toplevel", "--git-dir", "--git-common-dir", "--abbrev-ref", "HEAD"], options); const lines = out.stdout.trimEnd().split("\n"); if (lines.length < 4) throw new GitError("Invalid Git discovery output");

@@ -11,6 +11,7 @@ import {
   type ServerTerminalControl,
 } from "../../shared/protocol/terminals.ts";
 import { WorkspaceError, type WorkspaceService } from "../workspaces/service.ts";
+import { errorFields, logger } from "../logging.ts";
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
@@ -82,6 +83,7 @@ class TerminalInstance {
       void this.process.exited.then((code) => {
         this.status = "exited";
         this.exitCode = code;
+        logger("terminal").info("PTY process exited", { event: "terminal.process_exited", terminalId: this.id, exitCode: code });
         this.broadcastControl({ type: "exit", exitCode: code });
         try {
           if (!this.terminal.closed) this.terminal.close();
@@ -90,6 +92,7 @@ class TerminalInstance {
     } catch (err) {
       this.status = "exited";
       this.exitCode = -1;
+      logger("terminal").error("PTY process could not start", { event: "terminal.start_failed", terminalId: this.id, ...errorFields(err) });
       throw err;
     }
   }
@@ -229,6 +232,7 @@ class TerminalInstance {
   }
 
   kill() {
+    logger("terminal").info("PTY termination requested", { event: "terminal.termination_requested", terminalId: this.id });
     this.status = "exited";
     if (this.process.exitCode === null) {
       try {
