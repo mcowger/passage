@@ -51,7 +51,14 @@ export async function runAgentServiceAcceptance(): Promise<void> {
       service.create("workspace-live", "Live agent one"),
       service.create("workspace-live", "Live agent two"),
     ]);
-    if (!first.live || !second.live || first.piSessionId === second.piSessionId) {
+    // create() returns before the Pi boot finishes (so the New Agent pane
+    // can open immediately); wait for both boots before asserting liveness.
+    // capabilities() waits on the pending boot via ensureProcess, so it
+    // doubles as the boot barrier.
+    await Promise.all([service.capabilities(first.id), service.capabilities(second.id)]);
+    const firstLive = service.snapshot(first.id);
+    const secondLive = service.snapshot(second.id);
+    if (!firstLive.live || !secondLive.live || first.piSessionId === second.piSessionId) {
       throw new Error("Pi agents did not start as isolated live processes");
     }
     await service.capabilities(first.id);

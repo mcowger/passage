@@ -81,8 +81,15 @@ describe("agent HTTP API", () => {
 
     const list = await (await app.fetch(request("/api/workspaces/workspace-1/agents"))).json() as unknown[];
     expect(list).toHaveLength(1);
-    const snapshot = await json(await app.fetch(request(`/api/agents/${created.id}`)));
-    expect(snapshot.live).toBe(true);
+    // create() returns before the Pi boot finishes (so the New Agent pane
+    // can open immediately); the snapshot goes live once boot completes.
+    let snapshot: Record<string, unknown> | undefined;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      snapshot = await json(await app.fetch(request(`/api/agents/${created.id}`)));
+      if (snapshot.live === true) break;
+      await Bun.sleep(20);
+    }
+    expect(snapshot?.live).toBe(true);
   });
 
   test("admits commands and persists model and thinking preferences", async () => {

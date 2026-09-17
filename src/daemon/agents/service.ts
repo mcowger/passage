@@ -94,6 +94,11 @@ export class AgentService {
   private readonly cancellations = new Map<string, Cancellation>();
   private readonly runStartedAt = new Map<string, number>();
   private readonly eventChains = new Map<string, Promise<void>>();
+  /** Background boot kicked off by create(): lets the POST return (and the
+   *  New Agent pane open) without waiting for Pi spawn + reconcile, while
+   *  giving later per-agent operations something to wait on so they keep
+   *  the old start-then-operate ordering. Never rejects. */
+  private readonly pendingStarts = new Map<string, Promise<void>>();
   private readonly manager: PiRpcManager;
   private readonly listLimit: number;
   private readonly pi: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
@@ -190,11 +195,36 @@ export class AgentService {
       archivedAt: null,
     };
     this.repositories.agents.save(agent);
-    await this.start(agent.id);
+    // Spawning the Pi process (manager.start) plus the initial reconcile
+    // (get_state + get_entries RPCs + session history read) is slow. Await
+    // it here and the POST stays open while Pi boots, which in turn keeps
+    // the New Agent button from opening its pane until boot finishes. The
+    // row is already persisted, so return the initializing snapshot now and
+    // let the process come up in the background -- status/row events over
+    // the agent socket bring the open pane live. start() reports its own
+    // failures via an error status, so nothing is lost by not awaiting it.
+    // Tracked in pendingStarts so prompt/steer/history/etc. still run
+    // after boot (preserving the old ordering) and shutdown waits for it.
+    const tracked: Promise<void> = this.start(agent.id).catch(() => undefined).finally(() => {
+      if (this.pendingStarts.get(agent.id) === tracked) this.pendingStarts.delete(agent.id);
+    });
+    this.pendingStarts.set(agent.id, tracked);
     return this.snapshot(agent.id);
   }
 
+  /** Wait for create()'s background boot for this agent, if still in flight. */
+  private awaitPendingStart(agentId: string): Promise<void> {
+    const pending = this.pendingStarts.get(agentId);
+    if (!pending) return Promise.resolve();
+    return pending;
+  }
+
   async start(agentId: string): Promise<void> {
+    // Serialize behind create()'s background boot so two overlapping
+    // starts (and their trailing reconciles) can't interleave. The
+    // background invocation itself sees no entry (it is set only after
+    // start() is entered), so this never self-waits.
+    await this.awaitPendingStart(agentId);
     const agent = this.requireAgent(agentId);
     if (agent.lastKnownStatus === "stopping") {
       if (this.cancellations.has(agentId)) throw new AgentError("invalid-input", "agent cancellation is in progress");
@@ -210,6 +240,13 @@ export class AgentService {
         sessionDir,
         sessionId: agent.piSessionId,
       });
+      // create() no longer awaits start(), so an archive can land while Pi
+      // is still booting. Don't attach/reconcile (and resurrect the status
+      // of) an agent that was archived mid-start; park the process instead.
+      if (this.repositories.agents.get(agentId)?.archivedAt) {
+        await this.manager.stop(agentId).catch(() => undefined);
+        return;
+      }
       this.diagnostics.delete(agent.id);
       this.attach(agent.id, process);
       await this.reconcile(agent.id);
@@ -264,6 +301,10 @@ export class AgentService {
 
   async abort(agentId: string): Promise<void> {
     this.pendingUiRequests.delete(agentId);
+    // Don't report "no process" for a create() whose boot is still in
+    // flight; wait for it so an immediate New-Agent-then-abort still
+    // reaches the stopping state instead of silently staying initializing.
+    await this.awaitPendingStart(agentId);
     const agent = this.requireAgent(agentId);
     const process = this.manager.get(agentId);
     if (!process) {
@@ -280,6 +321,9 @@ export class AgentService {
   }
 
   async respondExtensionUi(agentId: string, response: PiExtensionUiResponse): Promise<void> {
+    // Same boot race as abort(): the pane opens before Pi is up, so a fast
+    // dialog response must wait for the process rather than 409.
+    await this.awaitPendingStart(agentId);
     this.rejectWhileStopping(this.requireAgent(agentId));
     const process = this.requireProcess(agentId);
     process.respondExtensionUi(response);
@@ -362,8 +406,17 @@ export class AgentService {
   async history(agentId: string, before?: number, limit = 100): Promise<AgentHistoryResult> {
     let agent = this.requireAgent(agentId);
     if (!agent.piSessionPath) {
-      await this.reconcile(agentId, !this.cancellations.has(agentId));
-      agent = this.requireAgent(agentId);
+      if (agent.lastKnownStatus === "initializing" && !this.manager.get(agentId)) {
+        // create() returns before the background start() puts a process in
+        // the manager. Reconciling immediately would see "no process" and
+        // flip a brand-new agent to error; wait for the in-flight start
+        // (ensureProcess dedupes via the manager's pending start) instead.
+        await this.ensureProcess(agentId).catch(() => undefined);
+        agent = this.requireAgent(agentId);
+      } else {
+        await this.reconcile(agentId, !this.cancellations.has(agentId));
+        agent = this.requireAgent(agentId);
+      }
     }
     if (!agent.piSessionPath && !this.transcripts.has(agentId)) return { unpersisted: true, history: null };
     const state = await this.getTranscript(agentId);
@@ -391,6 +444,9 @@ export class AgentService {
   }
 
   async archive(agentId: string): Promise<void> {
+    // Serialize behind a still-booting create() so the background start
+    // can't attach/reconcile (or leak a process) around the archival.
+    await this.awaitPendingStart(agentId);
     const agent = this.repositories.agents.get(agentId);
     if (!agent) throw new AgentError("not-found", "agent not found");
     this.detach(agentId);
@@ -416,6 +472,10 @@ export class AgentService {
   }
 
   async shutdown(): Promise<void> {
+    // Let create()'s background boots finish (they clean up their own map
+    // entries) so they never write to a closed database after this returns.
+    await Promise.allSettled([...this.pendingStarts.values()]);
+    this.pendingStarts.clear();
     for (const agentId of this.subscriptions.keys()) this.detach(agentId);
     this.listeners.clear();
     this.previousRevisions.clear();
@@ -839,6 +899,11 @@ export class AgentService {
 
   private async ensureProcess(agentId: string): Promise<PiRpcProcess> {
     this.requireAgent(agentId);
+    // A prompt/steer/etc. racing create()'s background boot must run after
+    // it (the old await-create ordering), not beside its trailing
+    // reconcile -- otherwise the stale get_state read flips the just-set
+    // running status back to idle and clears runStartedAt.
+    await this.awaitPendingStart(agentId);
     let process = this.manager.get(agentId);
     if (!process) {
       await this.start(agentId);
