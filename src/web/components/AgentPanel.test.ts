@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { formatDuration, formatThinkingPreview, isComposerLocked, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
+import { formatDuration, formatThinkingPreview, isComposerLocked, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 
 const modelOptions: AgentCapabilities["models"] = [
@@ -90,6 +90,20 @@ describe("resolveStreamActive", () => {
     expect(isComposerLocked("stopping")).toBe(true);
     expect(isComposerLocked("idle")).toBe(false);
     expect(isComposerLocked("running")).toBe(false);
+  });
+});
+
+describe("resolveStreamStartMs", () => {
+  test("anchors to the daemon run start so a reload does not reset the timer", () => {
+    const runStartedAt = 1_700_000_000_000;
+    // The observed time is later (page loaded mid-run); the authoritative run
+    // start must win so elapsed time and tokens/sec stay continuous.
+    expect(resolveStreamStartMs(runStartedAt, runStartedAt + 30_000)).toBe(runStartedAt);
+  });
+
+  test("falls back to first observation when the daemon has no run start", () => {
+    expect(resolveStreamStartMs(undefined, 1_700_000_000_000)).toBe(1_700_000_000_000);
+    expect(resolveStreamStartMs(0, 1_700_000_000_000)).toBe(1_700_000_000_000);
   });
 });
 

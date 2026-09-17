@@ -65,6 +65,35 @@ test("requires explicit steering or follow-up while an agent is running", async 
   f.store.close();
 });
 
+test("anchors an active run to one stable start timestamp and clears it on settlement", async () => {
+  const f = await make();
+  const runSpanScript = `let streaming=false;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n');setTimeout(()=>{streaming=false;process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n')},40)}const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+  const service = new AgentService(f.repos, {
+    sessionsRoot: join(f.root, "run-span-sessions"),
+    manager: new PiRpcManager(1),
+    pi: { executable: process.execPath, executableArgs: ["-e", runSpanScript] },
+  });
+  const agent = await service.create("w");
+  const events: Array<{ type: string; runStartedAt?: number }> = [];
+  service.subscribe((event) => events.push({ type: event.type, runStartedAt: event.payload?.runStartedAt as number | undefined }));
+
+  await service.prompt(agent.id, "long run");
+  const started = service.snapshot(agent.id).runStartedAt;
+  expect(typeof started).toBe("number");
+  expect(service.list("w")[0]?.runStartedAt).toBe(started);
+
+  await Bun.sleep(15);
+  // Client reloads and re-anchors from the same authoritative run start.
+  expect(service.snapshot(agent.id).runStartedAt).toBe(started);
+  expect(events.some((event) => event.type === "status" && event.runStartedAt === started)).toBe(true);
+
+  await Bun.sleep(60);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  expect(service.snapshot(agent.id).runStartedAt).toBeUndefined();
+  await service.shutdown();
+  f.store.close();
+});
+
 test("keeps an agent stopping until Pi confirms cancellation", async () => {
   const f = await make();
   const abortScript = `let streaming=false;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n')}const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};if(r.type==='abort')setTimeout(()=>{streaming=false;process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n')},20);else process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
