@@ -101,6 +101,29 @@ describe("Pi history projection", () => {
     expect(history.timeline.at(-1)?.kind).toBe("user");
   });
 
+  test("reports context occupancy from the latest assistant turn, not cumulative usage", () => {
+    const source = [
+      line(header),
+      line({ type: "message", id: "u1", parentId: null, timestamp: "t", message: { role: "user", content: "Inspect" } }),
+      line({ type: "message", id: "a1", parentId: "u1", timestamp: "t", message: { role: "assistant", provider: "plexus", model: "m", usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 110, cost: { total: 0.01 } }, content: [{ type: "text", text: "First" }] } }),
+      line({ type: "message", id: "u2", parentId: "a1", timestamp: "t", message: { role: "user", content: "More" } }),
+      line({ type: "message", id: "a2", parentId: "u2", timestamp: "t", message: { role: "assistant", provider: "plexus", model: "m", usage: { input: 5, output: 20, cacheRead: 500, cacheWrite: 0, totalTokens: 525, cost: { total: 0.02 } }, content: [{ type: "text", text: "Second" }] } }),
+    ].join("");
+    const history = parsePiJsonl(source, revision(source));
+    expect(history.usage).toMatchObject({ input: 105, output: 30, cacheRead: 500, totalTokens: 635 });
+    expect(history.contextUsage).toEqual({ tokens: 525 });
+  });
+
+  test("reports unknown context occupancy immediately after compaction", () => {
+    const source = [
+      line(header),
+      line({ type: "message", id: "a1", parentId: null, timestamp: "t", message: { role: "assistant", provider: "plexus", model: "m", usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 110, cost: { total: 0.01 } }, content: [{ type: "text", text: "First" }] } }),
+      line({ type: "compaction", id: "c1", parentId: "a1", timestamp: "t", summary: "Compact", firstKeptEntryId: "a1", tokensBefore: 110, usage: { input: 50, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 55, cost: { total: 0.005 } } }),
+    ].join("");
+    const history = parsePiJsonl(source, revision(source));
+    expect(history.contextUsage).toEqual({ tokens: null });
+  });
+
   test("tracks compaction, branch summaries, model/thinking changes, and unknown entries", () => {
     const source = [
       line(header),

@@ -106,6 +106,8 @@ export type AgentHistory = {
   timeline: TimelineItem[];
   branches: AgentBranchEntry[];
   usage: AgentUsage;
+  /** Current context-window occupancy from the latest assistant turn, not the session cumulative total. */
+  contextUsage?: { tokens: number | null };
   unknownRecordCount: number;
   agentErrorCount: number;
   malformedRecordCount: number;
@@ -147,6 +149,7 @@ export const agentHistorySchema: z.ZodType<AgentHistory> = z.object({
   usage: z.object({
     input: z.number(), output: z.number(), cacheRead: z.number(), cacheWrite: z.number(), totalTokens: z.number(), cost: z.number(),
   }).strict(),
+  contextUsage: z.object({ tokens: z.number().nullable() }).strict().optional(),
   unknownRecordCount: z.number().int().nonnegative(),
   agentErrorCount: z.number().int().nonnegative(),
   malformedRecordCount: z.number().int().nonnegative(),

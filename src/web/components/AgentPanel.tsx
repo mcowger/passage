@@ -323,8 +323,8 @@ export function AgentPanel({
   const maxTokens = (currentModel && "contextWindow" in currentModel && typeof currentModel.contextWindow === "number")
     ? currentModel.contextWindow
     : 200_000;
-  const totalTokens = effectiveHistory?.usage?.totalTokens ?? ((effectiveHistory?.usage?.input ?? 0) + (effectiveHistory?.usage?.output ?? 0));
-  const contextPct = totalTokens > 0 ? Math.min(100, Math.max(1, Math.round((totalTokens / maxTokens) * 100))) : 0;
+  const contextTokens = effectiveHistory?.contextUsage?.tokens ?? null;
+  const contextPct = contextTokens !== null && contextTokens > 0 ? Math.min(100, Math.max(1, Math.round((contextTokens / maxTokens) * 100))) : 0;
   const pieColor = contextPct >= 95 ? "var(--danger, #b91c1c)" : contextPct >= 80 ? "var(--warning, #b45309)" : "currentColor";
   const changeSummary = useMemo(() => summarizeChanges(effectiveHistory?.timeline ?? []), [effectiveHistory?.timeline]);
 
@@ -397,7 +397,7 @@ export function AgentPanel({
         currentModel={currentModel}
         currentModelDisplayName={currentModelDisplayName}
         thinking={thinking}
-        totalTokens={totalTokens}
+        contextTokens={contextTokens}
         maxTokens={maxTokens}
         contextPct={contextPct}
         pieColor={pieColor}
@@ -458,7 +458,7 @@ type AgentComposerProps = {
   currentModel?: AgentCapabilities["models"][number] | { name: string; id: string; provider: string; contextWindow?: number };
   currentModelDisplayName: string;
   thinking: string;
-  totalTokens: number;
+  contextTokens: number | null;
   maxTokens: number;
   contextPct: number;
   pieColor: string;
@@ -527,7 +527,7 @@ function AgentComposerInner({
   currentModel,
   currentModelDisplayName,
   thinking,
-  totalTokens,
+  contextTokens,
   maxTokens,
   contextPct,
   pieColor,
@@ -941,13 +941,13 @@ function AgentComposerInner({
             >
               <Slash size={14} aria-hidden="true" />
             </button>
-            {totalTokens > 0 && (
+            {contextTokens !== null && contextTokens > 0 && (
               <div className="composer-ctx-wrapper" ref={ctxDetailsRef}>
                 <button
                   type="button"
                   className="composer-ctx-pill"
                   onClick={() => setCtxDetailsOpen((prev) => !prev)}
-                  title={`${totalTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens · ${contextPct}% context · Click for details`}
+                  title={`${contextTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens · ${contextPct}% context · Click for details`}
                   aria-label={`Context used: ${contextPct}%. Click for usage breakdown.`}
                   aria-expanded={ctxDetailsOpen}
                   aria-haspopup="dialog"
@@ -975,7 +975,7 @@ function AgentComposerInner({
                       <div className="ctx-detail-row">
                         <span>Context used</span>
                         <b>
-                          {contextPct}% ({totalTokens.toLocaleString()} / {maxTokens.toLocaleString()})
+                          {contextPct}% ({contextTokens.toLocaleString()} / {maxTokens.toLocaleString()})
                         </b>
                       </div>
                       <div className="ctx-detail-row">

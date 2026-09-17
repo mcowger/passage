@@ -93,6 +93,11 @@ function addUsage(total: AgentUsage, value: unknown): void {
   total.cost += usage.cost;
 }
 
+function usageTotalTokens(value: unknown): number {
+  const usage = usageFrom(value);
+  return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+}
+
 function isSignificantTool(name: string): boolean {
   return /edit|write|patch|test|image|artifact|permission|git|diff/i.test(name);
 }
@@ -137,6 +142,28 @@ function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "s
     const id = string(entry.id);
     return id !== undefined && activeIds.has(id);
   });
+
+  // Context occupancy is the latest assistant turn's prompt-plus-output token
+  // count, matching Pi's own getContextUsage() base. The cumulative `usage`
+  // below grows with every turn and must never be used for the context meter.
+  // Use original file order so a compaction that post-dates the last assistant
+  // turn leaves occupancy unknown until a fresh response arrives.
+  let contextTokens: number | null = null;
+  let lastAssistantIndex = -1;
+  let lastCompactionIndex = -1;
+  activeEntries.forEach((entry, index) => {
+    if (entry.type === "compaction") lastCompactionIndex = index;
+    if (entry.type !== "message") return;
+    const message = object(entry.message);
+    if (string(message?.role) !== "assistant") return;
+    const tokens = usageTotalTokens(message?.usage);
+    if (tokens > 0) {
+      contextTokens = tokens;
+      lastAssistantIndex = index;
+    }
+  });
+  if (lastAssistantIndex < lastCompactionIndex) contextTokens = null;
+
   const compactions = activeEntries.filter((entry) => entry.type === "compaction");
   const latestCompaction = compactions.at(-1);
   if (latestCompaction) {
@@ -267,6 +294,7 @@ function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "s
     timeline: groupTools(timeline),
     branches,
     usage,
+    contextUsage: { tokens: contextTokens },
     unknownRecordCount,
     agentErrorCount,
     sessionName,
