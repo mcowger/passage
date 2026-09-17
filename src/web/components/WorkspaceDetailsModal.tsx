@@ -108,7 +108,7 @@ export function WorkspaceDetailsModal({
   return (
     <>
       <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
-        <DialogContent className="max-w-[560px] text-sm">
+        <DialogContent className="max-w-[560px] text-sm max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xs text-muted-foreground font-mono">{project.displayLabel}</span>

@@ -177,7 +177,7 @@ function ProjectRow({
         {onDiscoverWorktrees && (
           <button
             type="button"
-            className="opacity-0 group-hover/proj:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground transition-opacity ml-1 shrink-0"
+            className="opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 touch-visible p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground transition-opacity ml-1 shrink-0"
             onClick={(e) => {
               e.stopPropagation();
               onDiscoverWorktrees(project.id);
@@ -190,7 +190,7 @@ function ProjectRow({
         {onRequestRemoveProject && (
           <button
             type="button"
-            className="opacity-0 group-hover/proj:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-danger transition-opacity ml-1 shrink-0"
+            className="opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 touch-visible p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-danger transition-opacity ml-1 shrink-0"
             onClick={(e) => {
               e.stopPropagation();
               onRequestRemoveProject(project);
@@ -264,7 +264,7 @@ function ProjectRow({
                   </div>
 
                   {onManageWorkspace && (
-                    <span className="flex items-center gap-0.5 opacity-0 group-hover/ws:opacity-100 transition-opacity">
+                    <span className="flex items-center gap-0.5 opacity-0 group-hover/ws:opacity-100 focus-within:opacity-100 touch-visible transition-opacity">
                       <CopyValueButton value={workspace.cwd} label="workspace path" />
                       <button
                         type="button"
