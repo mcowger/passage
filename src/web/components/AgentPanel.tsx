@@ -47,6 +47,8 @@ import {
 const STREAMING_STATS_INTERVAL_MS = 300;
 /** Distance from the bottom that still counts as following the live tail. */
 const STICK_TO_BOTTOM_SLACK_PX = 48;
+/** Distance from the top that triggers backfilling the previous page of history. */
+const LOAD_MORE_HISTORY_SLACK_PX = 120;
 
 export type AgentPanelProps = {
   agent: AgentSummary;
@@ -62,6 +64,12 @@ export type AgentPanelProps = {
   /** Offline transcript override for rendering verification (never live state). */
   previewHistory?: AgentHistory;
   settings?: WorkspaceSettings;
+  /** Whether an older page of history is available to backfill. */
+  hasMoreHistory?: boolean;
+  /** Whether a backfill fetch for older history is in flight. */
+  loadingMoreHistory?: boolean;
+  /** Fetches and prepends the previous page of history. */
+  onLoadMoreHistory?: () => void;
 };
 
 export function resolveActiveQuestionRequest(agent: AgentSummary): QuestionRequest | null {
@@ -240,6 +248,9 @@ export function AgentPanel({
   onOptimisticMessage,
   previewHistory,
   settings,
+  hasMoreHistory,
+  loadingMoreHistory,
+  onLoadMoreHistory,
 }: AgentPanelProps) {
   const effectiveHistory = previewHistory ?? history;
   const conciseKey = `passage:agent:${agent.id}:concise`;
@@ -328,15 +339,42 @@ export function AgentPanel({
   );
   const pinnedQuestionIdRef = useRef<string | null>(null);
 
+  // Scrolling near the top backfills the previous page of history. Refs
+  // (rather than effect deps) keep the mount-only scroll listener below
+  // reading the latest values without re-subscribing on every change.
+  const hasMoreHistoryRef = useRef(hasMoreHistory);
+  hasMoreHistoryRef.current = hasMoreHistory;
+  const loadingMoreHistoryRef = useRef(loadingMoreHistory);
+  loadingMoreHistoryRef.current = loadingMoreHistory;
+  const onLoadMoreHistoryRef = useRef(onLoadMoreHistory);
+  onLoadMoreHistoryRef.current = onLoadMoreHistory;
+  // Captured right before a backfill fetch starts so the resulting DOM
+  // growth above the viewport can be compensated for once it renders,
+  // instead of visually yanking the transcript the user is reading.
+  const pendingScrollRestoreRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+
   useEffect(() => {
     const el = timelineRef.current;
     if (!el) return;
     const onScroll = () => {
       pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_TO_BOTTOM_SLACK_PX;
+      if (hasMoreHistoryRef.current && !loadingMoreHistoryRef.current && el.scrollTop <= LOAD_MORE_HISTORY_SLACK_PX) {
+        pendingScrollRestoreRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
+        onLoadMoreHistoryRef.current?.();
+      }
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollRestoreRef.current;
+    if (!pending) return;
+    pendingScrollRestoreRef.current = null;
+    const el = timelineRef.current;
+    if (!el) return;
+    el.scrollTop = pending.scrollTop + (el.scrollHeight - pending.scrollHeight);
+  }, [timeline]);
 
   useEffect(() => {
     if (!streamActive) return;
@@ -431,6 +469,7 @@ export function AgentPanel({
             </div>
           ) : (
             <>
+              {loadingMoreHistory && <p className="muted timeline-loading-more">Loading earlier messages…</p>}
               {visibleTimeline.map((item) => (
                 <TimelineRow
                   key={item.id}

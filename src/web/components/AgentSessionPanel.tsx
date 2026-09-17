@@ -15,12 +15,18 @@ export type AgentSessionPanelProps = {
   settings?: WorkspaceSettings;
 };
 
+/** Timeline rows fetched for the initial render and on every full reload.
+ *  Kept small (rather than the API's own 100-row default) so a session with
+ *  a long history still paints on the first round trip on a slow mobile
+ *  connection; older rows are backfilled on demand as the user scrolls up. */
+export const HISTORY_PAGE_LIMIT = 20;
+
 export type AgentSessionLoader = {
   agentId: string;
   api: Pick<WorkspaceApi, "agent" | "history" | "capabilities">;
   isCurrent: () => boolean;
   onSummary: (summary: AgentSummary) => void;
-  onHistory: (history: AgentHistory | undefined) => void;
+  onHistory: (history: AgentHistory | undefined, nextBefore?: number) => void;
   onCapabilities: (capabilities: AgentCapabilities | undefined) => void;
   onError: (message: string) => void;
   onSettled: () => void;
@@ -37,10 +43,13 @@ export type AgentSessionLoadResult = "loaded" | "failed" | "superseded";
 
 export async function loadAgentSession(loader: AgentSessionLoader): Promise<AgentSessionLoadResult> {
   try {
-    const [summary, result] = await Promise.all([loader.api.agent(loader.agentId), loader.api.history(loader.agentId)]);
+    const [summary, result] = await Promise.all([
+      loader.api.agent(loader.agentId),
+      loader.api.history(loader.agentId, undefined, HISTORY_PAGE_LIMIT),
+    ]);
     if (!loader.isCurrent()) return "superseded";
     loader.onSummary(summary);
-    loader.onHistory("unpersisted" in result ? undefined : result.history);
+    loader.onHistory("unpersisted" in result ? undefined : result.history, "unpersisted" in result ? undefined : result.nextBefore);
     loader.onError("");
     loader.onSettled();
   } catch (cause) {
@@ -88,14 +97,40 @@ export function mergeLoadedHistory(current: AgentHistory | undefined, loaded: Ag
   return { ...loaded, timeline: current.timeline };
 }
 
+/** True exactly when `mergeLoadedHistory` would discard the currently
+ *  rendered timeline wholesale, which is also when a backfilled pagination
+ *  cursor (`nextBefore`) stops meaning anything and must be replaced by the
+ *  fresh page's own cursor instead of kept as-is. */
+export function historyReplaced(current: AgentHistory | undefined, loaded: AgentHistory | undefined): boolean {
+  return loaded !== undefined && (!current || current.transcriptEpoch !== loaded.transcriptEpoch);
+}
+
+/**
+ * Prepends an older page of history (fetched by scrolling up) onto the
+ * currently rendered timeline. Ids are deduped defensively in case the page
+ * boundary raced a live row-upsert that already delivered one of these rows.
+ */
+export function prependOlderHistory(current: AgentHistory | undefined, older: AgentHistory | undefined): AgentHistory | undefined {
+  if (!older) return current;
+  if (!current) return older;
+  const existingIds = new Set(current.timeline.map((item) => item.id));
+  const olderRows = older.timeline.filter((item) => !existingIds.has(item.id));
+  return { ...current, timeline: [...olderRows, ...current.timeline] };
+}
+
 export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, previewHistory, settings }: AgentSessionPanelProps) {
   const [agent, setAgent] = useState(initialAgent);
   const [history, setHistory] = useState<AgentHistory>();
   const [capabilities, setCapabilities] = useState<AgentCapabilities>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [nextBefore, setNextBefore] = useState<number>();
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const generation = useRef(0);
   const statusRef = useRef(initialAgent.status);
+  const historyRef = useRef<AgentHistory | undefined>(undefined);
+  historyRef.current = history;
+  const loadingOlderRef = useRef(false);
   const onAgentChangedRef = useRef(onAgentChanged);
   onAgentChangedRef.current = onAgentChanged;
 
@@ -118,7 +153,10 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       api,
       isCurrent: () => currentGeneration === generation.current,
       onSummary: updateLoadedAgent,
-      onHistory: (loaded) => setHistory((current) => mergeLoadedHistory(current, loaded)),
+      onHistory: (loaded, loadedNextBefore) => {
+        if (historyReplaced(historyRef.current, loaded)) setNextBefore(loadedNextBefore);
+        setHistory((current) => mergeLoadedHistory(current, loaded));
+      },
       onCapabilities: setCapabilities,
       onError: setError,
       onSettled: () => setLoading(false),
@@ -131,11 +169,38 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
     await loadAgentSessionWithRetry(load, isInitial);
   }, [load]);
 
+  // Fetches the next page of older rows (scrolled into view above the
+  // currently rendered timeline) and prepends them. Guarded by a ref rather
+  // than just the `loadingOlder` state so back-to-back scroll events in the
+  // same tick can't both slip through before the first fetch's state update
+  // commits.
+  const loadOlder = useCallback(async () => {
+    if (nextBefore === undefined || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    const currentGeneration = generation.current;
+    try {
+      const result = await api.history(initialAgent.id, nextBefore, HISTORY_PAGE_LIMIT);
+      if (currentGeneration !== generation.current) return;
+      const older = "unpersisted" in result ? undefined : result.history;
+      setHistory((current) => prependOlderHistory(current, older));
+      setNextBefore("unpersisted" in result ? undefined : result.nextBefore);
+    } catch {
+      // Leave nextBefore as-is so scrolling up again retries the same page.
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [api, initialAgent.id, nextBefore]);
+
   useEffect(() => {
     statusRef.current = initialAgent.status;
     setAgent(initialAgent);
     setHistory(undefined);
     setCapabilities(undefined);
+    setNextBefore(undefined);
+    loadingOlderRef.current = false;
+    setLoadingOlder(false);
     void loadWithRetry(true);
 
     const subscription = subscribeAgent(
@@ -210,6 +275,9 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
         setHistory((current) => addOptimisticUserMessage(current, message));
       }}
       previewHistory={previewHistory}
+      hasMoreHistory={nextBefore !== undefined}
+      loadingMoreHistory={loadingOlder}
+      onLoadMoreHistory={loadOlder}
     />
   );
 }
