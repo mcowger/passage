@@ -25,6 +25,13 @@ type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respons
 const acceptedResponseSchema = z.object({ accepted: z.literal(true) }).strict();
 const okResponseSchema = z.object({ ok: z.literal(true) }).strict();
 
+/** A read that never resolves leaves the view on a spinner forever because
+ *  nothing retries it. Mutations (worktree setup, Git network ops, Pi
+ *  start-up, preview launch) legitimately run longer, so they get a larger
+ *  deadline instead of being aborted mid-flight. */
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const MUTATION_REQUEST_TIMEOUT_MS = 120_000;
+
 export type WorkspaceApi = ReturnType<typeof createWorkspaceApi>;
 
 export class WorkspaceApiError extends Error {
@@ -50,6 +57,7 @@ const FRIENDLY_API_ERRORS: Record<string, string> = {
   "force-required": "That would discard uncommitted changes. Confirm a force delete to proceed.",
   "git-failed": "The git operation failed. Check the repository state and try again.",
   "preview-not-running": "The preview is not running. Start it and try again.",
+  "timeout": "Request timed out. Check your connection and try again.",
 };
 
 /** Convert API/validation failures into human-readable UI messages. Raw
@@ -74,22 +82,48 @@ export type DiscoveredWorktree = {
   archived: boolean;
 };
 
-export function createWorkspaceApi(fetcher: Fetcher = fetch) {
-  async function request(path: string, init?: RequestInit): Promise<unknown> {
+export function createWorkspaceApi(
+  fetcher: Fetcher = fetch,
+  options?: { requestTimeoutMs?: number; mutationTimeoutMs?: number },
+) {
+  const readTimeoutMs = options?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const writeTimeoutMs = options?.mutationTimeoutMs ?? MUTATION_REQUEST_TIMEOUT_MS;
+
+  async function request(path: string, init?: RequestInit, timeoutMs?: number): Promise<unknown> {
     const headers = new Headers(init?.headers);
     if (init?.body !== undefined) headers.set("Content-Type", "application/json");
-    const response = await fetcher(path, { ...init, headers });
-    if (!response.ok) {
-      let code = "request-failed";
-      let message: string | undefined;
+    const method = (init?.method ?? "GET").toUpperCase();
+    const deadline = timeoutMs ?? (method === "GET" ? readTimeoutMs : writeTimeoutMs);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), deadline);
+    const timeoutError = () => new WorkspaceApiError("timeout", 0, "Request timed out. Check your connection and try again.");
+    try {
+      let response: Response;
       try {
-        const error = (await response.json()) as { error?: string; message?: string };
-        code = error.error ?? code;
-        message = error.message;
-      } catch {}
-      throw new WorkspaceApiError(code, response.status, message);
+        response = await fetcher(path, { ...init, headers, signal: controller.signal });
+      } catch (cause) {
+        if (controller.signal.aborted) throw timeoutError();
+        throw cause;
+      }
+      if (!response.ok) {
+        let code = "request-failed";
+        let message: string | undefined;
+        try {
+          const error = (await response.json()) as { error?: string; message?: string };
+          code = error.error ?? code;
+          message = error.message;
+        } catch {}
+        throw new WorkspaceApiError(code, response.status, message);
+      }
+      try {
+        return await response.json();
+      } catch (cause) {
+        if (controller.signal.aborted) throw timeoutError();
+        throw cause;
+      }
+    } finally {
+      clearTimeout(timer);
     }
-    return response.json();
   }
 
   return {
@@ -179,7 +213,9 @@ export function createWorkspaceApi(fetcher: Fetcher = fetch) {
       return agentSummarySchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`, { method: "POST", body: JSON.stringify(title ? { title } : {}) }));
     },
     async agent(id: string): Promise<AgentSummary> { return agentSummarySchema.parse(await request(`/api/agents/${encodeURIComponent(id)}`)); },
-    async capabilities(id: string): Promise<AgentCapabilities> { return agentCapabilitiesSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/capabilities`)); },
+    // Capabilities can block on Pi process start-up, so it keeps the longer
+    // mutation-grade deadline even though it is a read.
+    async capabilities(id: string): Promise<AgentCapabilities> { return agentCapabilitiesSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/capabilities`, undefined, MUTATION_REQUEST_TIMEOUT_MS)); },
     async listModels(): Promise<AgentCapabilities["models"]> {
       const body = (await request("/api/models")) as { models: unknown };
       return agentCapabilitiesSchema.shape.models.parse(body.models);

@@ -32,27 +32,41 @@ export type AgentSessionLoader = {
  * leaves a slow or hung capabilities call stuck on "Loading history…" even
  * though history already arrived.
  */
-export async function loadAgentSession(loader: AgentSessionLoader): Promise<void> {
+export type AgentSessionLoadResult = "loaded" | "failed" | "superseded";
+
+export async function loadAgentSession(loader: AgentSessionLoader): Promise<AgentSessionLoadResult> {
   try {
     const [summary, result] = await Promise.all([loader.api.agent(loader.agentId), loader.api.history(loader.agentId)]);
-    if (!loader.isCurrent()) return;
+    if (!loader.isCurrent()) return "superseded";
     loader.onSummary(summary);
     loader.onHistory("unpersisted" in result ? undefined : result.history);
     loader.onError("");
+    loader.onSettled();
   } catch (cause) {
-    if (loader.isCurrent()) {
-      loader.onError(cause instanceof Error ? cause.message : "Unable to load agent");
-      loader.onSettled();
-    }
-    return;
+    if (!loader.isCurrent()) return "superseded";
+    loader.onError(cause instanceof Error ? cause.message : "Unable to load agent");
+    loader.onSettled();
+    return "failed";
   }
-  if (loader.isCurrent()) loader.onSettled();
   try {
     const capabilities = await loader.api.capabilities(loader.agentId);
     if (loader.isCurrent()) loader.onCapabilities(capabilities);
   } catch {
     if (loader.isCurrent()) loader.onCapabilities(undefined);
   }
+  return "loaded";
+}
+
+/** Runs a load and retries once after a failure. Initial mount and
+ *  reconnect/suspend reconciliation both use this: a phone suspend or a
+ *  dropped stream can kill the first fetch before it settles. Superseded
+ *  loads are not retried -- a newer load already owns the view. */
+export async function loadAgentSessionWithRetry(
+  attempt: (isInitial: boolean) => Promise<AgentSessionLoadResult>,
+  isInitial: boolean,
+): Promise<void> {
+  if ((await attempt(isInitial)) !== "failed") return;
+  await attempt(false);
 }
 
 export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, previewHistory, settings }: AgentSessionPanelProps) {
@@ -70,10 +84,10 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
     onAgentChangedRef.current?.(next);
   }, []);
 
-  const load = useCallback(async (isInitial = false) => {
+  const load = useCallback(async (isInitial = false): Promise<AgentSessionLoadResult> => {
     const currentGeneration = ++generation.current;
     if (isInitial) setLoading(true);
-    await loadAgentSession({
+    return await loadAgentSession({
       agentId: initialAgent.id,
       api,
       isCurrent: () => currentGeneration === generation.current,
@@ -85,11 +99,17 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
     });
   }, [api, initialAgent.id, updateAgent]);
 
+  // Retry once on failure so a transient mobile suspend or dropped stream
+  // recovers without a manual reload, on both first load and reconcile.
+  const loadWithRetry = useCallback(async (isInitial = false) => {
+    await loadAgentSessionWithRetry(load, isInitial);
+  }, [load]);
+
   useEffect(() => {
     setAgent(initialAgent);
     setHistory(undefined);
     setCapabilities(undefined);
-    void load(true);
+    void loadWithRetry(true);
 
     const subscription = subscribeAgent(
       initialAgent.id,
@@ -123,10 +143,10 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
         }
         setHistory((current) => applyStreamEvent(current, value) ?? current);
       },
-      () => load(),
+      () => loadWithRetry(),
     );
     return () => subscription.close();
-  }, [initialAgent.id, load]);
+  }, [initialAgent.id, load, loadWithRetry]);
 
   return (
     <AgentPanel
@@ -137,7 +157,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       error={error}
       api={api}
       settings={settings}
-      onRefresh={() => load()}
+      onRefresh={async () => { await load(); }}
       onModelChanged={updateAgent}
       onArchive={() => Promise.resolve()}
       onOptimisticMessage={(message) => {

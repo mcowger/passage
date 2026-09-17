@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createWorkspaceApi } from "./api.ts";
+import { createWorkspaceApi, WorkspaceApiError } from "./api.ts";
 
 const snapshot = { projects: [], workspaces: [], locations: [] };
 test("client requests and validates snapshots", async () => {
@@ -123,4 +123,25 @@ test("client requests worktree operations and suggestions", async () => {
 
   await api.removeWorktree("wsp_123", true);
   expect(calls.at(-1)?.url).toContain("/api/workspaces/wsp_123/worktree/remove");
+});
+
+test("client aborts a hung read instead of waiting forever", async () => {
+  // A mobile suspend or dropped QUIC stream can leave a fetch pending forever;
+  // the client must abort it and surface a retryable timeout, not spin.
+  const api = createWorkspaceApi(
+    (_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+    }),
+    { requestTimeoutMs: 20, mutationTimeoutMs: 20 },
+  );
+  await expect(api.snapshot()).rejects.toBeInstanceOf(WorkspaceApiError);
+  await expect(api.snapshot()).rejects.toMatchObject({ code: "timeout" });
+});
+
+test("client disables the timeout once a response resolves", async () => {
+  const api = createWorkspaceApi(
+    async () => Response.json(snapshot),
+    { requestTimeoutMs: 25 },
+  );
+  expect(await api.snapshot()).toEqual(snapshot);
 });

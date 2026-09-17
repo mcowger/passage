@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentCapabilities, AgentHistory, AgentSummary } from "../../shared/domain/agents.ts";
-import { loadAgentSession, type AgentSessionLoader } from "./AgentSessionPanel.tsx";
+import { loadAgentSession, loadAgentSessionWithRetry, type AgentSessionLoadResult, type AgentSessionLoader } from "./AgentSessionPanel.tsx";
 
 const summary = { id: "agt-1" } as unknown as AgentSummary;
 const history = { timeline: [] } as unknown as AgentHistory;
@@ -46,7 +46,7 @@ describe("loadAgentSession", () => {
 
   test("applies capabilities after history settles", async () => {
     const { calls, loader } = recordedLoader();
-    await loadAgentSession(loader);
+    expect(await loadAgentSession(loader)).toBe("loaded");
     expect(calls).toEqual(["summary", "history", "settled", "capabilities"]);
   });
 
@@ -60,13 +60,33 @@ describe("loadAgentSession", () => {
         capabilities: async () => capabilities,
       },
     });
-    await loadAgentSession(loader);
+    expect(await loadAgentSession(loader)).toBe("failed");
     expect(calls).toEqual(["error:history unavailable", "settled"]);
   });
 
   test("ignores results once the load is superseded", async () => {
     const { calls, loader } = recordedLoader({ isCurrent: () => false });
-    await loadAgentSession(loader);
+    expect(await loadAgentSession(loader)).toBe("superseded");
     expect(calls).toEqual([]);
+  });
+});
+
+describe("loadAgentSessionWithRetry", () => {
+  test("retries once after a failed attempt", async () => {
+    const results: AgentSessionLoadResult[] = ["failed", "loaded"];
+    const attempts: boolean[] = [];
+    await loadAgentSessionWithRetry(async (isInitial) => {
+      attempts.push(isInitial);
+      return results.shift()!;
+    }, true);
+    expect(attempts).toEqual([true, false]);
+  });
+
+  test("does not retry a loaded or superseded attempt", async () => {
+    for (const result of ["loaded", "superseded"] as const) {
+      let attempts = 0;
+      await loadAgentSessionWithRetry(async () => { attempts += 1; return result; }, false);
+      expect(attempts).toBe(1);
+    }
   });
 });
