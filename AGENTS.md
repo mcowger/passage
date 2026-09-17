@@ -9,7 +9,7 @@
 
 ## Product and runtime
 
-Passage is a single-user, trusted-LAN coding environment. A persistent Bun daemon owns filesystem and Git access, worktrees, SQLite metadata, PTYs, Pi processes, HTTP, and WebSockets. The React PWA is an attachable view; closing or suspending a browser must not stop daemon-owned work.
+Passage is a single-user, trusted-LAN coding environment. A persistent Bun daemon owns filesystem and Git access, worktrees, SQLite metadata, PTYs, Pi processes, HTTP, and WebSockets. The React PWA is an attachable view; closing or suspending the browser client (not a Passage canvas tab) must not stop daemon-owned work.
 
 - Use Bun end-to-end. Initial host support is Linux x64.
 - Pi is the only agent runtime. Pin behavior and fixtures to the verified Pi CLI (`0.85.1`); never rely on `latest` wire documentation without checking the pinned release.
@@ -27,6 +27,31 @@ Passage is a single-user, trusted-LAN coding environment. A persistent Bun daemo
 - All browser protocol payloads use Zod-defined, versioned envelopes with request IDs and per-subject sequences. Bound reads, history pages, files, diffs, process output, stderr, and replay buffers.
 - Mutations return fresh HTTP snapshots inline and broadcast invalidations over `/ws` per `docs/WS.md`. Never push content on the wire, add transports, or duplicate hub logic.
 
+## Resource lifecycle invariant
+
+There are no background processes that are not represented in the UI. A Passage
+canvas tab is the only UI representation of the resource it owns, and closing
+that tab tears the resource down in the same action:
+
+- **agent tab** → stop the `pi --mode rpc` process and archive the agent (daemon `archive()` calls `manager.stop()`), keeping its history
+- **terminal tab** → terminate the daemon-owned PTY shell
+- **preview tab** → stop the agent-browser session and remove the preview record
+
+Closing a tab must never leave a Pi process, PTY, WebSocket relay, or browser
+session alive with no UI to reach it. Every resource a user starts is reachable
+from exactly the tab that owns it.
+
+Durable history is not a process. Closing an agent tab stops the Pi process but
+must NOT delete, truncate, or rewrite the Pi JSONL session; history stays the
+authoritative record per `PI.md` and remains readable after the tab closes.
+Editors, diffs, explorer, changes, and overview are views over durable
+files/workspaces and leave those untouched, apart from the unsaved-editor
+confirmation.
+
+Scope: this governs explicit Passage canvas-tab closes, not client disconnect.
+Closing/suspending the browser or dropping its WebSocket must not stop
+daemon-owned work; that work continues until the owning tab is closed.
+
 ## Security and workspace rules
 
 - Resolve every filesystem and Git operation from a registered server-side canonical workspace root. Browser paths, labels, and displayed values are never authority; reject traversal and symlink escapes.
@@ -37,7 +62,7 @@ Passage is a single-user, trusted-LAN coding environment. A persistent Bun daemo
 
 ## UI implementation and verification
 
-- Preserve the workspace-first model: agents, terminals, editors, diffs, explorer, changes, and overview are peer workspace surfaces. Closing a pane closes only the view, never the underlying resource.
+- Preserve the workspace-first model: agents, terminals, editors, diffs, explorer, changes, and overview are peer workspace surfaces. Honor the resource lifecycle invariant above: closing a canvas tab ends the resource that owns it, and nothing runs un-represented behind a closed tab.
 - Use Tailwind CSS v4 via Bun's native bundler and `bun-plugin-tailwind` (configured in `bunfig.toml`). Do not add Vite, PostCSS configs, or external Tailwind watch processes.
 - Use shadcn/ui primitives (`src/web/components/ui/*`) configured via `components.json` and class merging via `cn()` in `src/web/lib/utils.ts`. Add new primitives with `bunx --bun shadcn@latest add <component>`.
 - Prefer ready-made shadcn primitives and compositions (first-party via `bunx --bun shadcn@latest add`, or compatible third-party shadcn distributions/registries) over hand-built controls. Before building custom dropdowns, popovers, dialogs, selects, checkboxes, radios, switches, tabs, tooltips, toasts, alerts, accordions, or command palettes, search for an existing shadcn primitive/composition (e.g. `command` + `popover` combobox, `alert-dialog`, `sonner`) and adopt it; keep custom code to domain rendering (CodeMirror, Xterm, transcripts, diffs) plus thin composition around primitives. Never reimplement focus trapping, portal rendering, outside-click dismissal, or keyboard navigation that Radix/shadcn already provides.
