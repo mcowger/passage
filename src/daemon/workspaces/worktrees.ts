@@ -1,6 +1,8 @@
 import { realpath, rm } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { workspaceSchema, type Workspace } from "../../shared/domain/workspaces.ts";
+import { WORKSPACE_SETUP_ACTION_ID, type WorkspaceActionRun } from "../../shared/domain/workspace-actions.ts";
+import { WorkspaceActionsService } from "./actions.ts";
 import { GitService } from "./git.ts";
 import type { MetadataRepositories } from "../metadata/repositories.ts";
 import { MetadataGenerator, type WorktreeSuggestion } from "./metadata-generator.ts";
@@ -19,11 +21,14 @@ const markerName = ".passage-worktree.json";
 const id = () => crypto.randomUUID();
 const inside = (root: string, path: string) => { const r = relative(root, path); return r === "" || (!r.split(/[\\/]/).includes("..") && !resolve(path).startsWith("..")); };
 
+export type CreateWorktreeResult = { workspace: Workspace; setup: WorkspaceActionRun | null };
+
 export class WorktreeService {
   constructor(
     private readonly repositories: MetadataRepositories,
     private readonly git = new GitService(),
     private readonly metadataGenerator = new MetadataGenerator(),
+    private readonly actions?: WorkspaceActionsService,
   ) {}
 
   async suggest(projectId: string, purpose: string, model?: string): Promise<WorktreeSuggestion> {
@@ -31,7 +36,7 @@ export class WorktreeService {
     if (!project || project.archivedAt) throw new WorktreeError("invalid-project", "Active project required");
     return this.metadataGenerator.suggest(purpose, project.canonicalRootPath, model);
   }
-  async create(projectId: string, locationId: string, ref: string, label: string, folder?: string, options?: { createBranch?: boolean; baseRef?: string }): Promise<Workspace> {
+  async create(projectId: string, locationId: string, ref: string, label: string, folder?: string, options?: { createBranch?: boolean; baseRef?: string }): Promise<CreateWorktreeResult> {
     const project = this.repositories.projects.get(projectId); if (!project || project.archivedAt) throw new WorktreeError("invalid-project", "Active project required");
     const location = this.repositories.worktreeLocations.get(locationId); if (!location || !location.enabled || (location.projectId && location.projectId !== projectId)) throw new WorktreeError("invalid-location", "An enabled worktree location is required. Configure one before creating a worktree.");
     if (!ref || ref.startsWith("-") || ref.includes("..")) throw new WorktreeError("invalid-ref", `Invalid Git ref "${ref}". Use an existing branch name, or choose "New branch" to create one.`);
@@ -69,7 +74,13 @@ export class WorktreeService {
         archivedAt: null,
       });
       this.repositories.workspaces.save(workspace);
-      return workspace;
+      // Auto-start the workspace setup action (paseo.json worktree.setup).
+      // Setup commands are commonly slow, so the run proceeds in the
+      // background; the run reference rides along in the response for the
+      // caller to poll. A setup failure never fails creation or deletes
+      // user work.
+      const setup = await this.startWorktreeSetup(workspace);
+      return { workspace, setup };
     } catch (error) {
       const repair = workspaceSchema.parse({
         id: workspaceId,
@@ -254,6 +265,17 @@ export class WorktreeService {
 
     this.repositories.workspaces.save(workspace);
     return workspace;
+  }
+
+  private async startWorktreeSetup(workspace: Workspace): Promise<WorkspaceActionRun | null> {
+    try {
+      const runner = this.actions ?? new WorkspaceActionsService(this.repositories);
+      if (runner.list(workspace.id).length === 0) return null;
+      return await runner.start(workspace.id, WORKSPACE_SETUP_ACTION_ID);
+    } catch (error) {
+      console.warn(`[worktree] setup action not started for workspace ${workspace.id}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
   }
 
   private async command(cwd: string, args: string[]): Promise<{ code: number; stderr: string }> {
