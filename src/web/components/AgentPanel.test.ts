@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { formatDuration, isComposerLocked, resolveActiveQuestionRequest, resolveCurrentModel, resolveStreamActive, TimelineRow } from "./AgentPanel.tsx";
+import { formatDuration, isComposerLocked, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 
 const modelOptions: AgentCapabilities["models"] = [
@@ -54,6 +54,20 @@ describe("resolveCurrentModel", () => {
       provider: "test",
       id: "old-model",
     });
+  });
+});
+
+describe("resolveCurrentThinking", () => {
+  test("prefers the persisted preference over stale history", () => {
+    expect(resolveCurrentThinking("low", "high")).toBe("low");
+  });
+
+  test("uses history when no thinking preference has been persisted", () => {
+    expect(resolveCurrentThinking(null, "high")).toBe("high");
+  });
+
+  test("falls back to default when neither preference nor history is known", () => {
+    expect(resolveCurrentThinking(null, undefined)).toBe("default");
   });
 });
 

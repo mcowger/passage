@@ -211,6 +211,13 @@ export function resolveCurrentModel(
   return historyModel ? findModel(historyModel.provider, historyModel.modelId) : undefined;
 }
 
+export function resolveCurrentThinking(
+  thinkingPreference: string | null,
+  historyThinkingLevel: AgentHistory["currentThinkingLevel"],
+) {
+  return thinkingPreference ?? historyThinkingLevel ?? "default";
+}
+
 export function resolveStreamActive(status: AgentSummary["status"]): boolean {
   return status === "running";
 }
@@ -310,7 +317,7 @@ export function AgentPanel({
   const model = effectiveHistory?.currentModel
     ? `${effectiveHistory.currentModel.provider}/${effectiveHistory.currentModel.modelId}`
     : agent.modelPreference ?? "model unavailable";
-  const thinking = effectiveHistory?.currentThinkingLevel ?? agent.thinkingPreference ?? "default";
+  const thinking = resolveCurrentThinking(agent.thinkingPreference, effectiveHistory?.currentThinkingLevel);
   const modelOptions = useMemo(
     () => capabilities?.models.filter((option) => option.authenticated) ?? [],
     [capabilities?.models]
