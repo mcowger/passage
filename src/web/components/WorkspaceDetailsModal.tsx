@@ -107,19 +107,19 @@ export function WorkspaceDetailsModal({
   return (
     <>
       <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
-        <DialogContent className="max-w-[560px] text-sm max-h-[calc(100dvh-2rem)] overflow-y-auto">
-          <DialogHeader>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs text-muted-foreground font-mono">{project.displayLabel}</span>
-              <span className="text-muted-foreground">/</span>
-              <DialogTitle className="text-base font-semibold">{workspace.displayLabel}</DialogTitle>
+        <DialogContent className="max-w-[min(560px,calc(100%-2rem))] text-sm max-h-[calc(100dvh-2rem)] overflow-y-auto overflow-x-hidden">
+          <DialogHeader className="min-w-0 pr-6">
+            <div className="flex items-center gap-2 mb-1 min-w-0 flex-wrap">
+              <span className="text-xs text-muted-foreground font-mono shrink-0">{project.displayLabel}</span>
+              <span className="text-muted-foreground shrink-0">/</span>
+              <DialogTitle className="text-base font-semibold min-w-0 [overflow-wrap:anywhere]">{workspace.displayLabel}</DialogTitle>
             </div>
-            <div className="flex items-center gap-2 pt-1 flex-wrap">
+            <div className="flex items-center gap-2 pt-1 flex-wrap min-w-0">
               <Badge variant="outline" className="text-xs font-mono">
                 {workspace.kind}
               </Badge>
               {workspace.branchRef && (
-                <Badge variant="secondary" className="text-xs font-mono">
+                <Badge variant="secondary" className="text-xs font-mono max-w-full min-w-0 shrink whitespace-normal text-left leading-snug [overflow-wrap:anywhere]">
                   ⎇ {workspace.branchRef}
                 </Badge>
               )}
@@ -160,8 +160,8 @@ export function WorkspaceDetailsModal({
                 </Button>
               </form>
             ) : (
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-muted-foreground min-w-0 break-words">
+              <div className="flex items-center justify-between gap-3 min-w-0">
+                <span className="text-xs text-muted-foreground min-w-0 flex-1 [overflow-wrap:anywhere]">
                   {isWorktree ? "Worktree" : "Workspace"} label: <b>{workspace.displayLabel}</b>
                 </span>
                 <Button size="xs" variant="outline" className="shrink-0" onClick={() => setEditing(true)}>
@@ -206,29 +206,29 @@ export function WorkspaceDetailsModal({
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
               Metadata & Paths
             </h4>
-            <dl className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-2 text-xs">
+            <dl className="grid grid-cols-[110px_1fr] sm:grid-cols-[140px_1fr] gap-x-3 gap-y-2 text-xs min-w-0">
               <dt className="text-muted-foreground">Project root</dt>
-              <dd className="font-mono break-words flex items-start gap-1">{project.canonicalRootPath}<CopyValueButton value={project.canonicalRootPath} label="project root path" /></dd>
+              <dd className="font-mono min-w-0 flex items-start gap-1"><span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{project.canonicalRootPath}</span><span className="shrink-0"><CopyValueButton value={project.canonicalRootPath} label="project root path" /></span></dd>
 
               <dt className="text-muted-foreground">Working directory</dt>
-              <dd className="font-mono break-words flex items-start gap-1">{workspace.cwd}<CopyValueButton value={workspace.cwd} label="working directory path" /></dd>
+              <dd className="font-mono min-w-0 flex items-start gap-1"><span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{workspace.cwd}</span><span className="shrink-0"><CopyValueButton value={workspace.cwd} label="working directory path" /></span></dd>
 
               <dt className="text-muted-foreground">Checkout root</dt>
-              <dd className="font-mono break-words flex items-start gap-1">{workspace.checkoutRoot ?? "Not applicable"}{workspace.checkoutRoot && <CopyValueButton value={workspace.checkoutRoot} label="checkout root path" />}</dd>
+              <dd className="font-mono min-w-0 flex items-start gap-1"><span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{workspace.checkoutRoot ?? "Not applicable"}</span>{workspace.checkoutRoot && <span className="shrink-0"><CopyValueButton value={workspace.checkoutRoot} label="checkout root path" /></span>}</dd>
 
               <dt className="text-muted-foreground">Main repository</dt>
-              <dd className="font-mono break-words flex items-start gap-1">{workspace.mainRepositoryRoot ?? "Not applicable"}{workspace.mainRepositoryRoot && <CopyValueButton value={workspace.mainRepositoryRoot} label="main repository path" />}</dd>
+              <dd className="font-mono min-w-0 flex items-start gap-1"><span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{workspace.mainRepositoryRoot ?? "Not applicable"}</span>{workspace.mainRepositoryRoot && <span className="shrink-0"><CopyValueButton value={workspace.mainRepositoryRoot} label="main repository path" /></span>}</dd>
 
               <dt className="text-muted-foreground">Branch ref</dt>
-              <dd className="font-mono break-words flex items-start gap-1">{workspace.branchRef ?? "None (directory)"}{workspace.branchRef && <CopyValueButton value={workspace.branchRef} label="branch ref" />}</dd>
+              <dd className="font-mono min-w-0 flex items-start gap-1"><span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{workspace.branchRef ?? "None (directory)"}</span>{workspace.branchRef && <span className="shrink-0"><CopyValueButton value={workspace.branchRef} label="branch ref" /></span>}</dd>
 
               <dt className="text-muted-foreground">Ownership</dt>
-              <dd>{workspace.ownershipState}</dd>
+              <dd className="min-w-0 [overflow-wrap:anywhere]">{workspace.ownershipState}</dd>
 
               {workspace.markerPath && (
                 <>
                   <dt className="text-muted-foreground">Marker path</dt>
-                  <dd className="font-mono break-words">{workspace.markerPath}</dd>
+                  <dd className="font-mono min-w-0 [overflow-wrap:anywhere]">{workspace.markerPath}</dd>
                 </>
               )}
             </dl>
@@ -239,19 +239,19 @@ export function WorkspaceDetailsModal({
       {/* Confirmation Dialog for Worktree Deletion */}
       {confirmRemove && (
         <Dialog open onOpenChange={(open) => { if (!open) { setConfirmRemove(false); setForceAvailable(false); } }}>
-          <DialogContent className="max-w-[440px]">
-            <DialogHeader>
-              <DialogTitle className="text-base font-semibold">Delete Git Worktree</DialogTitle>
+          <DialogContent className="max-w-[min(440px,calc(100%-2rem))] overflow-x-hidden">
+            <DialogHeader className="min-w-0 pr-6">
+              <DialogTitle className="text-base font-semibold [overflow-wrap:anywhere]">Delete Git Worktree</DialogTitle>
             </DialogHeader>
-            <p className="text-xs text-muted-foreground my-2">
-              Are you sure you want to permanently delete the worktree at <code className="font-mono text-xs">{workspace.cwd}</code> from disk?
+            <p className="text-xs text-muted-foreground my-2 min-w-0 [overflow-wrap:anywhere]">
+              Are you sure you want to permanently delete the worktree at <code className="font-mono text-xs [overflow-wrap:anywhere]">{workspace.cwd}</code> from disk?
             </p>
             {removeError && (
               <Alert variant="destructive" className="my-2">
                 <AlertDescription className="text-xs">{removeError}</AlertDescription>
               </Alert>
             )}
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-2 pt-2 flex-wrap">
               <Button size="xs" variant="secondary" onClick={() => { setConfirmRemove(false); setForceAvailable(false); }}>Cancel</Button>
               {forceAvailable && (
                 <Button size="xs" variant="destructive" onClick={() => handleRemoveWorktree(true)} disabled={busy}>
