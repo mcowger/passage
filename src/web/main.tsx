@@ -485,6 +485,11 @@ function App() {
     return countTabsOfKind(layout.root, "agent", new Set(agents.map((agent) => agent.id)));
   }, [layout, agents]);
 
+  const openTerminalCount = useMemo(() => {
+    if (!layout) return 0;
+    return countTabsOfKind(layout.root, "terminal", new Set(terminals.map((terminal) => terminal.id)));
+  }, [layout, terminals]);
+
   const openPreviewCount = useMemo(() => {
     if (!layout) return 0;
     return countTabsOfKind(layout.root, "preview", new Set(previews.map((preview) => preview.id)));
@@ -1287,47 +1292,101 @@ function App() {
                     {openAgentCount > 0 && <span className="tab-badge">{openAgentCount}</span>}
                   </button>
                 )}
-                <button
-                  className={`nav-tab ${activeTab === "terminal" ? "active" : ""}`}
-                  onClick={() => {
-                    const target = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
-                    if (target) {
-                      setSelectedTerminalId(target.id);
-                      setActiveTab("terminal");
-                      handleSelectTerminal(target.id);
-                    } else {
-                      const liveIds = new Set(terminals.map((t) => t.id));
-                      const deadTab = layout ? findFirstDeadTerminalTab(layout.root, liveIds) : null;
-                      if (deadTab) {
-                        setActiveTab("terminal");
-                        handleActivateTab(deadTab);
-                        if (layout) {
-                          const found = findTab(layout.root, deadTab.id);
-                          if (found) {
-                            handleLayoutChange({ ...layout, root: setActiveTabInTree(layout.root, found.node.id, deadTab.id) });
+                {isMobile ? (
+                  <>
+                    <button
+                      type="button"
+                      className={`nav-tab ${activeTab === "terminal" ? "active" : ""}`}
+                      aria-label="Go to terminal session"
+                      title="Go to terminal session"
+                      onClick={() => {
+                        const target = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
+                        if (target) {
+                          handleSelectTerminal(target.id);
+                        } else {
+                          const liveIds = new Set(terminals.map((t) => t.id));
+                          const deadTab = layout ? findFirstDeadTerminalTab(layout.root, liveIds) : null;
+                          if (deadTab) {
+                            setActiveTab("terminal");
+                            handleActivateTab(deadTab);
+                            if (layout) {
+                              const found = findTab(layout.root, deadTab.id);
+                              if (found) {
+                                handleLayoutChange({ ...layout, root: setActiveTabInTree(layout.root, found.node.id, deadTab.id) });
+                              }
+                            }
+                          } else {
+                            void createTerminal();
                           }
                         }
-                      } else {
-                        void createTerminal();
-                      }
-                    }
-                  }}
-                >
-                  &gt;_ Terminal {terminals.length > 0 && <span className="tab-badge">{terminals.length}</span>}
-                </button>
-                <button
-                  className={`nav-tab ${activeTab === "preview" ? "active" : ""}`}
-                  onClick={() => {
-                    const target = previews.find((p) => p.id === selectedPreviewId) ?? previews[0];
-                    if (target) {
-                      handleSelectPreview(target.id);
-                    } else {
-                      void createPreview();
-                    }
-                  }}
-                >
-                  ◉ Preview {openPreviewCount > 0 && <span className="tab-badge">{openPreviewCount}</span>}
-                </button>
+                      }}
+                    >
+                      &gt;_ Terminal
+                      {openTerminalCount > 0 && <span className="tab-badge">{openTerminalCount}</span>}
+                    </button>
+                    <button
+                      type="button"
+                      className="nav-tab"
+                      aria-label="Create new terminal"
+                      title="Create new terminal"
+                      onClick={() => void createTerminal()}
+                    >
+                      <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className={`nav-tab ${activeTab === "terminal" ? "active" : ""}`}
+                    aria-label="Create new terminal"
+                    title="Create new terminal"
+                    onClick={() => void createTerminal()}
+                  >
+                    &gt;_ Terminal <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    {openTerminalCount > 0 && <span className="tab-badge">{openTerminalCount}</span>}
+                  </button>
+                )}
+                {isMobile ? (
+                  <>
+                    <button
+                      type="button"
+                      className={`nav-tab ${activeTab === "preview" ? "active" : ""}`}
+                      aria-label="Go to web preview"
+                      title="Go to web preview"
+                      onClick={() => {
+                        const target = previews.find((p) => p.id === selectedPreviewId) ?? previews[0];
+                        if (target) {
+                          handleSelectPreview(target.id);
+                        } else {
+                          void createPreview();
+                        }
+                      }}
+                    >
+                      ◉ Preview
+                      {openPreviewCount > 0 && <span className="tab-badge">{openPreviewCount}</span>}
+                    </button>
+                    <button
+                      type="button"
+                      className="nav-tab"
+                      aria-label="Create new web preview"
+                      title="Create new web preview"
+                      onClick={() => void createPreview()}
+                    >
+                      <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className={`nav-tab ${activeTab === "preview" ? "active" : ""}`}
+                    aria-label="Create new web preview"
+                    title="Create new web preview"
+                    onClick={() => void createPreview()}
+                  >
+                    ◉ Preview <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    {openPreviewCount > 0 && <span className="tab-badge">{openPreviewCount}</span>}
+                  </button>
+                )}
                 <button
                   className={`nav-tab ${activeTab === "explorer" ? "active" : ""}`}
                   onClick={() => {
