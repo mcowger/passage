@@ -15,6 +15,14 @@ describe("renderComposerDraft", () => {
     expect(out).toContain("src/index.ts");
   });
 
+  test("renders skill refs as atomic composer mentions with a cap icon", () => {
+    const out = html("Try /skill:gh-cli for this");
+    expect(out).toContain("composer-skill-mention");
+    expect(out).toContain("data-composer-raw=\"/skill:gh-cli\"");
+    expect(out).toContain("<svg");
+    expect(out).toContain("/skill:gh-cli");
+  });
+
   test("keeps ordinary draft text ordinary", () => {
     expect(html("hello world")).toBe("<div>hello world</div>");
   });

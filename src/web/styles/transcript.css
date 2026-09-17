@@ -634,3 +634,27 @@ button.timeline-concise-badge {
   border: 0;
   padding: 0;
 }
+
+/* Skill-ref chip: display-time rendering of `/skill:name` refs in user
+ * message cards. Mirrors the file-ref chip with a graduation-cap icon. */
+.skill-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0 6px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  vertical-align: baseline;
+}
+.skill-ref-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  padding: 0;
+}

@@ -7,7 +7,9 @@ import {
 } from "react";
 import type { ClipboardEvent, KeyboardEvent, ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { GraduationCap } from "lucide-react";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
+import { cleanSkillRefToken, countSkillRefs, isSkillRefBoundary, splitSkillRefs } from "./skillRefs.ts";
 
 const FILE_REF_PATTERN = /@`([^`\n]{1,4096})`/g;
 const BLOCK_ELEMENTS = new Set(["DIV", "P", "LI"]);
@@ -98,23 +100,49 @@ export function renderComposerDraft(value: string): ReactNode[] {
   let last = 0;
   let match: RegExpExecArray | null;
   let key = 0;
+  const pushText = (text: string) => {
+    for (const segment of splitSkillRefs(text)) {
+      nodes.push(typeof segment === "string" ? segment : renderSkillMention(segment.skill, `composer-skill-${key++}`));
+    }
+  };
   FILE_REF_PATTERN.lastIndex = 0;
   while ((match = FILE_REF_PATTERN.exec(value)) !== null) {
-    if (match.index > last) nodes.push(value.slice(last, match.index));
+    if (match.index > last) pushText(value.slice(last, match.index));
     nodes.push(renderFileMention(match[1]!, `composer-file-${key++}`));
     last = match.index + match[0].length;
   }
-  if (last < value.length) nodes.push(value.slice(last));
+  if (last < value.length) pushText(value.slice(last));
   return nodes;
 }
 
+function renderSkillMention(token: string, key: string): ReactNode {
+  return (
+    <span
+      key={key}
+      className="composer-skill-mention"
+      data-composer-raw={token}
+      contentEditable={false}
+      title={token}
+      aria-label={`Skill command ${token}`}
+    >
+      <GraduationCap size={13} />
+      <code className="composer-skill-name">{token}</code>
+    </span>
+  );
+}
 function buildComposerDom(value: string): DocumentFragment {
   const fragment = document.createDocumentFragment();
+  const appendText = (text: string) => {
+    for (const segment of splitSkillRefs(text)) {
+      if (typeof segment === "string") fragment.append(document.createTextNode(segment));
+      else appendSkillMention(fragment, segment.skill);
+    }
+  };
   let last = 0;
   let match: RegExpExecArray | null;
   FILE_REF_PATTERN.lastIndex = 0;
   while ((match = FILE_REF_PATTERN.exec(value)) !== null) {
-    if (match.index > last) fragment.append(document.createTextNode(value.slice(last, match.index)));
+    if (match.index > last) appendText(value.slice(last, match.index));
     const path = match[1]!;
     const mention = document.createElement("span");
     mention.className = "composer-file-mention";
@@ -148,8 +176,28 @@ function buildComposerDom(value: string): DocumentFragment {
     fragment.append(mention);
     last = match.index + match[0].length;
   }
-  if (last < value.length) fragment.append(document.createTextNode(value.slice(last)));
+  if (last < value.length) appendText(value.slice(last));
   return fragment;
+}
+
+function appendSkillMention(parent: DocumentFragment, token: string): void {
+  const mention = document.createElement("span");
+  mention.className = "composer-skill-mention";
+  mention.dataset.composerRaw = token;
+  mention.contentEditable = "false";
+  mention.title = token;
+  mention.ariaLabel = `Skill command ${token}`;
+
+  const icon = document.createElement("span");
+  icon.className = "composer-skill-mention-icon";
+  icon.setAttribute("aria-hidden", "true");
+  mention.append(icon);
+
+  const name = document.createElement("span");
+  name.className = "composer-skill-name";
+  name.textContent = token;
+  mention.append(name);
+  parent.append(mention);
 }
 
 function mountComposerIcons(editor: HTMLElement, roots: Root[]): void {
@@ -161,6 +209,11 @@ function mountComposerIcons(editor: HTMLElement, roots: Root[]): void {
     const root = createRoot(icon);
     roots.push(root);
     root.render(<FileTypeIcon path={path} size={13} />);
+  });
+  editor.querySelectorAll<HTMLElement>(".composer-skill-mention-icon").forEach((icon) => {
+    const root = createRoot(icon);
+    roots.push(root);
+    root.render(<GraduationCap size={13} />);
   });
 }
 
@@ -345,7 +398,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
   useLayoutEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    const expectedMentions = [...value.matchAll(FILE_REF_PATTERN)].length;
+    const expectedMentions = [...value.matchAll(FILE_REF_PATTERN)].length + countSkillRefs(value);
     const actualMentions = editor.querySelectorAll("[data-composer-raw]").length;
     if (readComposerDraft(editor) !== value || actualMentions !== expectedMentions) {
       replaceEditorContent(editor);
@@ -420,12 +473,30 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
         replaceRange(offsets.start - match[0].length, offsets.end, "");
         return;
       }
+      // Skill chips delete atomically too; trailing punctuation belongs to
+      // the surrounding text, so only a token flush against the caret counts.
+      const skill = value.slice(0, offsets.start).match(/(?:^|[\s("'])(\/skill:[A-Za-z0-9_:.-]+)$/);
+      if (skill) {
+        const token = cleanSkillRefToken(skill[1]!);
+        if (value.slice(0, offsets.start).endsWith(token)) {
+          event.preventDefault();
+          replaceRange(offsets.start - token.length, offsets.end, "");
+          return;
+        }
+      }
     }
     if (offsets && offsets.start === offsets.end && event.key === "Delete") {
       const match = value.slice(offsets.start).match(/^@`[^`\n]{1,4096}`/);
       if (match) {
         event.preventDefault();
         replaceRange(offsets.start, offsets.end + match[0].length, "");
+        return;
+      }
+      const ahead = value.slice(offsets.start).match(/^\/skill:[A-Za-z0-9_:.-]+/);
+      if (ahead && isSkillRefBoundary(value, offsets.start)) {
+        const token = cleanSkillRefToken(ahead[0]);
+        event.preventDefault();
+        replaceRange(offsets.start, offsets.start + token.length, "");
         return;
       }
     }

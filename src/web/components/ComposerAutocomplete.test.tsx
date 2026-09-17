@@ -61,6 +61,18 @@ describe("renderFileRefs", () => {
     expect(out).toContain("y.ts");
   });
 
+  test("renders skill refs as chips with a cap icon", () => {
+    const out = html("try /skill:gh-cli now");
+    expect(out).toContain("skill-ref-chip");
+    expect(out).toContain("/skill:gh-cli");
+    expect(out).toContain("<svg");
+  });
+
+  test("leaves non-skill slash text and bare URLs untouched", () => {
+    expect(html("please run /unknown-command now")).toBe("<p>please run /unknown-command now</p>");
+    expect(html("see http://skill:x here")).toBe("<p>see http://skill:x here</p>");
+  });
+
   test("unknown slash input stays plain prompt text", () => {
     expect(html("please run /unknown-command now")).toBe("<p>please run /unknown-command now</p>");
   });

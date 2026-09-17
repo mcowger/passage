@@ -110,6 +110,38 @@
 .composer-file-mention .tool-path-name {
   font-weight: 650;
 }
+.composer-skill-mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  margin: 0 1px;
+  padding: 1px 5px;
+  background: var(--accent-subtle);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: 5px;
+  vertical-align: baseline;
+  line-height: 1.2;
+  user-select: all;
+}
+.composer-skill-mention svg {
+  flex: none;
+}
+.composer-skill-name {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.composer-autocomplete-skill-icon {
+  flex: none;
+  color: var(--muted);
+}
 .composer-error-alert {
   margin: 6px 0 2px;
   padding: 4px 8px;

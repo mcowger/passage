@@ -1,5 +1,6 @@
 import type { SlashCommand } from "../../shared/domain/agents.ts";
 import type { FileSearchEntry } from "../../shared/protocol/workspace.ts";
+import { GraduationCap } from "lucide-react";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { Popover, PopoverAnchor, PopoverContent } from "./ui/popover.tsx";
 import {
@@ -150,7 +151,11 @@ export function ComposerAutocomplete({
                         onSelect={() => onSelectCommand(command)}
                         className="composer-autocomplete-row"
                       >
-                        <span className="composer-autocomplete-slash" aria-hidden="true">/</span>
+                        {command.name.startsWith("skill:") ? (
+                          <GraduationCap size={14} aria-hidden="true" className="composer-autocomplete-skill-icon" />
+                        ) : (
+                          <span className="composer-autocomplete-slash" aria-hidden="true">/</span>
+                        )}
                         <span className="composer-autocomplete-path">
                           <code className="composer-command-name">{command.name}</code>
                           <span className="composer-command-desc">{command.description}</span>

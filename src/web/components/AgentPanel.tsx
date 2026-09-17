@@ -13,6 +13,7 @@ import { Button } from "./ui/button.tsx";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert.tsx";
 import { ToolRow } from "./ToolRow.tsx";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
+import { splitSkillRefs } from "./skillRefs.ts";
 import { ComposerAutocomplete, COMPOSER_SUGGESTION_LIST_ID } from "./ComposerAutocomplete.tsx";
 import { ComposerEditor, currentViewportIsMobileComposer, type ComposerEditorHandle } from "./ComposerEditor.tsx";
 import {
@@ -43,6 +44,7 @@ import {
   Plus,
   Pencil,
   Zap,
+  GraduationCap,
 } from "lucide-react";
 
 const STREAMING_STATS_INTERVAL_MS = 300;
@@ -653,15 +655,30 @@ export function truncateFileRefPath(path: string, maxLength = 64): string {
 
 const FILE_REF_PATTERN = /@`([^`\n]{1,4096})`/g;
 
-/** Render backticked `@`path`` refs as inline file chips at display time. */
+/** Render backticked `@`path`` refs as inline file chips and `/skill:name`
+ *  refs as skill chips (graduation cap) at display time. */
 export function renderFileRefs(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
+  let key = 0;
+  const pushText = (part: string) => {
+    for (const segment of splitSkillRefs(part)) {
+      if (typeof segment === "string") {
+        nodes.push(segment);
+      } else {
+        nodes.push(
+          <span key={`skill-ref-${key++}`} className="skill-ref-chip" title={segment.skill}>
+            <GraduationCap size={12} />
+            <code className="skill-ref-name">{segment.skill}</code>
+          </span>,
+        );
+      }
+    }
+  };
   let last = 0;
   let match: RegExpExecArray | null;
-  let key = 0;
   FILE_REF_PATTERN.lastIndex = 0;
   while ((match = FILE_REF_PATTERN.exec(text)) !== null) {
-    if (match.index > last) nodes.push(text.slice(last, match.index));
+    if (match.index > last) pushText(text.slice(last, match.index));
     const refPath = match[1]!;
     nodes.push(
       <span key={`file-ref-${key++}`} className="file-ref-chip" title={refPath}>
@@ -671,7 +688,7 @@ export function renderFileRefs(text: string): ReactNode[] {
     );
     last = match.index + match[0].length;
   }
-  if (last < text.length) nodes.push(text.slice(last));
+  if (last < text.length) pushText(text.slice(last));
   if (nodes.length === 0) nodes.push(text);
   return nodes;
 }
