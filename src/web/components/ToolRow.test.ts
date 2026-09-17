@@ -12,7 +12,6 @@ describe("getToolSummary", () => {
       name: "bash",
       input: { command: "bun test" },
       status: "complete",
-      significant: true,
     };
     const summary = getToolSummary(item);
     expect(summary.icon).toBe("command");
@@ -27,7 +26,6 @@ describe("getToolSummary", () => {
       name: "grep",
       input: { pattern: "const foo" },
       status: "complete",
-      significant: true,
     };
     const summary = getToolSummary(item);
     expect(summary.icon).toBe("search");
@@ -42,7 +40,6 @@ describe("getToolSummary", () => {
       name: "read",
       input: { filePath: "/tmp/test.ts" },
       status: "complete",
-      significant: true,
     };
     const summary = getToolSummary(item);
     expect(summary.icon).toBe("read");
@@ -57,7 +54,6 @@ describe("getToolSummary", () => {
       name: "edit",
       input: { filePath: "src/web/App.tsx", oldString: "a", newString: "b" },
       status: "complete",
-      significant: true,
     };
     const summary = getToolSummary(item);
     expect(summary.icon).toBe("edit");
@@ -73,7 +69,6 @@ describe("getToolSummary", () => {
       name: "find",
       input: { pattern: "src/web/components/*.tsx" },
       status: "complete",
-      significant: true,
     };
     const summary = getToolSummary(item);
     expect(summary.icon).toBe("search");
@@ -91,7 +86,6 @@ describe("ToolRow component", () => {
       input: { command: "agent-browser eval '1 + 1'" },
       result: "2",
       status: "complete",
-      significant: true,
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -115,7 +109,6 @@ describe("ToolRow component", () => {
         newString: "const greeting = 'world';",
       },
       status: "complete",
-      significant: true,
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -141,7 +134,6 @@ describe("ToolRow component", () => {
       input: { filePath: "src/types.ts" },
       result: "1: export type ID = string;\n2: export interface User {\n3:   id: ID;\n4: }",
       status: "complete",
-      significant: true,
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -165,7 +157,6 @@ describe("ToolRow component", () => {
       input: { pattern: "src/**/*.ts" },
       result: "src/daemon/index.ts\nsrc/daemon/http.ts\nsrc/web/main.tsx",
       status: "complete",
-      significant: true,
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -190,7 +181,6 @@ describe("ToolRow component", () => {
       result:
         "src/web/components/AgentPanel.tsx\nsrc/web/components/AgentSessionPanel.tsx\nsrc/web/components/ChangesPanel.tsx",
       status: "complete",
-      significant: true,
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -213,7 +203,6 @@ describe("ToolRow component", () => {
       input: { pattern: "myFunction", path: "src" },
       result: "src/index.ts:12:export function myFunction() {}\nsrc/utils.ts:50:myFunction();",
       status: "complete",
-      significant: true,
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -235,7 +224,6 @@ describe("ToolRow component", () => {
       input: { command: "cat package.json" },
       result: '{"name": "passage", "private": true}',
       status: "complete",
-      significant: true,
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -260,7 +248,6 @@ describe("ToolRow component", () => {
         content: [{ type: "text", text: "src/server.ts:47: port: number," }],
       } as any,
       status: "complete",
-      significant: true,
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -280,7 +267,6 @@ describe("ToolRow component", () => {
       name: "edit",
       input: { rawInput: "" },
       status: "running",
-      significant: true,
     } as any;
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -299,7 +285,6 @@ describe("ToolRow component", () => {
       name: "bash",
       input: { command: "sleep 30" },
       status: "running",
-      significant: true,
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -318,7 +303,6 @@ describe("ToolRow component", () => {
       name: "edit",
       input: { rawInput: '{"path":"src/a.ts","oldSt' },
       status: "running",
-      significant: true,
     } as any;
     expect(getToolSummary(edit).subtitle).toBe("src/a.ts");
 
@@ -328,7 +312,6 @@ describe("ToolRow component", () => {
       name: "bash",
       input: { rawInput: '{"command":"sleep' },
       status: "running",
-      significant: true,
     } as any;
     expect(getToolSummary(bash).subtitle).toBe("sleep");
   });
@@ -341,7 +324,6 @@ describe("ToolRow component", () => {
       input: { command: "echo test" },
       result: "[object Object]",
       status: "complete",
-      significant: true,
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(

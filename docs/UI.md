@@ -38,7 +38,7 @@ references, not UI assets to copy.
 | Desktop header | One compact contextual workspace bar. |
 | Sidebar | Rich operational project/workspace rows. Only the active workspace exposes child agent/terminal rows by default. |
 | Agent transcript | Hybrid: subtle user card, document-like assistant response, compact thinking/tool trace. |
-| Tool density | Detailed is the per-agent default: every tool is a compact row. A session-local Concise mode groups sequential activity. |
+| Tool density | Every tool is a compact row; per-session Display Options control expansion. |
 | Tool row | Semantic icon, friendly verb, one-line target, outcome, and duration before expansion. |
 | Statistics | Compact header on each assistant turn; agent header adds live model/status summary. |
 | Artifacts | Inline concise previews first; large/interactable artifacts open in a dedicated panel. |
@@ -439,18 +439,14 @@ Each row has:
 Raw JSON is never the closed-row preview. Unknown/custom tools use the same
 grammar with their safe generic renderer.
 
-The per-agent **Detailed / Concise** toggle is stored for that agent/session
-only. It is visible in the agent header or overflow at compact widths:
+Display Options in the composer toolbar control per-session expansion for
+thinking and tools (`always` / `latest` / `none`). Overrides apply to the
+current session only and can be reset to the workspace defaults.
 
-- **Detailed** (default): individual compact rows remain visible.
-- **Concise**: adjacent non-significant tools become a process group such as
-  `Explored 8 files · ran 3 commands · edited 2 files`. Expand it to recover
-  the same rows and all details.
-
-Expansion state for thinking, tools, and process groups is remembered for the
+Expansion state for thinking and tools is remembered for the
 current agent/session. It does not globally change other agents or sessions.
 Errors, edit summaries, permission/attention items, and important image/artifact
-results remain prominent boundaries in both modes.
+results remain prominent boundaries.
 
 ### Inline artifact escalation
 
@@ -697,7 +693,7 @@ The UI is ready for MVP beta when:
 2. Returning to a workspace returns to its canvas and most relevant agent
    without leaking inspector tabs from a different worktree.
 3. A detailed agent trace is transparent without making the final answer hard
-   to read; Concise mode reduces sequential activity without hiding errors.
+   to read; per-session expansion keeps sequential activity readable without hiding errors.
 4. A tool row is useful before expansion and renders custom/unknown tools
    gracefully.
 5. File/diff previews explain an agent action inline, while live terminals and

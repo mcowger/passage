@@ -67,7 +67,6 @@ export const toolMatcherSchema = z.object({
   icon: z.string().min(1).max(32).optional(),
   summaryTemplate: z.string().min(1).max(256).optional(),
   category: z.enum(["file", "git", "command", "agent", "search", "generic"]).default("generic"),
-  showInConcise: z.boolean().default(true),
 });
 export type ToolMatcher = z.infer<typeof toolMatcherSchema>;
 
@@ -284,12 +283,12 @@ export const BUILTIN_TOOL_RENDERERS: ToolRendererPack = {
   id: "builtin",
   name: "Default Tool Renderers",
   matchers: [
-    { toolName: "read", displayName: "Read", icon: "📖", category: "file", showInConcise: true },
-    { toolName: "edit", displayName: "Edit", icon: "✏️", category: "file", showInConcise: true },
-    { toolName: "write", displayName: "Write", icon: "📝", category: "file", showInConcise: true },
-    { toolName: "bash", displayName: "Ran", icon: "⚡", category: "command", showInConcise: true },
-    { toolName: "glob", displayName: "Search files", icon: "🔍", category: "search", showInConcise: true },
-    { toolName: "grep", displayName: "Search text", icon: "🔎", category: "search", showInConcise: true },
-    { toolName: "git", displayName: "Git", icon: "±", category: "git", showInConcise: true },
+    { toolName: "read", displayName: "Read", icon: "📖", category: "file" },
+    { toolName: "edit", displayName: "Edit", icon: "✏️", category: "file" },
+    { toolName: "write", displayName: "Write", icon: "📝", category: "file" },
+    { toolName: "bash", displayName: "Ran", icon: "⚡", category: "command" },
+    { toolName: "glob", displayName: "Search files", icon: "🔍", category: "search" },
+    { toolName: "grep", displayName: "Search text", icon: "🔎", category: "search" },
+    { toolName: "git", displayName: "Git", icon: "±", category: "git" },
   ],
 };

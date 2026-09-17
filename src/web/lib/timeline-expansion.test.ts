@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   resolveCanonicalTool,
   computeLatestTimelineIds,
-  collectExpandedIds,
   isItemExpanded,
 } from "./timeline-expansion.ts";
 import { DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
@@ -63,7 +62,6 @@ describe("computeLatestTimelineIds", () => {
         name: "read",
         input: { path: "a.ts" },
         status: "complete",
-        significant: false,
       },
       { kind: "thinking", id: "think-2", text: "Second thought" },
       {
@@ -72,7 +70,6 @@ describe("computeLatestTimelineIds", () => {
         name: "readFile",
         input: { path: "b.ts" },
         status: "complete",
-        significant: false,
       },
       {
         kind: "tool",
@@ -80,7 +77,6 @@ describe("computeLatestTimelineIds", () => {
         name: "bash",
         input: { command: "ls" },
         status: "complete",
-        significant: true,
       },
     ];
 
@@ -137,7 +133,6 @@ describe("isItemExpanded", () => {
       name: "write",
       input: null,
       status: "complete",
-      significant: true,
     };
     expect(isItemExpanded(write1, settings, latestIds)).toBe(true);
   });
@@ -149,7 +144,6 @@ describe("isItemExpanded", () => {
       name: "edit",
       input: null,
       status: "complete",
-      significant: true,
     };
     expect(isItemExpanded(edit2, settings, latestIds)).toBe(false);
   });
@@ -162,7 +156,6 @@ describe("isItemExpanded", () => {
       input: null,
       status: "error",
       error: "Write failed",
-      significant: true,
     };
     expect(isItemExpanded(editError, settings, latestIds)).toBe(true);
   });
@@ -174,7 +167,6 @@ describe("isItemExpanded", () => {
       name: "edit",
       input: null,
       status: "running",
-      significant: true,
     };
     expect(isItemExpanded(editRunning, settings, latestIds)).toBe(true);
   });
@@ -186,7 +178,6 @@ describe("isItemExpanded", () => {
       name: "edit",
       input: null,
       status: "complete",
-      significant: true,
     };
     // Setting is 'none', but user explicitly clicked open
     expect(isItemExpanded(edit2, settings, latestIds, { "tool-edit-2": true })).toBe(true);
@@ -197,69 +188,16 @@ describe("isItemExpanded", () => {
       name: "write",
       input: null,
       status: "complete",
-      significant: true,
     };
     // Setting is 'always', but user explicitly collapsed it
     expect(isItemExpanded(write1, settings, latestIds, { "tool-write-1": false })).toBe(false);
   });
 
-  test("concise mode collapses items unless manually toggled or error", () => {
-    const write1: ToolActivity = {
-      kind: "tool",
-      id: "tool-write-1",
-      name: "write",
-      input: null,
-      status: "complete",
-      significant: true,
-    };
-    expect(isItemExpanded(write1, settings, latestIds, {}, true)).toBe(false);
-
-    // Error still expands in concise mode
-    const writeErr: ToolActivity = {
-      kind: "tool",
-      id: "tool-write-err",
-      name: "write",
-      input: null,
-      status: "error",
-      significant: true,
-    };
-    expect(isItemExpanded(writeErr, settings, latestIds, {}, true)).toBe(true);
-  });
-
-  test("stickyExpandedIds keeps a row expanded once it is no longer 'latest'", () => {
-    const edit1: ToolActivity = { kind: "tool", id: "tool-edit-1", name: "edit", input: null, status: "complete", significant: true };
-    // Not latest (latestIds points at tool-edit-2), so it would normally collapse.
-    expect(isItemExpanded(edit1, settings, latestIds)).toBe(false);
-    expect(isItemExpanded(edit1, settings, latestIds, {}, false, new Set(["tool-edit-1"]))).toBe(true);
-  });
-});
-
-describe("collectExpandedIds", () => {
-  test("never removes a previously expanded id when a newer 'latest' row supersedes it", () => {
-    const settings = {
-      ...DEFAULT_TIMELINE_EXPANSION,
-      tools: { ...DEFAULT_TIMELINE_EXPANSION.tools, edit: "latest" as const },
-    };
-    const edit1: ToolActivity = { kind: "tool", id: "e1", name: "edit", input: null, status: "complete", significant: true };
-    const edit2: ToolActivity = { kind: "tool", id: "e2", name: "edit", input: null, status: "running", significant: true };
-
-    // First render: only e1 exists and is latest, so it renders expanded and becomes sticky.
-    const afterFirst = collectExpandedIds([edit1], settings, computeLatestTimelineIds([edit1]), {}, false, new Set());
-    expect(afterFirst.has("e1")).toBe(true);
-
-    // Second render: e2 starts running (now latest); e1 must stay expanded even
-    // though 'latest' mode would otherwise collapse it -- this is what keeps a
-    // finished tool from shrinking above the viewport while a new one streams in.
-    const afterSecond = collectExpandedIds([edit1, edit2], settings, computeLatestTimelineIds([edit1, edit2]), {}, false, afterFirst);
-    expect(afterSecond.has("e1")).toBe(true);
-    expect(afterSecond.has("e2")).toBe(true);
-  });
-
-  test("returns the same set instance when nothing new became expanded", () => {
-    const settings = DEFAULT_TIMELINE_EXPANSION;
-    const read1: ToolActivity = { kind: "tool", id: "r1", name: "read", input: null, status: "complete", significant: false };
-    const previous = collectExpandedIds([read1], settings, computeLatestTimelineIds([read1]), {}, false, new Set());
-    const again = collectExpandedIds([read1], settings, computeLatestTimelineIds([read1]), {}, false, previous);
-    expect(again).toBe(previous);
+  test("a superseded 'latest' row collapses once a newer row arrives", () => {
+    const read1: ToolActivity = { kind: "tool", id: "tool-read-1", name: "read", input: null, status: "complete" };
+    const read2: ToolActivity = { kind: "tool", id: "tool-read-2", name: "read", input: null, status: "complete" };
+    // latestIds points at tool-read-2, so the older row stays collapsed.
+    expect(isItemExpanded(read1, settings, latestIds)).toBe(false);
+    expect(isItemExpanded(read2, settings, latestIds)).toBe(true);
   });
 });

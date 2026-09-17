@@ -82,7 +82,7 @@ describe("Pi history projection", () => {
     expect(history).toMatchObject({ leafId: "metadata", leafInferred: true });
   });
 
-  test("groups only completed non-significant tools and preserves errors and user boundaries", () => {
+  test("projects completed tools and preserves errors and user boundaries", () => {
     const source = [
       line(header),
       line({ type: "message", id: "a1", parentId: null, timestamp: "t", message: { role: "assistant", content: [
@@ -97,7 +97,7 @@ describe("Pi history projection", () => {
     ].join("");
     const history = parsePiJsonl(source, revision(source));
     expect(history.timeline.some((item) => item.kind === "tool" && item.status === "error")).toBe(true);
-    expect(history.timeline.some((item) => item.kind === "tool" && item.significant)).toBe(true);
+    expect(history.timeline.some((item) => item.kind === "tool" && item.status === "complete")).toBe(true);
     expect(history.timeline.at(-1)?.kind).toBe("user");
   });
 
@@ -222,7 +222,7 @@ describe("Pi history projection", () => {
     expect(history.timeline.at(-1)).toMatchObject({ kind: "assistant", text: "File created and verified." });
   });
 
-  test("projects unknown model tools as non-significant generic activities", () => {
+  test("projects unknown model tools as generic activities", () => {
     // Mirrors the NullModel `tool_calls` persona shape (get_weather and friends):
     // Pi records the call, Passage renders it through the safe generic card.
     const source = [
@@ -234,6 +234,6 @@ describe("Pi history projection", () => {
     ].join("");
     const history = parsePiJsonl(source, revision(source));
     const tool = history.timeline.filter((item) => item.kind === "tool").find((item) => item.name === "get_weather");
-    expect(tool).toMatchObject({ status: "complete", significant: false, result: "sunny" });
+    expect(tool).toMatchObject({ status: "complete", result: "sunny" });
   });
 });

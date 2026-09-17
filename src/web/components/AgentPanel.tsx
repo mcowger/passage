@@ -10,7 +10,7 @@ import { subscribeWorkspace } from "../workspaceSocket.ts";
 import type { GitStatus } from "../../shared/domain/git.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { DisplayOptionsPopover } from "./DisplayOptionsPopover.tsx";
-import { collectExpandedIds, computeLatestTimelineIds, isItemExpanded, type LatestTimelineIds } from "../lib/timeline-expansion.ts";
+import { computeLatestTimelineIds, isItemExpanded, type LatestTimelineIds } from "../lib/timeline-expansion.ts";
 import { hasFileDrag } from "../lib/image-drop.ts";
 import { Streamdown } from "streamdown";
 import { Button } from "./ui/button.tsx";
@@ -447,8 +447,6 @@ export function AgentPanel({
   onWorkspaceDeleted,
 }: AgentPanelProps) {
   const effectiveHistory = previewHistory ?? history;
-  const conciseKey = `passage:agent:${agent.id}:concise`;
-  const [concise, setConcise] = useState(() => localStorage.getItem(conciseKey) === "true");
   const [sessionExpansion, setSessionExpansion] = useState<TimelineExpansionSettings>(
     () => settings?.timelineExpansion ?? DEFAULT_TIMELINE_EXPANSION
   );
@@ -637,10 +635,6 @@ export function AgentPanel({
     scrollToBottomIfPinned();
   });
 
-  useEffect(() => {
-    setConcise(localStorage.getItem(conciseKey) === "true");
-  }, [conciseKey]);
-
   const model = effectiveHistory?.currentModel
     ? `${effectiveHistory.currentModel.provider}/${effectiveHistory.currentModel.modelId}`
     : agent.modelPreference ?? "model unavailable";
@@ -672,12 +666,7 @@ export function AgentPanel({
     [timeline, questionRequest]
   );
 
-  const [stickyExpandedIds, setStickyExpandedIds] = useState<ReadonlySet<string>>(new Set());
-  useEffect(() => {
-    setStickyExpandedIds((previous) =>
-      collectExpandedIds(effectiveHistory?.timeline ?? [], sessionExpansion, latestIds, manualToggles, concise, previous)
-    );
-  }, [effectiveHistory?.timeline, sessionExpansion, latestIds, manualToggles, concise]);
+
 
   const handleRespondUi = async (result: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) => {
     try {
@@ -720,11 +709,9 @@ export function AgentPanel({
                   item={item}
                   agentId={agent.id}
                   api={api}
-                  concise={concise}
                   expansion={sessionExpansion}
                   latestIds={latestIds}
                   manualToggles={manualToggles}
-                  stickyExpandedIds={stickyExpandedIds}
                   onToggleManual={(id, open) => {
                     setManualToggles((prev) => ({ ...prev, [id]: open }));
                   }}
@@ -1559,11 +1546,9 @@ export interface TimelineRowProps {
   item: TimelineItem;
   agentId: string;
   api: WorkspaceApi;
-  concise: boolean;
   expansion?: TimelineExpansionSettings;
   latestIds?: LatestTimelineIds;
   manualToggles?: Record<string, boolean>;
-  stickyExpandedIds?: ReadonlySet<string>;
   onToggleManual?: (id: string, open: boolean) => void;
 }
 
@@ -1571,26 +1556,14 @@ export const TimelineRow = memo(function TimelineRow({
   item,
   agentId,
   api,
-  concise,
   expansion = DEFAULT_TIMELINE_EXPANSION,
   latestIds = { latestToolIds: {} },
   manualToggles = {},
-  stickyExpandedIds,
   onToggleManual,
 }: TimelineRowProps) {
   if (item.kind === "unknown") return <article className="timeline-row unknown"><strong>Unknown activity</strong><code>{item.entryType}</code></article>;
   if (item.kind === "tool") {
-    const isExpanded = isItemExpanded(item, expansion, latestIds, manualToggles, concise, stickyExpandedIds);
-    if (concise && !item.significant && item.status !== "error") {
-      return (
-        <ToolRow
-          item={item}
-          conciseBadge
-          open={isExpanded}
-          onOpenChange={(open) => onToggleManual?.(item.id, open)}
-        />
-      );
-    }
+    const isExpanded = isItemExpanded(item, expansion, latestIds, manualToggles);
     return (
       <ToolRow
         item={item}
@@ -1600,7 +1573,7 @@ export const TimelineRow = memo(function TimelineRow({
     );
   }
   if (item.kind === "thinking") {
-    const isExpanded = isItemExpanded(item, expansion, latestIds, manualToggles, concise, stickyExpandedIds);
+    const isExpanded = isItemExpanded(item, expansion, latestIds, manualToggles);
     const preview = formatThinkingPreview(item.text);
     return (
       <details

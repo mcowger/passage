@@ -81,7 +81,6 @@ export type ToolActivity = {
   input: JsonValue;
   result?: string;
   status: "running" | "complete" | "error";
-  significant: boolean;
   error?: string;
 };
 
@@ -157,7 +156,6 @@ const toolActivitySchema = z.object({
   input: protocolPayloadSchema,
   result: z.string().optional(),
   status: z.enum(["running", "complete", "error"]),
-  significant: z.boolean(),
   error: z.string().optional(),
 }).strict();
 

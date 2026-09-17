@@ -142,7 +142,6 @@ describe("TimelineRow", () => {
       React.createElement(TimelineRow, {
         agentId: "agt-test",
         api: stubApi,
-        concise: false,
         item: { kind: "assistant", id: "turn-1:terminal", text: "Request was aborted", error: "Request was aborted" },
       }),
     );
@@ -160,7 +159,6 @@ describe("TimelineRow", () => {
       React.createElement(TimelineRow, {
         agentId: "agt-test",
         api: stubApi,
-        concise: false,
         item: { kind: "thinking", id: "think-2", text: "Latest thinking" },
         expansion: {
           thinking: "latest",
@@ -184,7 +182,6 @@ describe("TimelineRow", () => {
       React.createElement(TimelineRow, {
         agentId: "agt-test",
         api: stubApi,
-        concise: false,
         item: { kind: "thinking", id: "think-1", text: "Older thinking" },
         expansion: {
           thinking: "latest",
@@ -210,7 +207,6 @@ describe("TimelineRow", () => {
       React.createElement(TimelineRow, {
         agentId: "agt-test",
         api: stubApi,
-        concise: false,
         item: {
           kind: "user",
           id: "u-images",
@@ -229,7 +225,6 @@ describe("TimelineRow", () => {
       React.createElement(TimelineRow, {
         agentId: "agt-test",
         api: stubApi,
-        concise: false,
         item: {
           kind: "user",
           id: "optimistic-pending",
@@ -247,7 +242,6 @@ describe("TimelineRow", () => {
       React.createElement(TimelineRow, {
         agentId: "agt-test",
         api: stubApi,
-        concise: false,
         item: { kind: "error", id: "err-1", text: "Pi process exited (1)" },
         expansion: {
           thinking: "latest",
@@ -378,8 +372,8 @@ describe("resolveActiveQuestionRequest", () => {
 
   test("hides a blocking tool row while Pi's native dialog is open", () => {
     const timeline: TimelineItem[] = [
-      { kind: "tool", id: "question-tool", name: "ask_user_question", input: {}, status: "running", significant: true },
-      { kind: "tool", id: "read-tool", name: "read", input: {}, status: "running", significant: true },
+      { kind: "tool", id: "question-tool", name: "ask_user_question", input: {}, status: "running" },
+      { kind: "tool", id: "read-tool", name: "read", input: {}, status: "running" },
       { kind: "assistant", id: "assistant", text: "Waiting for your answer" },
     ];
 

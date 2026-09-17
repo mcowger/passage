@@ -98,10 +98,6 @@ function usageTotalTokens(value: unknown): number {
   return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
 }
 
-function isSignificantTool(name: string): boolean {
-  return /edit|write|patch|test|image|artifact|permission|git|diff/i.test(name);
-}
-
 function activeEntryIds(entries: ObjectValue[], leafId?: string): Set<string> {
   const byId = new Map(entries.map((entry) => [string(entry.id), entry]).filter((pair): pair is [string, ObjectValue] => pair[0] !== undefined));
   const active = new Set<string>();
@@ -187,7 +183,6 @@ function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "s
             input: null,
             result,
             status: message?.isError === true ? "error" : "complete",
-            significant: isSignificantTool(name),
             ...(message?.isError === true ? { error: result || "Tool failed" } : {}),
           });
         }
@@ -228,7 +223,6 @@ function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "s
             name,
             input: safeJson(block.arguments),
             status: "running",
-            significant: isSignificantTool(name),
           };
           tools.set(toolId, tool);
           timeline.push(tool);

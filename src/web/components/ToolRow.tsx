@@ -709,44 +709,17 @@ function isGlobLikeSearch(name: string): boolean {
 
 export interface ToolRowProps {
   item: Extract<TimelineItem, { kind: "tool" }>;
-  conciseBadge?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
 
-function ToolRowInner({ item, conciseBadge, open, onOpenChange }: ToolRowProps) {
+function ToolRowInner({ item, open, onOpenChange }: ToolRowProps) {
   const { icon, title, subtitle, isPath } = getToolSummary(item);
   const effectiveInput = getEffectiveToolInput(item);
   const diff = getToolDiff({ name: item.name, input: effectiveInput }) ?? getToolDiff(item);
   const effectivePath = String(effectiveInput.path ?? effectiveInput.filePath ?? effectiveInput.filename ?? "");
   const filePath = subtitle || effectivePath || undefined;
   const isRunning = item.status === "running";
-
-  if (conciseBadge) {
-    return (
-      <Collapsible
-        className={`tool-row concise ${item.status}`}
-        open={open}
-        onOpenChange={onOpenChange}
-      >
-        <CollapsibleTrigger className="timeline-concise-badge" title={`${title}${subtitle ? ` ${subtitle}` : ""} — expand for details`}>
-          {isRunning ? <Spinner className="size-3 text-muted-foreground" /> : null}
-          <span className="timeline-concise-title"><ToolIcon kind={icon} /> {title}</span>
-          {subtitle && isPath ? renderPathWithIcon(subtitle) : subtitle ? <code title={subtitle}>{subtitle}</code> : null}
-          {diff && (diff.additions > 0 || diff.deletions > 0) && (
-            <span className="tool-diff-stats" aria-label={`${diff.additions} additions, ${diff.deletions} deletions`}>
-              <span className="tool-diff-stat-add">+{diff.additions}</span>
-              <span className="tool-diff-stat-sep">/</span>
-              <span className="tool-diff-stat-del">-{diff.deletions}</span>
-            </span>
-          )}
-        </CollapsibleTrigger>
-        <CollapsibleContent forceMount>
-          <ToolExpandedBody item={item} diff={diff} filePath={filePath} />
-        </CollapsibleContent>
-      </Collapsible>
-    );
-  }
 
   return (
     <Collapsible

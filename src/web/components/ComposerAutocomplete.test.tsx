@@ -87,7 +87,6 @@ describe("TimelineRow user card", () => {
       React.createElement(TimelineRow, {
         agentId: "agt-test",
         api: stubApi,
-        concise: false,
         item: { kind: "user", id: "u1", text: "review @`src/index.ts` please" },
       }),
     );

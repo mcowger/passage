@@ -203,7 +203,7 @@ export class TranscriptState {
     const existing = this.findToolRow(toolCallId);
     const base: ToolActivity = existing && existing.kind === "tool"
       ? existing
-      : { kind: "tool", id: toolCallId, name: patch.name || "tool", input: null, status: "running", significant: true };
+      : { kind: "tool", id: toolCallId, name: patch.name || "tool", input: null, status: "running" };
     const next: ToolActivity = {
       ...base,
       ...patch,

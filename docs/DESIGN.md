@@ -65,8 +65,8 @@ Persistent Bun daemon
    broken ownership records are part of the same model.
 3. Make Pi the only agent system and retain its history as the source of truth.
 4. Render agent work transparently by default: every tool appears as a compact
-   expandable row, with per-agent Concise hiding and per-session
-   always/latest/none expansion for thinking and per-tool output.
+   expandable row, with per-session always/latest/none expansion for
+   thinking and per-tool output.
 5. Support a real interactive terminal, file editor, Git diff view, and live
    web preview in the same workspace canvas.
 6. Work well in a browser, including a phone PWA, without pretending a phone
@@ -242,7 +242,7 @@ desktop Enter-to-send becomes newline-insert on mobile.
 | Checked-out files and Git state | Filesystem and Git | Git CLI calculates status, worktree state, and diffs. |
 | Live Pi RPC and PTY processes, preview sessions, action runs | Daemon memory | Process lifetime is independent of a browser connection and ends on daemon restart. Action runs and preview runtime (ports, PIDs, frames, leases) are never in SQLite. |
 | Passage object identity, workspace policy, layout, labels, settings, preview metadata | Local SQLite | Small, migration-versioned registry (schema version 1); no transcript duplication. |
-| Browser drafts and ephemeral view state | Browser local storage / memory | Per-agent drafts, per-agent concise flag (`passage:agent:<id>:concise`), and timeline expansion overrides. Disposable. |
+| Browser drafts and ephemeral view state | Browser local storage / memory | Per-agent drafts and timeline expansion overrides. Disposable. |
 
 ### SQLite records
 
@@ -569,12 +569,10 @@ window occupancy) ride alongside.
 
 Presentation: thinking is a compact disclosure collapsed after completion with
 on-demand body load; tool call + result is one row (input shown only after
-streamed JSON completes); per-agent Concise (`localStorage`, hides
-non-significant non-error tools) plus per-session `timelineExpansion`
+streamed JSON completes); per-session `timelineExpansion`
 (`always`/`latest`/`none` for thinking, each baseline tool
 `read/write/edit/bash/find/grep/ls`, and other tools; defaults `latest`)
-controls disclosure; significant activities (edits, permission/attention,
-failures, images) stay prominent. Errors render as labeled alerts naming Pi
+controls disclosure. Errors render as labeled alerts naming Pi
 where appropriate. Streaming shows live token estimates (tokens, tok/s,
 elapsed from `runStartedAt`) with pinned-to-bottom autoscroll that yields to
 manual scroll. Coalescing is a presentation projection only: it never alters
@@ -588,10 +586,10 @@ The single builtin pack (`builtin` / `Default Tool Renderers`) registers:
 
 - `read` (Read, file), `edit` (Edit, file), `write` (Write, file),
   `bash` (Ran, command), `glob` (Search files, search), `grep` (Search
-  text, search), `git` (Git, git) — all `showInConcise: true`.
+  text, search), `git` (Git, git).
 
-The schema additionally supports `summaryTemplate`, `category`
-(`file`/`git`/`command`/`agent`/`search`/`generic`), and significance.
+The schema additionally supports `summaryTemplate` and `category`
+(`file`/`git`/`command`/`agent`/`search`/`generic`).
 Declarative packs may choose labels, target fields, result fields, path links,
 status mapping, and significance; they cannot render arbitrary HTML or execute
 code. Unknown tools always retain the generic fallback rather than becoming
@@ -746,8 +744,8 @@ Four builtin themes ship (`passage-light` default warm light,
 `terminalBackground/Foreground`, `editorBackground`). Three builtin font packs
 ship (`system-default`, `fira-code`, `jetbrains-mono`) as font-family strings
 only — no remote stylesheets. Per-workspace settings (`workspaceSettingsSchema`
-v1): `themeId`, `fontId`, `toolRendererPackId`, `agentActivityDetail`
-(`concise` default / `detailed`), `notificationsEnabled`, `editorWordWrap`
+v1): `themeId`, `fontId`, `toolRendererPackId`,
+`notificationsEnabled`, `editorWordWrap`
 (default true), `editorTabSize` (default 2), `terminalFontSize` (default 13),
 `suggestModel` (empty = Pi default), `timelineExpansion`
 (thinking/tools-baseline/otherTools, each `always`/`latest`/`none`, defaults
@@ -828,7 +826,7 @@ user telemetry.
 | Worktree cleanup deletes user work | Explicit ownership persisted, required for deletion, dirty removal force-gated, branches preserved, failures become `repair` records. |
 | Pi upgrades break rendering | Isolated RPC framing/normalization + JSONL parsing, pinned CLI, compatibility fixtures, `SLASH_COMMANDS_VERSION = pi-rpc-1`. |
 | Rich custom tools become a plugin-security problem | Safe read-only builtin renderer pack + generic fallback; no executable plugin API. |
-| Large histories/diffs freeze the UI | Server limits/paging (500 timeline rows/page, 20KB action chunks), lazy thinking, scroll backfill with position restore, process hiding via concise/expansion, oversize fallbacks. |
+| Large histories/diffs freeze the UI | Server limits/paging (500 timeline rows/page, 20KB action chunks), lazy thinking, scroll backfill with position restore, process hiding via expansion, oversize fallbacks. |
 | Pane canvas overwhelms mobile | Persist the full layout but render one focused panel with drawer + full-screen destinations on narrow screens. |
 
 ## Consistency checklist
@@ -849,5 +847,5 @@ When changing Passage, keep these invariants intact:
    takeover only, never focus-steal.
 6. Fixed Git argument arrays, `paseo.json` action IDs only, loopback-only
    preview URLs, bounded outputs everywhere.
-7. Per-workspace layout + settings; per-agent concise + per-session expansion;
+7. Per-workspace layout + settings; per-session expansion;
    builtin read-only packs; generic fallback for unknown tools.

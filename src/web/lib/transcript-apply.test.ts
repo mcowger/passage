@@ -8,7 +8,6 @@ const tool = (id: string, status: "running" | "complete" | "error" = "running"):
   name: "bash",
   input: null,
   status,
-  significant: true,
 });
 
 describe("applyRowUpsert", () => {

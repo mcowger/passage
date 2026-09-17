@@ -397,27 +397,6 @@ export function SettingsModal({
             </Select>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="settings-activity">Agent Activity Detail</Label>
-            <Select
-              value={currentSettings.agentActivityDetail}
-              onValueChange={(value) =>
-                setCurrentSettings({
-                  ...currentSettings,
-                  agentActivityDetail: value as "concise" | "detailed",
-                })
-              }
-            >
-              <SelectTrigger id="settings-activity" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="concise">Concise (Compact activity badges)</SelectItem>
-                <SelectItem value="detailed">Detailed (Full tool inputs and outputs)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between gap-2">
               <Label htmlFor="settings-notifications" className="text-sm font-medium">

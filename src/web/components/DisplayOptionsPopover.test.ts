@@ -16,7 +16,7 @@ describe("DisplayOptionsPopover", () => {
     );
 
     expect(html).toContain("composer-icon-btn");
-    expect(html).toContain('aria-label="Display expansion settings (session only)"');
+    expect(html).toContain('aria-label="Display options (session only)"');
   });
 
   test("renders override indicator dot when session is overridden", () => {

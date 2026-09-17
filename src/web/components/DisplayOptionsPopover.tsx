@@ -92,8 +92,8 @@ export const DisplayOptionsPopover = memo(function DisplayOptionsPopover({
         <button
           type="button"
           className="composer-icon-btn relative"
-          title="Display expansion settings (session only)"
-          aria-label="Display expansion settings (session only)"
+          title="Display options (session only)"
+          aria-label="Display options (session only)"
         >
           <SlidersHorizontal size={14} aria-hidden="true" />
           {isOverridden && (

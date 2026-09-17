@@ -130,7 +130,7 @@ describe("TranscriptState", () => {
     const state = new TranscriptState();
     const seeded: TimelineItem[] = [
       { kind: "user", id: "u1", text: "hi" },
-      { kind: "tool", id: "write-1", name: "write", input: null, status: "complete", significant: true, result: "done" },
+      { kind: "tool", id: "write-1", name: "write", input: null, status: "complete", result: "done" },
     ];
     state.seed({
       timeline: seeded,
@@ -151,7 +151,7 @@ describe("TranscriptState", () => {
     state.applyEvent("tool_execution_end", { toolCallId: "write-1", result: "truncated-live-result", isError: false });
 
     const journalTimeline: TimelineItem[] = [
-      { kind: "tool", id: "write-1", name: "write", input: { path: "a.md" }, status: "complete", significant: true, result: "full-untruncated-result" },
+      { kind: "tool", id: "write-1", name: "write", input: { path: "a.md" }, status: "complete", result: "full-untruncated-result" },
     ];
     const changed = state.refreshFromJournal({
       timeline: journalTimeline,
@@ -196,13 +196,13 @@ describe("TranscriptState", () => {
 
 describe("truncateRowForWire", () => {
   test("leaves small tool results untouched", () => {
-    const row: TimelineItem = { kind: "tool", id: "t1", name: "bash", input: null, status: "complete", significant: true, result: "short" };
+    const row: TimelineItem = { kind: "tool", id: "t1", name: "bash", input: null, status: "complete", result: "short" };
     expect(truncateRowForWire(row)).toEqual(row);
   });
 
   test("truncates oversized tool results for the wire without touching the row identity", () => {
     const huge = "x".repeat(100_000);
-    const row: TimelineItem = { kind: "tool", id: "t1", name: "bash", input: null, status: "complete", significant: true, result: huge };
+    const row: TimelineItem = { kind: "tool", id: "t1", name: "bash", input: null, status: "complete", result: huge };
     const wire = truncateRowForWire(row, 1024);
     expect(wire.kind === "tool" && wire.result!.length).toBeLessThan(huge.length);
     expect(wire.id).toBe("t1");

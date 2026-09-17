@@ -102,7 +102,6 @@ describe("layout and settings HTTP API", () => {
     const customSettings = {
       ...DEFAULT_WORKSPACE_SETTINGS,
       themeId: "passage-light",
-      agentActivityDetail: "detailed",
       terminalFontSize: 16,
       timelineExpansion: {
         thinking: "always",
@@ -130,7 +129,6 @@ describe("layout and settings HTTP API", () => {
     const updatedRes = await f.app.fetch(request(`/api/workspaces/${workspace.id}/settings`));
     const updated = await updatedRes.json();
     expect(updated.themeId).toBe("passage-light");
-    expect(updated.agentActivityDetail).toBe("detailed");
     expect(updated.terminalFontSize).toBe(16);
     expect(updated.timelineExpansion.thinking).toBe("always");
     expect(updated.timelineExpansion.tools.read).toBe("none");
