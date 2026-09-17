@@ -7,7 +7,7 @@ import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { HighlightedCode, getLanguageFromPath } from "./HighlightedCode.tsx";
 import { CopyButton } from "./CopyButton.tsx";
 import { Spinner } from "./ui/spinner.tsx";
-import { Skeleton } from "./ui/skeleton.tsx";
+import { SkeletonText } from "./ui/skeleton.tsx";
 import {
   renderTerminalOutput,
   tryParseJson,
@@ -528,9 +528,7 @@ function ToolPendingBody({ item, hint }: { item: Extract<TimelineItem, { kind: "
         ) : null}
       </div>
       <div className="tool-pending-skeleton" aria-hidden="true">
-        <Skeleton className="h-3 w-3/4" />
-        <Skeleton className="h-3 w-1/2" />
-        <Skeleton className="h-3 w-2/3" />
+        <SkeletonText />
       </div>
     </div>
   );
@@ -695,8 +693,7 @@ function ToolExpandedBodyInner({
             <span className="tool-pending-label">{getRunningToolLabel(item.name)}</span>
           </div>
           <div className="tool-pending-skeleton" aria-hidden="true">
-            <Skeleton className="h-3 w-2/3" />
-            <Skeleton className="h-3 w-1/2" />
+            <SkeletonText />
           </div>
         </div>
       ) : null}
