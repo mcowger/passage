@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Hono } from "hono";
 import { AgentService } from "./agents/service.ts";
@@ -60,6 +60,13 @@ const port = Number(process.env.PORT ?? DEFAULT_PORT);
 const defaultDataRoot = join(import.meta.dir, "..", "..", ".data");
 const metadataPath = process.env.PASSAGE_DB_PATH ?? join(defaultDataRoot, "passage.sqlite");
 mkdirSync(dirname(metadataPath), { recursive: true });
+
+const defaultPidPath = process.env.PASSAGE_DB_PATH ? null : join(defaultDataRoot, "dev.pid");
+const pidPath = process.env.PASSAGE_PID_FILE ?? defaultPidPath;
+if (pidPath) {
+  mkdirSync(dirname(pidPath), { recursive: true });
+  writeFileSync(pidPath, `${process.pid}\n`, "utf8");
+}
 
 const metadata = new MetadataStore(metadataPath);
 const repositories = new MetadataRepositories(metadata.db);
@@ -506,6 +513,13 @@ let shuttingDown = false;
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (pidPath && existsSync(pidPath)) {
+    try {
+      if (readFileSync(pidPath, "utf8").trim() === String(process.pid)) {
+        unlinkSync(pidPath);
+      }
+    } catch {}
+  }
   agentEvents.dispose();
   workspaceEvents.dispose();
   await previewManager.shutdown();

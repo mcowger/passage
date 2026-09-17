@@ -8,6 +8,8 @@
   "type": "module",
   "scripts": {
     "dev": "PORT=\"$(bun scripts/dev-port.ts)\" bun --watch run src/daemon/index.ts",
+    "dev:stop": "bun scripts/dev-stop.ts",
+    "stop": "bun scripts/dev-stop.ts",
     "build": "bun run scripts/build.ts",
     "start": "bun --cwd dist run ./index.js",
     "package": "bun build --compile --target=bun --production --outfile=dist/passage ./src/daemon/index.ts",
