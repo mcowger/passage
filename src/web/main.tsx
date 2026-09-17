@@ -27,6 +27,7 @@ import { CommandPalette } from "./components/CommandPalette.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { showAgentNotification } from "./notifications.ts";
 import { Button } from "./components/ui/button.tsx";
+import { Input } from "./components/ui/input.tsx";
 import { MoreHorizontal, Plus } from "lucide-react";
 import {
   Dialog,
@@ -1237,7 +1238,7 @@ function App() {
             }));
           }}
         >
-          <label>Project name<input name="label" required placeholder="Payments platform" /></label>
+          <label>Project name<Input name="label" required placeholder="Payments platform" /></label>
           <label>Directory path<DirectoryPicker api={api} name="path" placeholder="/home/user/code/payments" onOpenChange={setDirSuggestOpen} /></label>
           <p className="form-help">The daemon resolves and verifies this directory before registering it.</p>
         </FormDialog>

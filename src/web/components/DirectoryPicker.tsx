@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command.tsx";
+import { Popover, PopoverAnchor, PopoverContent } from "./ui/popover.tsx";
+import { Input } from "./ui/input.tsx";
 import type { WorkspaceApi } from "../api.ts";
 import type { DirectorySuggestEntry } from "../../shared/protocol/workspace.ts";
 
@@ -16,33 +17,37 @@ type DirectoryPickerProps = {
 };
 
 /**
- * Directory path field with live daemon-backed suggestions. The daemon
- * splits the typed partial path into a base directory plus a prefix and
- * fuzzy-matches child directories server-side; this component only renders
- * the bounded snapshot. Selecting a suggestion fills the input so typing
- * can continue deeper (a trailing `/` lists that directory's children).
- * `CommandInput` renders the real named input, so the parent form still
- * submits via `FormData` unchanged and cmdk owns arrow/Enter navigation.
+ * Directory path input with daemon-backed live suggestions. Composes
+ * the standard shadcn `Input` with Radix `PopoverAnchor` and `PopoverContent`:
+ * the input element is the anchor with zero outer wrappers or extra borders,
+ * matching neighboring dialog inputs 1:1.
  */
-export function DirectoryPicker({ api, name, defaultValue = "", placeholder, autoFocus, onOpenChange }: DirectoryPickerProps) {
+export function DirectoryPicker({
+  api,
+  name,
+  defaultValue = "",
+  placeholder,
+  autoFocus,
+  onOpenChange,
+}: DirectoryPickerProps) {
   const [value, setValue] = useState(defaultValue);
   const [entries, setEntries] = useState<DirectorySuggestEntry[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [open, setOpenState] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
   const requestId = useRef(0);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const setOpen = (next: boolean) => {
     setOpenState(next);
     onOpenChange?.(next);
+    if (!next) setSelectedIndex(-1);
   };
 
-  // The parent dialog reads suggestion visibility for Escape handling;
-  // reset it if this component unmounts while open.
   useEffect(() => () => { onOpenChange?.(false); }, [onOpenChange]);
 
   useEffect(() => {
-    if (!open) return;
     const id = ++requestId.current;
     setLoading(true);
     const timer = setTimeout(() => {
@@ -62,7 +67,7 @@ export function DirectoryPicker({ api, name, defaultValue = "", placeholder, aut
       );
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [api, open, value]);
+  }, [api, value]);
 
   const select = (path: string) => {
     requestId.current += 1;
@@ -73,72 +78,122 @@ export function DirectoryPicker({ api, name, defaultValue = "", placeholder, aut
     setOpen(false);
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!open || entries.length === 0) {
+      if (event.key === "ArrowDown" && entries.length > 0) {
+        event.preventDefault();
+        setOpen(true);
+        setSelectedIndex(0);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSelectedIndex((prev) => {
+        const next = prev < entries.length - 1 ? prev + 1 : 0;
+        scrollIntoView(next);
+        return next;
+      });
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSelectedIndex((prev) => {
+        const next = prev > 0 ? prev - 1 : entries.length - 1;
+        scrollIntoView(next);
+        return next;
+      });
+    } else if (event.key === "Enter") {
+      if (selectedIndex >= 0 && selectedIndex < entries.length) {
+        event.preventDefault();
+        select(entries[selectedIndex]!.path);
+      }
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+    }
+  };
+
+  const scrollIntoView = (index: number) => {
+    const item = listRef.current?.children[index] as HTMLElement | undefined;
+    item?.scrollIntoView({ block: "nearest" });
+  };
+
+  const showPopup = open && (loading || entries.length > 0);
+
   return (
-    <Command
-      shouldFilter={false}
-      label="Directory path"
-      // Restyle the internal CommandInput wrapper to match a plain form
-      // field (ui/input): the palette styling (bottom-border-only row on a
-      // filled box) otherwise renders a double frame that overflows the
-      // dialog grid. The inner input is taller (h-10) than its row (h-9),
-      // so pin it to h-9 as well; twMerge keeps our conflicting classes.
-      className="relative min-w-0 overflow-visible bg-transparent [&_[data-slot=command-input-wrapper]]:h-9 [&_[data-slot=command-input-wrapper]]:min-w-0 [&_[data-slot=command-input-wrapper]]:rounded-sm [&_[data-slot=command-input-wrapper]]:border [&_[data-slot=command-input-wrapper]]:border-input [&_[data-slot=command-input-wrapper]]:bg-transparent"
-    >
-      <CommandInput
-        name={name}
-        required
-        value={value}
-        onValueChange={(next) => {
-          setValue(next);
-          setOpen(true);
-        }}
-        placeholder={placeholder}
-        autoFocus={autoFocus}
-        autoComplete="off"
-        spellCheck={false}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        onKeyDown={(event) => {
-          // With suggestions visible, Escape dismisses only the list. The
-          // parent dialog skips its own Escape dismissal while the parent
-          // is told the list is open, since Radix listens in capture phase
-          // and input-level stopPropagation cannot preempt it.
-          if (event.key === "Escape" && open && (loading || entries.length > 0)) setOpen(false);
-        }}
-        className="h-9 min-w-0 flex-1 rounded-none border-0! bg-transparent! shadow-none"
-      />
-      {open && (loading || entries.length > 0) && (
-        <div className="absolute inset-x-0 top-full z-50 mt-1 overflow-hidden rounded-md border bg-popover shadow-md">
-          <CommandList>
-            {loading && entries.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-muted-foreground">Searching directories…</div>
-            ) : (
-              <>
-                <CommandEmpty>No matching directories</CommandEmpty>
-                <CommandGroup onMouseDown={(event) => event.preventDefault()}>
-                  {entries.map((entry) => (
-                    <CommandItem
-                      key={entry.path}
-                      value={entry.path}
-                      keywords={[entry.name]}
-                      onSelect={() => select(entry.path)}
-                      className="flex-col items-start gap-0.5"
-                    >
-                      <span className="text-xs font-medium">{entry.name}</span>
-                      <span className="max-w-full truncate text-[11px] text-muted-foreground">{entry.path}</span>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-                {truncated && (
-                  <div className="border-t px-3 py-1.5 text-[11px] text-muted-foreground">
-                    Showing the first {entries.length} matches — keep typing to narrow down.
-                  </div>
-                )}
-              </>
-            )}
-          </CommandList>
-        </div>
-      )}
-    </Command>
+    <Popover open={showPopup} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <Input
+          name={name}
+          required
+          value={value}
+          placeholder={placeholder}
+          autoFocus={autoFocus}
+          autoComplete="off"
+          spellCheck={false}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={showPopup}
+          aria-controls="directory-suggest-list"
+          onChange={(event) => {
+            setValue(event.target.value);
+            setSelectedIndex(-1);
+            setOpen(true);
+          }}
+          onFocus={() => {
+            if (entries.length > 0) setOpen(true);
+          }}
+          onKeyDown={handleKeyDown}
+        />
+      </PopoverAnchor>
+      <PopoverContent
+        id="directory-suggest-list"
+        role="listbox"
+        className="w-[var(--radix-popper-anchor-width)] p-1 max-h-60 overflow-y-auto z-50 shadow-md"
+        align="start"
+        side="bottom"
+        sideOffset={4}
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
+        {loading && entries.length === 0 ? (
+          <div className="px-3 py-2 text-xs text-muted-foreground">Searching directories…</div>
+        ) : (
+          <div ref={listRef} className="flex flex-col gap-0.5">
+            {entries.map((entry, index) => {
+              const isSelected = index === selectedIndex;
+              return (
+                <div
+                  key={entry.path}
+                  role="option"
+                  aria-selected={isSelected}
+                  onMouseDown={(e) => {
+                    // Prevent input from losing focus before click resolves
+                    e.preventDefault();
+                  }}
+                  onClick={() => select(entry.path)}
+                  onMouseEnter={() => setSelectedIndex(index)}
+                  className={`flex flex-col items-start gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer select-none text-left transition-colors ${
+                    isSelected
+                      ? "bg-accent text-accent-foreground"
+                      : "hover:bg-accent/50 text-foreground"
+                  }`}
+                >
+                  <span className="text-xs font-medium">{entry.name}</span>
+                  <span className="max-w-full truncate text-[11px] text-muted-foreground">
+                    {entry.path}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {truncated && (
+          <div className="border-t px-2 py-1.5 mt-1 text-[11px] text-muted-foreground">
+            Showing first {entries.length} matches — keep typing to narrow down.
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
