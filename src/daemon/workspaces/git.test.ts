@@ -6,6 +6,7 @@ import { GitError, GitService } from "./git.ts";
 
 const roots: string[] = [];
 const git = async (cwd: string, ...args: string[]) => { const p = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "pipe" }); if (await p.exited !== 0) throw new Error(await new Response(p.stderr).text()); };
+const gitOutput = async (cwd: string, ...args: string[]) => { const p = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "pipe" }); const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]); if (code !== 0) throw new Error(err); return out; };
 const fixture = async () => { const root = await mkdtemp(join(tmpdir(), "passage-git-")); roots.push(root); await git(root, "init", "-b", "main"); await git(root, "config", "user.email", "test@example.com"); await git(root, "config", "user.name", "Test"); return root; };
 afterEach(async () => { await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true }))); });
 
@@ -246,5 +247,60 @@ describe("GitService", () => {
     expect(status.conflicted).toBe(false);
     expect(status.files.find((f) => f.path === "shared.txt")).toBeUndefined();
     expect(await readFile(join(root, "shared.txt"), "utf8")).toBe("main\n");
+  });
+  test("rebases the branch before fast-forwarding so main stays linear", async () => {
+    const root = await fixture();
+    const service = new GitService();
+    await writeFile(join(root, "base.txt"), "base\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "initial");
+    const worktree = join(root, "feature-worktree");
+    await git(root, "worktree", "add", "-b", "feature", worktree);
+    await writeFile(join(worktree, "feature.txt"), "feature\n");
+    await git(worktree, "add", ".");
+    await git(worktree, "commit", "-m", "feature");
+
+    // Main advances while the feature branch is open, so the branch must be
+    // replayed onto main before it can merge.
+    await writeFile(join(root, "main.txt"), "main\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "main progress");
+
+    await service.mergeIntoMain(worktree);
+
+    expect(await readFile(join(root, "feature.txt"), "utf8")).toBe("feature\n");
+    expect(await readFile(join(root, "main.txt"), "utf8")).toBe("main\n");
+    // A rebase plus fast-forward leaves no merge commit behind.
+    expect((await gitOutput(root, "rev-list", "--merges", "main")).trim()).toBe("");
+    expect((await gitOutput(root, "rev-parse", "main")).trim()).toBe((await gitOutput(root, "rev-parse", "feature")).trim());
+  });
+  test("aborts a conflicted rebase and reports the conflicting files", async () => {
+    const root = await fixture();
+    const service = new GitService();
+    await writeFile(join(root, "shared.txt"), "A\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "initial");
+    const worktree = join(root, "feature-worktree");
+    await git(root, "worktree", "add", "-b", "feature", worktree);
+    // Feature edits then reverts the line, so merging the final branch into
+    // main is clean even though replaying its middle commit onto main conflicts.
+    await writeFile(join(worktree, "shared.txt"), "B\n");
+    await git(worktree, "commit", "-am", "feature edit");
+    await writeFile(join(worktree, "shared.txt"), "A\n");
+    await git(worktree, "commit", "-am", "feature revert");
+    await writeFile(join(root, "shared.txt"), "M\n");
+    await git(root, "commit", "-am", "main edit");
+
+    const mainBefore = (await gitOutput(root, "rev-parse", "main")).trim();
+    const featureBefore = (await gitOutput(worktree, "rev-parse", "feature")).trim();
+    const error = await service.mergeIntoMain(worktree).then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(GitError);
+    expect((error as GitError).message).toContain('Could not rebase "feature" onto "main"');
+    expect((error as GitError).message).toContain("shared.txt");
+    // Main and the branch are left exactly where they were; no rebase in progress.
+    expect((await gitOutput(root, "rev-parse", "main")).trim()).toBe(mainBefore);
+    expect((await gitOutput(worktree, "rev-parse", "feature")).trim()).toBe(featureBefore);
+    expect(await readFile(join(root, "shared.txt"), "utf8")).toBe("M\n");
+    expect((await service.status(worktree)).conflicted).toBe(false);
   });
 });

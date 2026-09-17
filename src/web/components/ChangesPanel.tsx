@@ -28,6 +28,7 @@ type ChangesProps = {
   api: WorkspaceApi;
   onOpenFile: (path: string) => void;
   onOpenDiff: (path: string, staged?: boolean) => void;
+  onWorkspaceDeleted?: () => void | Promise<void>;
 };
 
 type BulkOp = "stage-all" | "unstage-all" | "commit" | "pull" | "fetch" | "merge";
@@ -41,7 +42,7 @@ const loadDraft = (workspaceId: string): string => {
   }
 };
 
-export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: ChangesProps) {
+export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorkspaceDeleted }: ChangesProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -49,6 +50,9 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
   const [pendingPaths, setPendingPaths] = useState<ReadonlySet<string>>(new Set());
   const [bulkOp, setBulkOp] = useState<BulkOp | null>(null);
   const [discardTarget, setDiscardTarget] = useState<GitFileStatus | null>(null);
+  const [mergedBranch, setMergedBranch] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [commitMessage, setCommitMessage] = useState(() => loadDraft(workspaceId));
 
   const refreshStatus = useCallback(async (quiet = false) => {
@@ -181,7 +185,9 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
       (s) => {
         setStatus(s);
         setError("");
-        toast.success(`Merged ${status?.branchRef ?? "branch"} into main`);
+        setDeleteError("");
+        setMergedBranch(s.branchRef ?? status?.branchRef ?? "branch");
+        toast.success(`Merged ${s.branchRef ?? status?.branchRef ?? "branch"} into main`);
       },
       (err: unknown) => {
         const message = friendlyApiError(err, "Could not merge into main. Resolve any conflicts and try again.");
@@ -189,6 +195,24 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
         toast.error("Merge into main failed", { description: message });
       },
     ).finally(() => setBulkOp(null));
+  };
+
+  const handleDeleteWorkspace = () => {
+    if (mergedBranch === null || deleting) return;
+    setDeleting(true);
+    setDeleteError("");
+    void api.removeWorktree(workspaceId).then(
+      async () => {
+        setDeleting(false);
+        setMergedBranch(null);
+        toast.success("Workspace deleted");
+        await onWorkspaceDeleted?.();
+      },
+      (err: unknown) => {
+        setDeleting(false);
+        setDeleteError(friendlyApiError(err, "Could not delete the workspace. Remove it from workspace details."));
+      },
+    );
   };
 
   return (
@@ -411,6 +435,33 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
               }}
             >
               {discardTarget?.kind === "untracked" ? "Delete file" : "Discard changes"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={mergedBranch !== null} onOpenChange={(open) => { if (!open && !deleting) setMergedBranch(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Merged into main</AlertDialogTitle>
+            <AlertDialogDescription>
+              <code className="font-mono">{mergedBranch}</code> was merged into main. Delete this workspace?
+              The branch is kept; the worktree directory is removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteError && <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Keep workspace</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(event) => {
+                event.preventDefault();
+                handleDeleteWorkspace();
+              }}
+            >
+              {deleting ? <Spinner className="size-3" /> : null}
+              Delete workspace
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
