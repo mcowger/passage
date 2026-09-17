@@ -37,3 +37,9 @@ input { width: 100%; min-height: 28px; padding: 4px 6px; color: var(--foreground
 .form-actions { justify-content: flex-end; margin-top: 16px; }
 .mobile-nav, .mobile-only, .drawer-scrim { display: none; }
 
+/* Toasts (sonner) — pin toast text to the app tokens so the title and
+description always hold contrast against the toast card, even if sonner's
+internal light/dark theme ever disagrees with the app theme again. */
+.toaster [data-sonner-toast][data-styled="true"] { color: var(--popover-foreground); }
+.toaster [data-sonner-toast][data-styled="true"] [data-title],
+.toaster [data-sonner-toast][data-styled="true"] [data-description] { color: var(--popover-foreground); }
