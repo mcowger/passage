@@ -564,14 +564,25 @@ function isGlobLikeSearch(name: string): boolean {
   return name === "glob" || name === "ls" || name === "list" || name === "list_dir";
 }
 
-function ToolRowInner({ item, conciseBadge }: { item: Extract<TimelineItem, { kind: "tool" }>; conciseBadge?: boolean }) {
+export interface ToolRowProps {
+  item: Extract<TimelineItem, { kind: "tool" }>;
+  conciseBadge?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+function ToolRowInner({ item, conciseBadge, open, onOpenChange }: ToolRowProps) {
   const { icon, title, subtitle, isPath } = getToolSummary(item);
   const diff = getToolDiff(item);
   const filePath = subtitle || (item.input && typeof item.input === "object" ? String((item.input as Record<string, unknown>).path ?? (item.input as Record<string, unknown>).filePath ?? "") : undefined);
 
   if (conciseBadge) {
     return (
-      <Collapsible className={`tool-row concise ${item.status}`}>
+      <Collapsible
+        className={`tool-row concise ${item.status}`}
+        open={open}
+        onOpenChange={onOpenChange}
+      >
         <CollapsibleTrigger className="timeline-concise-badge" title={`${title}${subtitle ? ` ${subtitle}` : ""} — expand for details`}>
           <span className="timeline-concise-title"><ToolIcon kind={icon} /> {title}</span>
           {subtitle && isPath ? renderPathWithIcon(subtitle) : subtitle ? <code title={subtitle}>{subtitle}</code> : null}
@@ -591,7 +602,12 @@ function ToolRowInner({ item, conciseBadge }: { item: Extract<TimelineItem, { ki
   }
 
   return (
-    <Collapsible className={`tool-row ${item.status}`} defaultOpen={item.status === "error"}>
+    <Collapsible
+      className={`tool-row ${item.status}`}
+      open={open}
+      onOpenChange={onOpenChange}
+      defaultOpen={open !== undefined ? undefined : item.status === "error"}
+    >
       <CollapsibleTrigger className="tool-row-summary">
         <span className="tool-row-left">
           <span className="tool-row-icon"><ToolIcon kind={icon} /></span>

@@ -62,6 +62,9 @@
   transition: background 100ms ease;
 }
 .tool-row:hover { background: var(--surface-hover); }
+.tool-row [data-slot="collapsible-content"][data-state="closed"] {
+  display: none;
+}
 .tool-row-summary {
   display: flex;
   align-items: center;

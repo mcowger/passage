@@ -104,6 +104,19 @@ describe("layout and settings HTTP API", () => {
       themeId: "passage-light",
       agentActivityDetail: "detailed",
       terminalFontSize: 16,
+      timelineExpansion: {
+        thinking: "always",
+        tools: {
+          read: "none",
+          write: "always",
+          edit: "always",
+          bash: "always",
+          find: "none",
+          grep: "latest",
+          ls: "none",
+        },
+        otherTools: "latest",
+      },
     };
 
     const putRes = await f.app.fetch(
@@ -119,6 +132,9 @@ describe("layout and settings HTTP API", () => {
     expect(updated.themeId).toBe("passage-light");
     expect(updated.agentActivityDetail).toBe("detailed");
     expect(updated.terminalFontSize).toBe(16);
+    expect(updated.timelineExpansion.thinking).toBe("always");
+    expect(updated.timelineExpansion.tools.read).toBe("none");
+    expect(updated.timelineExpansion.tools.write).toBe("always");
 
     f.store.close();
   });

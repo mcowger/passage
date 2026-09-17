@@ -1,9 +1,13 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { AgentCapabilities, AgentHistory, AgentSummary, SlashCommand, TimelineItem, ToolActivity } from "../../shared/domain/agents.ts";
+import type { WorkspaceSettings, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
+import { DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
 import { MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentImage } from "../../shared/protocol/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
+import { DisplayOptionsPopover } from "./DisplayOptionsPopover.tsx";
+import { computeLatestTimelineIds, isItemExpanded, type LatestTimelineIds } from "../lib/timeline-expansion.ts";
 import { Streamdown } from "streamdown";
 import { Button } from "./ui/button.tsx";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert.tsx";
@@ -58,6 +62,7 @@ export type AgentPanelProps = {
   onOptimisticMessage?: (message: string) => void;
   /** Offline transcript override for rendering verification (never live state). */
   previewHistory?: AgentHistory;
+  settings?: WorkspaceSettings;
 };
 
 export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: TimelineItem[]): QuestionRequest | null {
@@ -286,10 +291,34 @@ export function AgentPanel({
   onArchive: _onArchive,
   onOptimisticMessage,
   previewHistory,
+  settings,
 }: AgentPanelProps) {
   const effectiveHistory = previewHistory ?? history;
   const conciseKey = `passage:agent:${agent.id}:concise`;
   const [concise, setConcise] = useState(() => localStorage.getItem(conciseKey) === "true");
+  const [sessionExpansion, setSessionExpansion] = useState<TimelineExpansionSettings>(
+    () => settings?.timelineExpansion ?? DEFAULT_TIMELINE_EXPANSION
+  );
+  const [sessionExpansionOverridden, setSessionExpansionOverridden] = useState(false);
+  const [manualToggles, setManualToggles] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!sessionExpansionOverridden) {
+      setSessionExpansion(settings?.timelineExpansion ?? DEFAULT_TIMELINE_EXPANSION);
+    }
+  }, [settings?.timelineExpansion, sessionExpansionOverridden]);
+
+  const handleUpdateSessionExpansion = (next: TimelineExpansionSettings) => {
+    setSessionExpansion(next);
+    setSessionExpansionOverridden(true);
+  };
+
+  const handleResetSessionExpansion = () => {
+    setSessionExpansion(settings?.timelineExpansion ?? DEFAULT_TIMELINE_EXPANSION);
+    setSessionExpansionOverridden(false);
+    setManualToggles({});
+  };
+
   const [busy, setBusy] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const running = agent.status === "running";
@@ -383,6 +412,10 @@ export function AgentPanel({
   const contextPct = contextTokens !== null && contextTokens > 0 ? Math.min(100, Math.max(1, Math.round((contextTokens / maxTokens) * 100))) : 0;
   const pieColor = contextPct >= 95 ? "var(--danger, #b91c1c)" : contextPct >= 80 ? "var(--warning, #b45309)" : "currentColor";
   const changeSummary = useMemo(() => summarizeChanges(effectiveHistory?.timeline ?? []), [effectiveHistory?.timeline]);
+  const latestIds = useMemo(
+    () => computeLatestTimelineIds(effectiveHistory?.timeline ?? []),
+    [effectiveHistory?.timeline]
+  );
 
   const questionRequest = useMemo(
     () => resolveActiveQuestionRequest(agent, effectiveHistory?.timeline),
@@ -423,7 +456,17 @@ export function AgentPanel({
           ) : (
             <>
               {effectiveHistory?.timeline?.map((item) => (
-                <TimelineRow key={item.id} item={item} concise={concise} />
+                <TimelineRow
+                  key={item.id}
+                  item={item}
+                  concise={concise}
+                  expansion={sessionExpansion}
+                  latestIds={latestIds}
+                  manualToggles={manualToggles}
+                  onToggleManual={(id, open) => {
+                    setManualToggles((prev) => ({ ...prev, [id]: open }));
+                  }}
+                />
               ))}
               {questionRequest && (
                 <QuestionCard request={questionRequest} onRespond={handleRespondUi} />
@@ -459,6 +502,10 @@ export function AgentPanel({
         pieColor={pieColor}
         usage={effectiveHistory?.usage}
         changeSummary={changeSummary}
+        sessionExpansion={sessionExpansion}
+        onSessionExpansionChange={handleUpdateSessionExpansion}
+        onResetSessionExpansion={handleResetSessionExpansion}
+        isExpansionOverridden={sessionExpansionOverridden}
       />
     </section>
   );
@@ -520,6 +567,10 @@ type AgentComposerProps = {
   pieColor: string;
   usage?: AgentHistory["usage"];
   changeSummary?: { fileCount: number; additions: number; deletions: number };
+  sessionExpansion: TimelineExpansionSettings;
+  onSessionExpansionChange: (next: TimelineExpansionSettings) => void;
+  onResetSessionExpansion: () => void;
+  isExpansionOverridden: boolean;
 };
 
 /** Middle-out truncation that preserves the filename suffix. */
@@ -589,6 +640,10 @@ function AgentComposerInner({
   pieColor,
   usage,
   changeSummary,
+  sessionExpansion,
+  onSessionExpansionChange,
+  onResetSessionExpansion,
+  isExpansionOverridden,
 }: AgentComposerProps) {
   const draftKey = `passage:agent:${agentId}:draft`;
   const [draft, setDraft] = useState(() => localStorage.getItem(draftKey) ?? "");
@@ -1069,6 +1124,12 @@ function AgentComposerInner({
             >
               {concise ? <Shrink size={14} aria-hidden="true" /> : <Expand size={14} aria-hidden="true" />}
             </button>
+            <DisplayOptionsPopover
+              expansion={sessionExpansion}
+              onExpansionChange={onSessionExpansionChange}
+              onResetDefaults={onResetSessionExpansion}
+              isOverridden={isExpansionOverridden}
+            />
             <ModelPicker
               currentModelId={currentModel ? `${currentModel.provider}:${currentModel.id}` : undefined}
               currentModelName={currentModelDisplayName}
@@ -1180,35 +1241,86 @@ function summarizeChanges(timeline: TimelineItem[]): { fileCount: number; additi
   return files.size > 0 ? { fileCount: files.size, additions, deletions } : undefined;
 }
 
-export const TimelineRow = memo(function TimelineRow({ item, concise }: { item: TimelineItem; concise: boolean }) {
+export interface TimelineRowProps {
+  item: TimelineItem;
+  concise: boolean;
+  expansion?: TimelineExpansionSettings;
+  latestIds?: LatestTimelineIds;
+  manualToggles?: Record<string, boolean>;
+  onToggleManual?: (id: string, open: boolean) => void;
+}
+
+export const TimelineRow = memo(function TimelineRow({
+  item,
+  concise,
+  expansion = DEFAULT_TIMELINE_EXPANSION,
+  latestIds = { latestToolIds: {} },
+  manualToggles = {},
+  onToggleManual,
+}: TimelineRowProps) {
   if (item.kind === "unknown") return <article className="timeline-row unknown"><strong>Unknown activity</strong><code>{item.entryType}</code></article>;
   if (item.kind === "tool") {
+    const isExpanded = isItemExpanded(item, expansion, latestIds, manualToggles, concise);
     if (concise && !item.significant && item.status !== "error") {
-      return <ToolRow item={item} conciseBadge />;
+      return (
+        <ToolRow
+          item={item}
+          conciseBadge
+          open={isExpanded}
+          onOpenChange={(open) => onToggleManual?.(item.id, open)}
+        />
+      );
     }
-    return <ToolRow item={item} />;
+    return (
+      <ToolRow
+        item={item}
+        open={isExpanded}
+        onOpenChange={(open) => onToggleManual?.(item.id, open)}
+      />
+    );
   }
   if (item.kind === "process") {
+    const isAnyActivityExpanded = item.activities.some((activity) =>
+      isItemExpanded(activity, expansion, latestIds, manualToggles, concise)
+    );
+    const isProcessOpen = manualToggles[item.id] !== undefined
+      ? manualToggles[item.id]
+      : isAnyActivityExpanded;
+
     return (
-      <details className="timeline-row process">
+      <details
+        className="timeline-row process"
+        open={isProcessOpen}
+        onToggle={(e) => onToggleManual?.(item.id, e.currentTarget.open)}
+      >
         <summary className="process-summary">
           <span className="process-title">Process</span>
           <span className="process-count">{item.activities.length} {item.activities.length === 1 ? "activity" : "activities"}</span>
         </summary>
-        {item.activities.map((activity) => (
-          <ToolRow
-            key={activity.id}
-            item={activity}
-            conciseBadge={concise && !activity.significant && activity.status !== "error"}
-          />
-        ))}
+        {item.activities.map((activity) => {
+          const isActExpanded = isItemExpanded(activity, expansion, latestIds, manualToggles, concise);
+          return (
+            <ToolRow
+              key={activity.id}
+              item={activity}
+              conciseBadge={concise && !activity.significant && activity.status !== "error"}
+              open={isActExpanded}
+              onOpenChange={(open) => onToggleManual?.(activity.id, open)}
+            />
+          );
+        })}
       </details>
     );
   }
   if (item.kind === "thinking") {
+    const isExpanded = isItemExpanded(item, expansion, latestIds, manualToggles, concise);
     const preview = item.text.replace(/^[#*\-\s]+/, "").slice(0, 70).replace(/\n/g, " ");
     return (
-      <details className="thinking-row">
+      <details
+        className="thinking-row"
+        open={isExpanded}
+        onToggle={(e) => onToggleManual?.(item.id, e.currentTarget.open)}
+      >
         <summary className="thinking-summary">
           <span className="thinking-icon">⚙</span>
           <span className="thinking-label">Thinking</span>

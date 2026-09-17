@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentCapabilities, AgentHistory, AgentSummary } from "../../shared/domain/agents.ts";
+import type { WorkspaceSettings } from "../../shared/domain/settings.ts";
 import { subscribeAgent } from "../agentSocket.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { applyStreamEvent } from "../lib/streaming-events.ts";
@@ -10,6 +11,7 @@ export type AgentSessionPanelProps = {
   api: WorkspaceApi;
   onAgentChanged?: (agent: AgentSummary) => void;
   previewHistory?: AgentHistory;
+  settings?: WorkspaceSettings;
 };
 
 export type AgentSessionLoader = {
@@ -53,7 +55,7 @@ export async function loadAgentSession(loader: AgentSessionLoader): Promise<void
   }
 }
 
-export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, previewHistory }: AgentSessionPanelProps) {
+export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, previewHistory, settings }: AgentSessionPanelProps) {
   const [agent, setAgent] = useState(initialAgent);
   const [history, setHistory] = useState<AgentHistory>();
   const [capabilities, setCapabilities] = useState<AgentCapabilities>();
@@ -134,6 +136,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       loading={loading}
       error={error}
       api={api}
+      settings={settings}
       onRefresh={() => load()}
       onModelChanged={updateAgent}
       onArchive={() => Promise.resolve()}

@@ -817,6 +817,7 @@ function App() {
             key={currentAgent.id}
             agent={currentAgent}
             api={api}
+            settings={settings}
             onAgentChanged={(updatedAgent) => {
               setAgents((current) => current.map((agent) => agent.id === updatedAgent.id ? updatedAgent : agent));
             }}

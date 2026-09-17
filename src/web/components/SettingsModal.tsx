@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import type { ThemePack, FontPack } from "../../shared/domain/customization.ts";
 import { BUILTIN_THEMES, BUILTIN_FONTS } from "../../shared/domain/customization.ts";
-import type { WorkspaceSettings } from "../../shared/domain/settings.ts";
+import type { WorkspaceSettings, BaselineTool, ExpandMode, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
+import { baselineTools, DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
 import type { AgentCapabilities } from "../../shared/domain/agents.ts";
 import type { Project, WorktreeLocation } from "../../shared/domain/workspaces.ts";
 import type { WorkspaceApi } from "../api.ts";
@@ -29,6 +30,164 @@ import { toast } from "sonner";
 
 /** Sentinel Select value for "use pi default" (stored as an empty suggestModel). Radix requires non-empty item values. */
 const DEFAULT_SUGGEST_MODEL_VALUE = "__pi_default";
+
+const BASELINE_TOOL_LABELS: Record<BaselineTool, string> = {
+  read: "Read (read, readFile)",
+  write: "Write (write, writeFile)",
+  edit: "Edit (edit, multiedit, patch)",
+  bash: "Command (bash)",
+  find: "Find Files (find, glob)",
+  grep: "Search Files (grep)",
+  ls: "List Directory (ls, list)",
+};
+
+export interface OutputExpansionSectionProps {
+  expansion: TimelineExpansionSettings;
+  onExpansionChange: (next: TimelineExpansionSettings) => void;
+}
+
+export function OutputExpansionSection({
+  expansion,
+  onExpansionChange,
+}: OutputExpansionSectionProps) {
+  const handleSetAllTools = (mode: ExpandMode) => {
+    const nextTools = { ...expansion.tools };
+    for (const tool of baselineTools) {
+      nextTools[tool] = mode;
+    }
+    onExpansionChange({
+      ...expansion,
+      tools: nextTools,
+      otherTools: mode,
+    });
+  };
+
+  return (
+    <section className="flex flex-col gap-3 border-t border-border/50 pt-3" aria-label="Output and tool expansion">
+      <div>
+        <h3 className="text-sm font-semibold">Output &amp; Tool Expansion</h3>
+        <p className="text-xs text-muted-foreground">
+          Configure default expansion behavior for model reasoning and tool executions in transcripts.
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor="settings-expand-thinking" className="text-sm font-medium">
+          Thinking Output
+        </Label>
+        <Select
+          value={expansion.thinking}
+          onValueChange={(val) =>
+            onExpansionChange({
+              ...expansion,
+              thinking: val as ExpandMode,
+            })
+          }
+        >
+          <SelectTrigger id="settings-expand-thinking" className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="always">Always</SelectItem>
+            <SelectItem value="latest">Latest</SelectItem>
+            <SelectItem value="none">None</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex flex-col gap-2 pt-1">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-foreground">Baseline Tools</span>
+          <div className="flex items-center gap-1">
+            <span className="text-[11px] text-muted-foreground mr-1">Set all:</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => handleSetAllTools("always")}
+            >
+              Always
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => handleSetAllTools("latest")}
+            >
+              Latest
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => handleSetAllTools("none")}
+            >
+              None
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5 pl-1">
+          {baselineTools.map((tool) => (
+            <div key={tool} className="flex items-center justify-between gap-2">
+              <Label htmlFor={`settings-tool-${tool}`} className="text-xs text-muted-foreground font-normal">
+                {BASELINE_TOOL_LABELS[tool]}
+              </Label>
+              <Select
+                value={expansion.tools[tool]}
+                onValueChange={(val) =>
+                  onExpansionChange({
+                    ...expansion,
+                    tools: {
+                      ...expansion.tools,
+                      [tool]: val as ExpandMode,
+                    },
+                  })
+                }
+              >
+                <SelectTrigger id={`settings-tool-${tool}`} className="h-7 w-32 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="always">Always</SelectItem>
+                  <SelectItem value="latest">Latest</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/30">
+        <Label htmlFor="settings-expand-other-tools" className="text-xs font-medium">
+          Other Tools (MCP, extensions)
+        </Label>
+        <Select
+          value={expansion.otherTools}
+          onValueChange={(val) =>
+            onExpansionChange({
+              ...expansion,
+              otherTools: val as ExpandMode,
+            })
+          }
+        >
+          <SelectTrigger id="settings-expand-other-tools" className="h-7 w-32 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="always">Always</SelectItem>
+            <SelectItem value="latest">Latest</SelectItem>
+            <SelectItem value="none">None</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </section>
+  );
+}
 
 export interface SettingsModalProps {
   open: boolean;
@@ -96,6 +255,27 @@ export function SettingsModal({
       });
     }
   }, [open, api, initialLocations, projects]);
+
+  const expansion = currentSettings.timelineExpansion ?? DEFAULT_TIMELINE_EXPANSION;
+
+  const handleUpdateExpansion = (next: TimelineExpansionSettings) => {
+    setCurrentSettings((prev) => ({
+      ...prev,
+      timelineExpansion: next,
+    }));
+  };
+
+  const handleSetAllTools = (mode: ExpandMode) => {
+    const nextTools = { ...expansion.tools };
+    for (const tool of baselineTools) {
+      nextTools[tool] = mode;
+    }
+    handleUpdateExpansion({
+      ...expansion,
+      tools: nextTools,
+      otherTools: mode,
+    });
+  };
 
   const handleToggleNotifications = async (enabled: boolean) => {
     if (enabled) {
@@ -173,7 +353,7 @@ export function SettingsModal({
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
-      <DialogContent className="max-w-[500px]">
+      <DialogContent className="max-w-[520px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-lg font-semibold">Workspace Settings</DialogTitle>
         </DialogHeader>
@@ -331,6 +511,11 @@ export function SettingsModal({
               }
             />
           </label>
+
+          <OutputExpansionSection
+            expansion={expansion}
+            onExpansionChange={handleUpdateExpansion}
+          />
 
           {saveError && (
             <Alert variant="destructive">

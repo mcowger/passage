@@ -101,6 +101,124 @@ describe("TimelineRow", () => {
     expect(html).toContain("Pi notice: Request was aborted");
     expect(html).not.toContain("assistant-prose");
   });
+
+  test("renders thinking block with open attribute when expanded", () => {
+    const htmlOpen = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        concise: false,
+        item: { kind: "thinking", id: "think-2", text: "Latest thinking" },
+        expansion: {
+          thinking: "latest",
+          tools: {
+            read: "latest",
+            write: "latest",
+            edit: "latest",
+            bash: "latest",
+            find: "latest",
+            grep: "latest",
+            ls: "latest",
+          },
+          otherTools: "latest",
+        },
+        latestIds: { latestThinkingId: "think-2", latestToolIds: {} },
+      }),
+    );
+    expect(htmlOpen).toContain("<details class=\"thinking-row\" open=\"\"");
+
+    const htmlClosed = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        concise: false,
+        item: { kind: "thinking", id: "think-1", text: "Older thinking" },
+        expansion: {
+          thinking: "latest",
+          tools: {
+            read: "latest",
+            write: "latest",
+            edit: "latest",
+            bash: "latest",
+            find: "latest",
+            grep: "latest",
+            ls: "latest",
+          },
+          otherTools: "latest",
+        },
+        latestIds: { latestThinkingId: "think-2", latestToolIds: {} },
+      }),
+    );
+    expect(htmlClosed).not.toContain("open=\"\"");
+  });
+
+  test("renders process card with open attribute when an activity is expanded", () => {
+    const htmlProcessOpen = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        concise: false,
+        item: {
+          kind: "process",
+          id: "proc-1",
+          activities: [
+            {
+              kind: "tool",
+              id: "act-read-1",
+              name: "read",
+              input: null,
+              status: "complete",
+              significant: false,
+            },
+          ],
+        },
+        expansion: {
+          thinking: "latest",
+          tools: {
+            read: "always",
+            write: "latest",
+            edit: "latest",
+            bash: "latest",
+            find: "latest",
+            grep: "latest",
+            ls: "latest",
+          },
+          otherTools: "latest",
+        },
+        latestIds: { latestToolIds: {} },
+      }),
+    );
+    expect(htmlProcessOpen).toContain("<details class=\"timeline-row process\" open=\"\"");
+
+    const htmlProcessClosed = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        concise: false,
+        item: {
+          kind: "process",
+          id: "proc-1",
+          activities: [
+            {
+              kind: "tool",
+              id: "act-read-1",
+              name: "read",
+              input: null,
+              status: "complete",
+              significant: false,
+            },
+          ],
+        },
+        expansion: {
+          thinking: "latest",
+          tools: {
+            read: "none",
+            write: "latest",
+            edit: "latest",
+            bash: "latest",
+            find: "latest",
+            grep: "latest",
+            ls: "latest",
+          },
+          otherTools: "latest",
+        },
+        latestIds: { latestToolIds: {} },
+      }),
+    );
+    expect(htmlProcessClosed).not.toContain("open=\"\"");
+  });
 });
 
 describe("resolveActiveQuestionRequest", () => {
