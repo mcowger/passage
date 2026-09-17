@@ -377,11 +377,16 @@ export class AgentService {
 
   async capabilities(agentId: string): Promise<AgentCapabilities> {
     const process = await this.ensureProcess(agentId);
-    const [modelsResponse, thinkingResponse, commandsResponse] = await Promise.all([
+    const [modelsResponse, thinkingResponse, commandsResponse, stateResponse] = await Promise.all([
       process.request({ type: "get_available_models" }),
       process.request({ type: "get_available_thinking_levels" }),
       // Best-effort: older pi releases may not know `get_commands`.
       process.request({ type: "get_commands" }).catch(() => undefined),
+      // Best-effort live defaults: a brand-new agent has no persisted
+      // preference and no journaled model yet, so without this the
+      // composer falls back to "model unavailable" until the next full
+      // summary refetch (which only happens after the first settlement).
+      process.request({ type: "get_state" }).catch(() => undefined),
     ]);
     const modelsData = responseData<{ models?: unknown[] }>(modelsResponse);
     const thinkingData = responseData<{ levels?: unknown[] }>(thinkingResponse);
@@ -394,9 +399,32 @@ export class AgentService {
     const skillCommands = piCommandsToSlashCommands(
       commandsResponse ? responseData<{ commands?: unknown }>(commandsResponse)?.commands : undefined,
     );
+    const stateData = stateResponse ? (responseData<Record<string, unknown>>(stateResponse) ?? {}) : {};
+    const stateModel = stateData.model && typeof stateData.model === "object"
+      ? stateData.model as Record<string, unknown>
+      : undefined;
+    const currentModel = stateModel && typeof stateModel.provider === "string" && typeof stateModel.id === "string"
+      ? { provider: stateModel.provider, modelId: stateModel.id }
+      : undefined;
+    const currentThinkingLevel = typeof stateData.thinkingLevel === "string" && stateData.thinkingLevel.length > 0
+      ? stateData.thinkingLevel
+      : undefined;
+    // Persist live defaults so later summary fetches agree with what the
+    // composer already displayed from this response (same rule as reconcile).
+    try {
+      const agent = this.repositories.agents.get(agentId);
+      if (agent && currentModel && !agent.modelPreference) {
+        this.repositories.agents.updateModelPreference(agentId, `${currentModel.provider}/${currentModel.modelId}`);
+      }
+      if (agent && currentThinkingLevel && !agent.thinkingPreference) {
+        this.repositories.agents.updateThinkingPreference(agentId, currentThinkingLevel);
+      }
+    } catch {}
     return agentCapabilitiesSchema.parse({
       models,
       thinkingLevels,
+      ...(currentModel ? { currentModel } : {}),
+      ...(currentThinkingLevel ? { currentThinkingLevel } : {}),
       slashCommands: [...getSlashCommands(), ...skillCommands],
       skillsAvailable: skillCommands.length > 0,
       skillsSupported: commandsResponse !== undefined,

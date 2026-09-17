@@ -42,6 +42,12 @@ export const agentCapabilitiesSchema = z.object({
     maxTokens: z.number().int().positive().optional(),
   }).strict()).max(100),
   thinkingLevels: z.array(z.string().min(1).max(64)).max(16),
+  /** Live Pi defaults from `get_state`: the fallback shown before any
+   *  persisted preference or journaled model exists (brand-new sessions).
+   *  Without these, a fresh agent renders "model unavailable" until the
+   *  first background reconcile + summary refetch lands. */
+  currentModel: z.object({ provider: z.string(), modelId: z.string() }).strict().optional(),
+  currentThinkingLevel: z.string().min(1).max(64).optional(),
   slashCommands: z.array(slashCommandSchema).max(50).default([]),
   skillsAvailable: z.boolean().default(false),
   /** True when the live Pi process answered `get_commands`. False means

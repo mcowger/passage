@@ -56,6 +56,27 @@ test("validates Pi model capabilities before persisting preferences", async () =
   f.store.close();
 });
 
+test("capabilities carry live Pi model defaults for brand-new sessions", async () => {
+  const f = await make();
+  const liveScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);const data=r.type==='get_available_models'?{models:[{provider:'test',id:'model',name:'Model',api:'test',input:['text'],authenticated:true,supportedThinkingLevels:['medium']}]}:r.type==='get_available_thinking_levels'?{levels:['medium']}:r.type==='get_state'?{model:{provider:'test',id:'model'},thinkingLevel:'medium',isStreaming:false}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+  const service = new AgentService(f.repos, {
+    sessionsRoot: join(f.root, "live-default-sessions"),
+    manager: new PiRpcManager(1),
+    pi: { executable: process.execPath, executableArgs: ["-e", liveScript] },
+  });
+  const agent = await service.create("w");
+  // create() returns before the background boot persists anything.
+  expect(f.repos.agents.get(agent.id)?.modelPreference).toBeNull();
+  const capabilities = await service.capabilities(agent.id);
+  expect(capabilities.currentModel).toEqual({ provider: "test", modelId: "model" });
+  expect(capabilities.currentThinkingLevel).toBe("medium");
+  // Live defaults are persisted so a later summary fetch agrees.
+  expect(f.repos.agents.get(agent.id)).toMatchObject({ modelPreference: "test/model", thinkingPreference: "medium" });
+  await service.shutdown();
+  await f.service.shutdown();
+  f.store.close();
+});
+
 test("requires explicit steering or follow-up while an agent is running", async () => {
   const f = await make();
   const agent = await f.service.create("w");

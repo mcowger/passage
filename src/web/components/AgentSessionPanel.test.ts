@@ -75,7 +75,9 @@ describe("loadAgentSession", () => {
   test("applies capabilities after history settles", async () => {
     const { calls, loader } = recordedLoader();
     expect(await loadAgentSession(loader)).toBe("loaded");
-    expect(calls).toEqual(["summary", "history", "settled", "capabilities"]);
+    // Trailing summary refresh picks up model/thinking defaults the
+    // background Pi boot persisted after the initial summary fetch.
+    expect(calls).toEqual(["summary", "history", "settled", "capabilities", "summary"]);
   });
 
   test("settles with an error when history fails", async () => {

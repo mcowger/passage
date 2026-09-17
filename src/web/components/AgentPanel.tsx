@@ -741,17 +741,25 @@ export function AgentPanel({
     scrollToBottomIfPinned();
   });
 
-  const model = effectiveHistory?.currentModel
-    ? `${effectiveHistory.currentModel.provider}/${effectiveHistory.currentModel.modelId}`
-    : agent.modelPreference ?? "model unavailable";
-  const thinking = resolveCurrentThinking(agent.thinkingPreference, effectiveHistory?.currentThinkingLevel);
+  // Brand-new sessions have no persisted preference and no journaled model
+  // yet; fall back to the live Pi defaults carried by capabilities (from
+  // `get_state`) so the chip shows the real model instead of
+  // "model unavailable" while the background boot settles. While
+  // capabilities are still in flight, show a neutral loading label rather
+  // than the error-looking unavailable fallback.
+  const liveModel = effectiveHistory?.currentModel ?? capabilities?.currentModel;
+  const liveThinkingLevel = effectiveHistory?.currentThinkingLevel ?? capabilities?.currentThinkingLevel;
+  const model = liveModel
+    ? `${liveModel.provider}/${liveModel.modelId}`
+    : agent.modelPreference ?? (capabilities ? "model unavailable" : "loading\u2026");
+  const thinking = resolveCurrentThinking(agent.thinkingPreference, liveThinkingLevel);
   const modelOptions = useMemo(
     () => capabilities?.models.filter((option) => option.authenticated) ?? [],
     [capabilities?.models]
   );
   const currentModel = useMemo(
-    () => resolveCurrentModel(agent.modelPreference, effectiveHistory?.currentModel, modelOptions),
-    [agent.modelPreference, effectiveHistory?.currentModel, modelOptions]
+    () => resolveCurrentModel(agent.modelPreference, liveModel, modelOptions),
+    [agent.modelPreference, liveModel, modelOptions]
   );
   const currentModelDisplayName = currentModel?.name ?? (model.includes("/") ? model.split("/")[1] : model);
 

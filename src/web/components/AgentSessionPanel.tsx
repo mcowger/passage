@@ -62,9 +62,29 @@ export async function loadAgentSession(loader: AgentSessionLoader): Promise<Agen
   }
   try {
     const capabilities = await loader.api.capabilities(loader.agentId);
-    if (loader.isCurrent()) loader.onCapabilities(capabilities);
+    if (!loader.isCurrent()) return "superseded";
+    loader.onCapabilities(capabilities);
+    // create() returns before its background Pi boot persists the model /
+    // thinking defaults, so the summary fetched above can still carry null
+    // preferences for a brand-new agent. capabilities() awaits that boot,
+    // so a fresh summary read here picks up what reconcile just wrote and
+    // the composer stops showing "model unavailable".
+    try {
+      const freshSummary = await loader.api.agent(loader.agentId);
+      if (loader.isCurrent()) loader.onSummary(freshSummary);
+    } catch {
+      // Keep the earlier summary; model display already falls back to the
+      // live defaults carried by capabilities.
+    }
   } catch {
-    if (loader.isCurrent()) loader.onCapabilities(undefined);
+    if (!loader.isCurrent()) return "superseded";
+    loader.onCapabilities(undefined);
+    try {
+      const freshSummary = await loader.api.agent(loader.agentId);
+      if (loader.isCurrent()) loader.onSummary(freshSummary);
+    } catch {
+      // Keep the earlier summary on refresh failure too.
+    }
   }
   return "loaded";
 }
