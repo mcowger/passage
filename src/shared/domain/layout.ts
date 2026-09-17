@@ -401,6 +401,48 @@ export function resizeSplitNode(
   return update(root);
 }
 
+export function updateTabInTree(
+  root: LayoutNode,
+  oldTabId: string,
+  updatedTab: PaneTab
+): LayoutNode {
+  function update(node: LayoutNode): LayoutNode {
+    if (node.type === "tabs") {
+      const hasTab = node.tabs.some((t) => t.id === oldTabId);
+      if (!hasTab) return node;
+      const tabs = node.tabs.map((t) => (t.id === oldTabId ? updatedTab : t));
+      const activeTabId = node.activeTabId === oldTabId ? updatedTab.id : node.activeTabId;
+      return { ...node, tabs, activeTabId };
+    }
+    return {
+      ...node,
+      children: node.children.map(update),
+    };
+  }
+  return update(root);
+}
+
+export function findFirstDeadTerminalTab(
+  node: LayoutNode,
+  liveTerminalIds: ReadonlySet<string>
+): PaneTab | null {
+  if (node.type === "tabs") {
+    for (const tab of node.tabs) {
+      if (tab.kind === "terminal") {
+        if (!tab.targetId || !liveTerminalIds.has(tab.targetId)) {
+          return tab;
+        }
+      }
+    }
+    return null;
+  }
+  for (const child of node.children) {
+    const found = findFirstDeadTerminalTab(child, liveTerminalIds);
+    if (found) return found;
+  }
+  return null;
+}
+
 export function replaceOverviewTabs(node: LayoutNode): LayoutNode {
   if (node.type === "tabs") {
     const nextTabs = node.tabs.map((tab) =>

@@ -3,6 +3,7 @@ import {
   addTabToGroup,
   countAgentTabs,
   createDefaultLayout,
+  findFirstDeadTerminalTab,
   findNode,
   findTab,
   migrateLayout,
@@ -11,6 +12,7 @@ import {
   removeTabFromTree,
   resizeSplitNode,
   splitTabGroup,
+  updateTabInTree,
   workspaceLayoutSchema,
   type PaneTab,
   type WorkspaceLayout,
@@ -137,5 +139,39 @@ describe("split-tree layout domain operations", () => {
     const fallback = migrateLayout(invalidRaw, 1);
     expect(fallback.version).toBe(1);
     expect(fallback.root.type).toBe("tabs");
+  });
+
+  test("updateTabInTree replaces tab in place and updates activeTabId if matched", () => {
+    const layout = createDefaultLayout("ws_1");
+    const terminalTab: PaneTab = { id: "term-old", kind: "terminal", title: "Terminal 1", targetId: "trm_old" };
+    const rootWithTerm = addTabToGroup(layout.root, layout.root.id, terminalTab);
+
+    const updatedTab: PaneTab = { id: "term-new", kind: "terminal", title: "Terminal 1", targetId: "trm_new" };
+    const nextRoot = updateTabInTree(rootWithTerm, "term-old", updatedTab);
+
+    expect(findTab(nextRoot, "term-old")).toBeNull();
+    const foundNew = findTab(nextRoot, "term-new");
+    expect(foundNew).not.toBeNull();
+    expect(foundNew?.tab.targetId).toBe("trm_new");
+    if (nextRoot.type === "tabs") {
+      expect(nextRoot.activeTabId).toBe("term-new");
+    }
+  });
+
+  test("findFirstDeadTerminalTab locates unbacked terminal tabs", () => {
+    const layout = createDefaultLayout("ws_1");
+    const deadTerm: PaneTab = { id: "term-dead", kind: "terminal", title: "Terminal 1", targetId: "trm_dead" };
+    const liveTerm: PaneTab = { id: "term-live", kind: "terminal", title: "Terminal 2", targetId: "trm_live" };
+
+    let root = addTabToGroup(layout.root, layout.root.id, deadTerm);
+    root = addTabToGroup(root, layout.root.id, liveTerm);
+
+    const liveSet = new Set(["trm_live"]);
+    const foundDead = findFirstDeadTerminalTab(root, liveSet);
+    expect(foundDead).not.toBeNull();
+    expect(foundDead?.id).toBe("term-dead");
+
+    const allLiveSet = new Set(["trm_dead", "trm_live"]);
+    expect(findFirstDeadTerminalTab(root, allLiveSet)).toBeNull();
   });
 });

@@ -5,12 +5,13 @@ import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.t
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import type { WebPreview } from "../shared/domain/previews.ts";
 import type { PaneTab, WorkspaceLayout, LayoutNode } from "../shared/domain/layout.ts";
-import { addTabToGroup, countAgentTabs, createDefaultLayout, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs } from "../shared/domain/layout.ts";
+import { addTabToGroup, countAgentTabs, createDefaultLayout, findFirstDeadTerminalTab, findTab, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs, setActiveTabInTree, updateTabInTree } from "../shared/domain/layout.ts";
 import type { WorkspaceSettings } from "../shared/domain/settings.ts";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
 import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
 import { BUILTIN_THEMES, BUILTIN_FONTS } from "../shared/domain/customization.ts";
 import { createWorkspaceApi, friendlyApiError } from "./api.ts";
+import { subscribeWorkspace } from "./workspaceSocket.ts";
 import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { WorkspaceDetailsModal } from "./components/WorkspaceDetailsModal.tsx";
@@ -19,6 +20,7 @@ import { ChangesPanel } from "./components/ChangesPanel.tsx";
 import { EditorPanel } from "./components/EditorPanel.tsx";
 import { DiffPanel } from "./components/DiffPanel.tsx";
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
+import { TerminalTabPane } from "./components/TerminalTabPane.tsx";
 import { PreviewPanel } from "./components/PreviewPanel.tsx";
 import { NewWorktreeModal } from "./components/NewWorktreeModal.tsx";
 import { DirectoryPicker } from "./components/DirectoryPicker.tsx";
@@ -28,7 +30,16 @@ import { SettingsModal } from "./components/SettingsModal.tsx";
 import { showAgentNotification } from "./notifications.ts";
 import { Button } from "./components/ui/button.tsx";
 import { Input } from "./components/ui/input.tsx";
-import { MoreHorizontal, Plus } from "lucide-react";
+import { FileCode, Globe, MoreHorizontal, Plus, Terminal as TerminalIcon } from "lucide-react";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "./components/ui/empty.tsx";
+import { Spinner } from "./components/ui/spinner.tsx";
 import {
   Dialog,
   DialogContent,
@@ -167,6 +178,7 @@ function App() {
   const [openDiffPath, setOpenDiffPath] = useState<string>();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [terminals, setTerminals] = useState<TerminalSummary[]>([]);
+  const [terminalsLoaded, setTerminalsLoaded] = useState(false);
   const [previews, setPreviews] = useState<WebPreview[]>([]);
   const [selectedPreviewId, setSelectedPreviewId] = useState<string>();
   const [previewHistory, setPreviewHistory] = useState<AgentHistory | null>(null);
@@ -191,6 +203,7 @@ function App() {
   const editorSaveHandlers = useRef(new Map<string, () => Promise<boolean>>());
 
   const agentsLoadGeneration = useRef(0);
+  const terminalsLoadGeneration = useRef(0);
 
   // Register service worker and offline listeners
   useEffect(() => {
@@ -276,14 +289,21 @@ function App() {
   }, [api]);
 
   const loadTerminals = useCallback(async (workspaceId: string, selectFirst = true) => {
+    const generation = ++terminalsLoadGeneration.current;
     try {
       const next = await api.listTerminals(workspaceId);
+      if (generation !== terminalsLoadGeneration.current) return;
       setTerminals(next);
       setSelectedTerminalId((current) => {
         if (current && next.some((t) => t.id === current)) return current;
         return selectFirst ? next[0]?.id : undefined;
       });
-    } catch {}
+      setTerminalsLoaded(true);
+    } catch {
+      if (generation !== terminalsLoadGeneration.current) return;
+      setTerminals([]);
+      setTerminalsLoaded(true);
+    }
   }, [api]);
 
   const loadPreviews = useCallback(async (workspaceId: string, selectFirst = true) => {
@@ -330,8 +350,10 @@ function App() {
 
   useEffect(() => {
     agentsLoadGeneration.current += 1;
+    terminalsLoadGeneration.current += 1;
     setAgents([]);
     setTerminals([]);
+    setTerminalsLoaded(false);
     setPreviews([]);
     setSelectedAgentId(undefined);
     setSelectedTerminalId(undefined);
@@ -346,6 +368,22 @@ function App() {
       void loadLayoutAndSettings(selectedWorkspaceId);
     }
   }, [loadAgents, loadTerminals, loadPreviews, loadLayoutAndSettings, selectedWorkspaceId]);
+
+  useEffect(() => {
+    if (!selectedWorkspaceId) return;
+    const sub = subscribeWorkspace(
+      selectedWorkspaceId,
+      () => {},
+      async () => {
+        await Promise.all([
+          loadAgents(selectedWorkspaceId, false),
+          loadTerminals(selectedWorkspaceId, false),
+          loadPreviews(selectedWorkspaceId, false),
+        ]);
+      }
+    );
+    return () => sub.close();
+  }, [selectedWorkspaceId, loadAgents, loadTerminals, loadPreviews]);
 
   const workspace = snapshot?.workspaces.find((item) => item.id === selectedWorkspaceId);
   const project = snapshot?.projects.find((item) => item.id === workspace?.projectId);
@@ -551,19 +589,52 @@ function App() {
     }
   };
 
-  const createTerminal = async () => {
+  const handleTerminalAttached = useCallback(
+    (oldTabId: string, created: TerminalSummary) => {
+      setTerminals((current) => {
+        if (current.some((t) => t.id === created.id)) return current;
+        return [...current, created];
+      });
+      setSelectedTerminalId(created.id);
+      setActiveTab("terminal");
+      setLayout((current) => {
+        if (!current) return current;
+        const updatedTab: PaneTab = {
+          id: `terminal-${created.id}`,
+          kind: "terminal",
+          title: created.title,
+          targetId: created.id,
+        };
+        const nextRoot = updateTabInTree(current.root, oldTabId, updatedTab);
+        const nextLayout = { ...current, root: nextRoot };
+        if (selectedWorkspaceId) {
+          void api.saveLayout(selectedWorkspaceId, nextLayout).catch(() => {});
+        }
+        return nextLayout;
+      });
+    },
+    [api, selectedWorkspaceId]
+  );
+
+  const createTerminal = async (options?: { forceNew?: boolean }) => {
     if (!workspace) return;
     try {
       const created = await api.createTerminal(workspace.id);
-      setTerminals((current) => [...current, created]);
+      setTerminals((current) => (current.some((t) => t.id === created.id) ? current : [...current, created]));
       setSelectedTerminalId(created.id);
       setActiveTab("terminal");
-      openPaneTab({
-        id: `terminal-${created.id}`,
-        kind: "terminal",
-        title: created.title,
-        targetId: created.id,
-      });
+      const liveIds = new Set(terminals.map((t) => t.id));
+      const deadTab = (!options?.forceNew && layout) ? findFirstDeadTerminalTab(layout.root, liveIds) : null;
+      if (deadTab) {
+        handleTerminalAttached(deadTab.id, created);
+      } else {
+        openPaneTab({
+          id: `terminal-${created.id}`,
+          kind: "terminal",
+          title: created.title,
+          targetId: created.id,
+        });
+      }
     } catch {}
   };
 
@@ -765,27 +836,23 @@ function App() {
       }
 
       case "terminal": {
-        const termId = tab.targetId ?? selectedTerminalId;
-        const currentTerm = terminals.find((t) => t.id === termId) ?? selectedTerminal;
-        return currentTerm ? (
-          <TerminalPanel
-            key={currentTerm.id}
-            terminal={currentTerm}
+        return (
+          <TerminalTabPane
+            key={tab.id}
+            tab={tab}
+            workspace={workspace}
+            terminals={terminals}
+            terminalsLoaded={terminalsLoaded}
             api={api}
             onClose={() => {
-              closeTabNow(`terminal-${currentTerm.id}`);
+              closeTabNow(tab.id);
               setActiveTab("overview");
             }}
             onTerminated={() => {
               void loadTerminals(workspace.id);
             }}
+            onTerminalAttached={handleTerminalAttached}
           />
-        ) : (
-          <div className="empty">
-            <span className="empty-icon" aria-hidden="true">&gt;_</span>
-            <h1>No active terminal</h1>
-            <button className="primary" onClick={() => void createTerminal()}>Launch terminal</button>
-          </div>
         );
       }
 
@@ -836,10 +903,15 @@ function App() {
             onOpenDiff={openFileDiff}
           />
         ) : (
-          <div className="empty">
-            <span className="empty-icon" aria-hidden="true">📄</span>
-            <h1>No file selected</h1>
-          </div>
+          <Empty className="border-none p-6">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FileCode className="size-5 text-muted-foreground" />
+              </EmptyMedia>
+              <EmptyTitle>No file selected</EmptyTitle>
+              <EmptyDescription>Choose a file from the explorer to view or edit.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         );
       }
 
@@ -878,16 +950,31 @@ function App() {
             }}
           />
         ) : (
-          <div className="empty">
-            <span className="empty-icon" aria-hidden="true">◉</span>
-            <h1>No web preview</h1>
-            <button className="primary" onClick={() => void createPreview()}>Start web preview</button>
-          </div>
+          <Empty className="border-none p-6">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Globe className="size-5 text-muted-foreground" />
+              </EmptyMedia>
+              <EmptyTitle>No web preview</EmptyTitle>
+              <EmptyDescription>Start a live web preview for this workspace.</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button size="sm" onClick={() => void createPreview()}>
+                Start web preview
+              </Button>
+            </EmptyContent>
+          </Empty>
         );
       }
 
       default:
-        return <div className="empty">Unknown view</div>;
+        return (
+          <Empty className="border-none p-6">
+            <EmptyHeader>
+              <EmptyTitle>Unknown view</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        );
     }
   };
 
@@ -1003,7 +1090,20 @@ function App() {
                       setActiveTab("terminal");
                       handleSelectTerminal(target.id);
                     } else {
-                      void createTerminal();
+                      const liveIds = new Set(terminals.map((t) => t.id));
+                      const deadTab = layout ? findFirstDeadTerminalTab(layout.root, liveIds) : null;
+                      if (deadTab) {
+                        setActiveTab("terminal");
+                        handleActivateTab(deadTab);
+                        if (layout) {
+                          const found = findTab(layout.root, deadTab.id);
+                          if (found) {
+                            handleLayoutChange({ ...layout, root: setActiveTabInTree(layout.root, found.node.id, deadTab.id) });
+                          }
+                        }
+                      } else {
+                        void createTerminal();
+                      }
                     }
                   }}
                 >
@@ -1092,7 +1192,14 @@ function App() {
                   workspaceId={workspace.id}
                 />
               ) : (
-                <div className="empty">Loading workspace layout…</div>
+                <Empty className="border-none p-6">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <Spinner className="size-5 text-muted-foreground" />
+                    </EmptyMedia>
+                    <EmptyTitle>Loading workspace layout…</EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
               )}
             </div>
           </div>
@@ -1124,7 +1231,7 @@ function App() {
           if (workspace) openPaneTab({ id: `${view}-${workspace.id}`, kind: view, title: view });
         }}
         onCreateAgent={() => void createAgent()}
-        onCreateTerminal={() => void createTerminal()}
+        onCreateTerminal={() => void createTerminal({ forceNew: true })}
         onResetLayout={() => {
           if (workspace) handleLayoutChange(createDefaultLayout(workspace.id));
         }}
