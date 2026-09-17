@@ -237,33 +237,17 @@ function ProjectRow({
                     <div className="workspace-copy min-w-0 flex-1">
                       <div className="flex items-center gap-1 leading-tight">
                         <b className="truncate text-xs font-medium" title={workspace.displayLabel}>{workspace.displayLabel}</b>
-                        {workspace.kind === "worktree" ? (
-                          <span className="text-[9px] px-1 py-0.2 rounded bg-muted text-muted-foreground font-mono shrink-0">
-                            worktree
-                          </span>
-                        ) : isDefaultWorkspace(workspace) ? (
+                        {isDefaultWorkspace(workspace) ? (
                           <span className="text-[9px] px-1 py-0.2 rounded bg-primary/10 text-primary font-medium shrink-0">
                             default
                           </span>
-                        ) : (
-                          <span className="text-[9px] px-1 py-0.2 rounded bg-muted/50 text-muted-foreground shrink-0">
-                            dir
-                          </span>
-                        )}
+                        ) : null}
                         {workspace.archivedAt && (
                           <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500/15 text-amber-600 font-medium shrink-0">
                             archived
                           </span>
                         )}
                       </div>
-                      {workspace.branchRef && (
-                        <small className="text-[10px] text-muted-foreground font-mono truncate block mt-0.5" title={workspace.branchRef}>
-                          ⎇ {workspace.branchRef}
-                        </small>
-                      )}
-                      <small className="text-[10px] text-muted-foreground/70 font-mono truncate block" title={workspace.cwd}>
-                        {workspace.cwd}
-                      </small>
                     </div>
                   </div>
 

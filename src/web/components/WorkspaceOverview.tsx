@@ -4,6 +4,7 @@ import type { TerminalSummary } from "../../shared/domain/terminals.ts";
 import type { WebPreview } from "../../shared/domain/previews.ts";
 import type { Project, Workspace } from "../../shared/domain/workspaces.ts";
 import { Button } from "./ui/button.tsx";
+import { CopyValueButton } from "./CopyValueButton.tsx";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card.tsx";
 import { Alert, AlertDescription } from "./ui/alert.tsx";
 import { Spinner } from "./ui/spinner.tsx";
@@ -48,10 +49,20 @@ export function WorkspaceOverview({
       <div className="flex flex-col gap-1">
         <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Workspace overview</p>
         <h1 className="text-xl font-semibold text-foreground">{workspace.displayLabel}</h1>
-        <p className="text-xs text-muted-foreground font-mono truncate" title={workspace.cwd}>
-          {project?.displayLabel ? `${project.displayLabel} / ` : ""}{workspace.cwd}
-          {workspace.branchRef ? ` · ⎇ ${workspace.branchRef}` : ""}
+        <p className="flex items-center gap-1 text-xs text-muted-foreground font-mono min-w-0">
+          <span className="truncate" title={workspace.cwd}>
+            {project?.displayLabel ? `${project.displayLabel} / ` : ""}{workspace.cwd}
+          </span>
+          <CopyValueButton value={workspace.cwd} label="workspace path" />
         </p>
+        {workspace.branchRef && (
+          <p className="flex items-center gap-1 text-xs text-muted-foreground font-mono min-w-0">
+            <span className="truncate" title={workspace.branchRef}>
+              ⎇ {workspace.branchRef}
+            </span>
+            <CopyValueButton value={workspace.branchRef} label="branch name" />
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">
           {agents.length} agent{agents.length === 1 ? "" : "s"} · {terminals.length} terminal{terminals.length === 1 ? "" : "s"} · {previews.length} preview{previews.length === 1 ? "" : "s"}
         </p>

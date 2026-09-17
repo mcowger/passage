@@ -220,7 +220,7 @@ export function WorkspaceDetailsModal({
               <dd className="font-mono break-words flex items-start gap-1">{workspace.mainRepositoryRoot ?? "Not applicable"}{workspace.mainRepositoryRoot && <CopyValueButton value={workspace.mainRepositoryRoot} label="main repository path" />}</dd>
 
               <dt className="text-muted-foreground">Branch ref</dt>
-              <dd className="font-mono">{workspace.branchRef ?? "None (directory)"}</dd>
+              <dd className="font-mono break-words flex items-start gap-1">{workspace.branchRef ?? "None (directory)"}{workspace.branchRef && <CopyValueButton value={workspace.branchRef} label="branch ref" />}</dd>
 
               <dt className="text-muted-foreground">Ownership</dt>
               <dd>{workspace.ownershipState}</dd>
