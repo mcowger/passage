@@ -715,13 +715,15 @@ const LiveStreamPhase = memo(function LiveStreamPhase({
 }) {
   if (!phase) return null;
   const Icon = STREAM_PHASE_ICONS[phase];
+  const label = STREAM_PHASE_LABELS[phase];
   return (
     <span
       className={`live-stream-phase${receiving ? " is-receiving" : ""}`}
-      title={receiving ? "Receiving data from Pi" : "Waiting for Pi"}
+      title={label}
+      role="img"
+      aria-label={label}
     >
       <Icon size={11} aria-hidden="true" />
-      {STREAM_PHASE_LABELS[phase]}
     </span>
   );
 });
