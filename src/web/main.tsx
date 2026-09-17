@@ -1271,6 +1271,7 @@ function App() {
                     if (tabId.startsWith("diff-")) setOpenDiffPath(undefined);
                   }}
                   workspaceId={workspace.id}
+                  agents={agents}
                 />
               ) : (
                 <Empty className="border-none p-6">

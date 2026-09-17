@@ -52,8 +52,10 @@
   --destructive-foreground: #ffffff;
   --ring: #0f766e;
   --radius: 6px;
-  --status-running: #d97706;
-  --status-idle: #0f766e;
+  --status-running: #16a34a;
+  --status-idle: #0369a1;
+  --status-active: #16a34a;
+  --status-attention: #dc2626;
   --status-error: #b91c1c;
   --user-card-bg: #f6f2ea;
   --user-card-border: #e7e2d7;
@@ -97,6 +99,11 @@
   --chip-green-fg: #4ade80;
   --badge-orange-subtle: rgba(245, 158, 11, 0.15);
   --danger-subtle: rgba(239, 68, 68, 0.15);
+  --status-running: var(--status-active);
+  --status-idle: #38bdf8;
+  --status-active: #4ade80;
+  --status-attention: #f87171;
+  --status-error: #f87171;
 }
 
 * { box-sizing: border-box; }

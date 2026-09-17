@@ -14,6 +14,7 @@ import {
   Plus,
 } from "lucide-react";
 import { cn } from "../lib/utils.ts";
+import { AGENT_STATUS_LABEL, getWorkspaceStatusKind } from "./agentStatus.ts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
 import {
   AlertDialog,
@@ -205,9 +206,11 @@ function ProjectRow({
         <div className="workspace-list">
           {rows.map((workspace) => {
             const isWorkspaceSelected = workspace.id === selected;
-            const hasActiveAgent = agents.some(
-              (agent) => agent.workspaceId === workspace.id && (agent.status === "running" || agent.status === "stopping")
+            const workspaceAgents = agents.filter(
+              (agent) => agent.workspaceId === workspace.id
             );
+            const statusKind = getWorkspaceStatusKind(workspaceAgents);
+            const statusLabel = workspace.archivedAt ? "Archived" : AGENT_STATUS_LABEL[statusKind];
 
             return (
               <div className="workspace-group group/ws" key={workspace.id}>
@@ -222,8 +225,9 @@ function ProjectRow({
                 >
                   <div className="flex items-center gap-1.5 min-w-0 flex-1">
                     <span
-                      className={cn("status-dot shrink-0", hasActiveAgent ? "running" : "idle")}
-                      aria-label={workspace.archivedAt ? "Archived" : "Ready"}
+                      className={cn("status-dot shrink-0", statusKind)}
+                      aria-label={statusLabel}
+                      title={statusLabel}
                     />
                     {workspace.kind === "worktree" ? (
                       <GitBranch className="w-3 h-3 text-primary/90 shrink-0" />

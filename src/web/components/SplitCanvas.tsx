@@ -1,5 +1,7 @@
 import React, { useCallback, useRef, useState } from "react";
 import type { LayoutNode, PaneTab, SplitNode, TabGroupNode, WorkspaceLayout } from "../../shared/domain/layout.ts";
+import type { AgentSummary } from "../../shared/domain/agents.ts";
+import { AGENT_STATUS_LABEL, getAgentStatusKind } from "./agentStatus.ts";
 import {
   addTabToGroup,
   createDefaultLayout,
@@ -17,6 +19,7 @@ export interface SplitCanvasProps {
   onActivateTab?: (tab: PaneTab) => void;
   onCloseTab?: (tabId: string) => boolean | void;
   workspaceId: string;
+  agents?: AgentSummary[];
 }
 
 export function SplitCanvas({
@@ -26,6 +29,7 @@ export function SplitCanvas({
   onActivateTab,
   onCloseTab,
   workspaceId,
+  agents,
 }: SplitCanvasProps) {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -106,6 +110,7 @@ export function SplitCanvas({
         onSplitRight={handleSplitRight}
         onSplitDown={handleSplitDown}
         onOpenContextMenu={(x, y, tabId, groupId) => setContextMenu({ x, y, tabId, groupId })}
+        agents={agents}
       />
 
       {contextMenu && (
@@ -181,6 +186,7 @@ interface NodeRendererProps {
   onSplitRight: (groupId: string, tab: PaneTab) => void;
   onSplitDown: (groupId: string, tab: PaneTab) => void;
   onOpenContextMenu: (x: number, y: number, tabId: string, groupId: string) => void;
+  agents?: AgentSummary[];
 }
 
 function NodeRenderer(props: NodeRendererProps) {
@@ -305,16 +311,16 @@ function TabGroupRenderer({
   onSplitDown,
   onOpenContextMenu,
   canCloseTab,
+  agents,
 }: TabGroupRendererProps) {
   const activeTab =
     group.tabs.find((t) => t.id === group.activeTabId) ?? group.tabs[0];
+  const agentsById = new Map((agents ?? []).map((agent) => [agent.id, agent]));
 
   const getTabIcon = (kind: PaneTab["kind"]) => {
     switch (kind) {
       case "overview":
         return "ℹ";
-      case "agent":
-        return "◈";
       case "terminal":
         return ">_";
       case "editor":
@@ -328,6 +334,23 @@ function TabGroupRenderer({
       default:
         return "•";
     }
+  };
+
+  const renderTabLeading = (tab: PaneTab) => {
+    if (tab.kind === "agent" && tab.targetId) {
+      const agent = agentsById.get(tab.targetId);
+      const kind = agent ? getAgentStatusKind(agent) : "idle";
+      const label = agent ? AGENT_STATUS_LABEL[kind] : "Ready";
+      return (
+        <span
+          className={`canvas-tab-dot ${kind}`}
+          role="img"
+          aria-label={label}
+          title={label}
+        />
+      );
+    }
+    return <span className="canvas-tab-icon">{getTabIcon(tab.kind)}</span>;
   };
 
   return (
@@ -349,7 +372,7 @@ function TabGroupRenderer({
                   onOpenContextMenu(e.clientX, e.clientY, tab.id, group.id);
                 }}
               >
-                <span className="canvas-tab-icon">{getTabIcon(tab.kind)}</span>
+                {renderTabLeading(tab)}
                 <span className="canvas-tab-title">{tab.title}</span>
                 {canCloseTab && (
                   <button

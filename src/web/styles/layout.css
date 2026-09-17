@@ -92,8 +92,15 @@
   flex-shrink: 0;
   line-height: 0;
 }
-.status-dot.running {
-  background-color: var(--status-running);
+.status-dot.idle {
+  background-color: var(--status-idle);
+}
+.status-dot.running,
+.status-dot.active {
+  background-color: var(--status-active, var(--status-running));
+}
+.status-dot.attention {
+  background-color: var(--status-attention, var(--status-error));
 }
 .status-dot.dot-sm,
 .status-dot.small {

@@ -43,6 +43,19 @@
 .canvas-tab.active { color: var(--foreground); background: var(--surface-subtle); font-weight: 600; }
 .canvas-tab:hover:not(.active) { color: var(--foreground); background: var(--surface-hover); }
 .canvas-tab-icon { font-size: 12px; }
+.canvas-tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border-radius: 50%;
+  background-color: var(--status-idle);
+  flex-shrink: 0;
+  line-height: 0;
+}
+.canvas-tab-dot.idle { background-color: var(--status-idle); }
+.canvas-tab-dot.active { background-color: var(--status-active, var(--status-running)); }
+.canvas-tab-dot.attention { background-color: var(--status-attention, var(--status-error)); }
 .canvas-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .canvas-tab-close { background: none; border: 0; color: var(--muted); font-size: 12px; padding: 0 2px; border-radius: 2px; line-height: 1; margin-left: 3px; }
 .canvas-tab-close:hover { background: var(--border-strong); color: var(--foreground); }
