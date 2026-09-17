@@ -16,6 +16,7 @@ import {
 import { MetadataRepositories, type Agent } from "../metadata/repositories.ts";
 import { normalizeAvailableModels } from "../models/catalog.ts";
 import { parsePiExtensionUiDialog } from "./ui.ts";
+import { errorFields, logger } from "../logging.ts";
 
 const MAX_LIST = 100;
 const MAX_LISTENERS = 64;
@@ -195,6 +196,7 @@ export class AgentService {
       await this.reconcile(agent.id);
     } catch (cause) {
       const error = cause instanceof Error ? cause.message : String(cause);
+      logger("agent").error("Agent could not start", { event: "agent.start_failed", agentId: agent.id, ...errorFields(cause) });
       this.updateStatus(agent.id, "error", "attention", undefined, error);
     }
   }
@@ -212,6 +214,7 @@ export class AgentService {
     try {
       await process.request({ type: "prompt", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
     } catch (cause) {
+      logger("agent").error("Agent prompt failed", { event: "agent.prompt_failed", agentId, generation: process.generation, ...errorFields(cause) });
       this.updateStatus(agentId, "error", "attention", process.generation, String(cause));
       throw cause;
     }
@@ -484,6 +487,7 @@ export class AgentService {
       stderrTruncated: event.stderrTruncated,
     });
     while (this.diagnostics.size > MAX_RUNTIME_DIAGNOSTICS) this.diagnostics.delete(this.diagnostics.keys().next().value!);
+    logger("agent").error("Agent Pi process ended", { event: "agent.process_ended", agentId, generation: event.generation, exitStatus: `${event.lifecycle} (${event.exitCode})`, exitCode: event.exitCode, stderrBytes: event.stderr.reduce((total, part) => total + encoder.encode(part).byteLength, 0), stderrTruncated: event.stderrTruncated });
     this.detach(agentId);
     this.updateStatus(agentId, "error", "attention", event.generation, `Pi process exited (${event.exitCode})`);
   }
@@ -592,7 +596,8 @@ export class AgentService {
         this.updateStatus(agentId, "error", "attention", process.generation, String(latestItem.error));
         return;
       }
-    } catch {
+    } catch (cause) {
+      logger("agent").error("Agent history reconciliation failed", { event: "agent.reconcile_failed", agentId, generation: process.generation, ...errorFields(cause) });
       this.updateStatus(agentId, "error", "attention", process.generation, "Unable to reconcile Pi session history");
       return;
     }

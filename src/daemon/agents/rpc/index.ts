@@ -8,6 +8,7 @@ import {
   type AgentImage,
 } from "../../../shared/protocol/agents.ts";
 import { parsePiExtensionUiDialog } from "../ui.ts";
+import { errorFields, logger } from "../../logging.ts";
 
 export type PiRecord = { type?: string; id?: string; [key: string]: unknown };
 export type PiImageBlock = AgentImage;
@@ -97,6 +98,7 @@ export class PiRpcProcess {
       stdout: "pipe",
       stderr: "pipe",
     });
+    logger("pi-rpc").info("Pi process started", { event: "pi.process_started", generation });
     const parser = new LfJsonlParser<PiRecord>(
       record => this.receive(record),
       this.limits.maxRecordBytes,
@@ -130,7 +132,7 @@ export class PiRpcProcess {
     if (chunk.byteLength > keep) this.stderrTruncated = true;
   }
   private protocolFailure(error: unknown) {
-    console.error("[Pi Protocol Failure]", error);
+    logger("pi-rpc").error("Pi protocol failure", { event: "pi.protocol_failure", generation: this.generation, ...errorFields(error) });
     this.failPending(asError(error));
     if (this.child.exitCode === null) this.child.kill();
   }
@@ -146,6 +148,13 @@ export class PiRpcProcess {
       stderr: [...this.stderr],
       stderrTruncated: this.stderrTruncated,
     };
+    logger("pi-rpc")[this.lifecycle === "crashed" ? "error" : "info"]("Pi process exited", {
+      event: this.lifecycle === "crashed" ? "pi.process_crashed" : "pi.process_stopped",
+      generation: this.generation,
+      exitCode: code,
+      stderrBytes: this.stderr.reduce((total, part) => total + encoder.encode(part).byteLength, 0),
+      stderrTruncated: this.stderrTruncated,
+    });
     for (const listener of this.lifecycleListeners) {
       try { listener(event); } catch {}
     }
@@ -161,7 +170,11 @@ export class PiRpcProcess {
     const line = `${JSON.stringify({ ...command, id })}\n`;
     if (encoder.encode(line).byteLength > this.limits.maxCommandBytes) return Promise.reject(new Error("Pi command exceeds byte limit"));
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Pi request timed out: ${command.type}`)); }, timeoutMs);
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        logger("pi-rpc").warn("Pi request timed out", { event: "pi.request_timeout", generation: this.generation, command: command.type, timeoutMs });
+        reject(new Error(`Pi request timed out: ${command.type}`));
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       try { this.child.stdin.write(line); } catch (error) { clearTimeout(timer); this.pending.delete(id); reject(asError(error)); }
     });
