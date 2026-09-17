@@ -65,32 +65,9 @@ export type AgentPanelProps = {
   settings?: WorkspaceSettings;
 };
 
-export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: TimelineItem[]): QuestionRequest | null {
+export function resolveActiveQuestionRequest(agent: AgentSummary): QuestionRequest | null {
   const pending = agent.pendingUiRequest as Record<string, unknown> | undefined;
   if (pending && pending.id) {
-    if (Array.isArray(pending.questions) && pending.questions.length > 0) {
-      return {
-        id: String(pending.id),
-        method: pending.method as any,
-        questions: (pending.questions as any[]).map((q) => ({
-          question: String(q.question || ""),
-          header: q.header ? String(q.header) : undefined,
-          options: Array.isArray(q.options)
-            ? q.options.map((o: any) =>
-                typeof o === "string"
-                  ? { label: o }
-                  : {
-                      label: String(o.label || ""),
-                      description: o.description ? String(o.description) : undefined,
-                      preview: o.preview ? String(o.preview) : undefined,
-                    }
-              )
-            : [],
-          multiple: Boolean(q.multiple || q.multiSelect),
-        })),
-      };
-    }
-
     if (pending.method === "select" || (Array.isArray(pending.options) && pending.options.length > 0)) {
       let header = "Select";
       let question = String(pending.title || "Choose an option");
@@ -101,6 +78,9 @@ export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: Tim
       }
 
       const rawOptions = Array.isArray(pending.options) ? pending.options : [];
+      const allowOther = rawOptions.some((option) =>
+        typeof option === "string" && /^\d+\.\s*(Type something\.|Other\b)|^Type something\.$/i.test(option.trim())
+      );
       const options: QuestionOption[] = rawOptions.flatMap((opt: unknown) => {
         if (!opt) return [];
         if (typeof opt === "object" && opt !== null && "label" in opt) {
@@ -146,6 +126,7 @@ export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: Tim
             question,
             header,
             options,
+            allowOther,
           },
         ],
       };
@@ -177,67 +158,22 @@ export function resolveActiveQuestionRequest(agent: AgentSummary, timeline?: Tim
             question: String(pending.title || "Input needed"),
             header: pending.method === "editor" ? "Editor" : "Input",
             options: [],
+            placeholder: typeof pending.placeholder === "string" ? pending.placeholder : undefined,
+            prefill: typeof pending.prefill === "string" ? pending.prefill : undefined,
           },
         ],
       };
     }
   }
-
-  // Check last running tool in timeline
-  if (timeline && timeline.length > 0) {
-    for (let i = timeline.length - 1; i >= 0; i--) {
-      const item = timeline[i];
-      if (item.kind === "user") break;
-      if (item.kind === "tool" && item.status === "running") {
-        const input = item.input as { questions?: any[]; options?: any[]; question?: string; header?: string } | undefined;
-        if (Array.isArray(input?.questions) && input.questions.length > 0) {
-          return {
-            id: item.id,
-            questions: input.questions.map((q: any) => ({
-              question: String(q.question || ""),
-              header: q.header ? String(q.header) : undefined,
-              options: Array.isArray(q.options)
-                ? q.options.map((o: any) =>
-                    typeof o === "string"
-                      ? { label: o }
-                      : {
-                          label: String(o.label || ""),
-                          description: o.description ? String(o.description) : undefined,
-                          preview: o.preview ? String(o.preview) : undefined,
-                        }
-                  )
-                : [],
-              multiple: Boolean(q.multiple || q.multiSelect),
-            })),
-          };
-        }
-        // Handle flat tool input: { question, header, options }
-        if (Array.isArray(input?.options) && input.options.length > 0) {
-          return {
-            id: item.id,
-            questions: [
-              {
-                question: String(input.question || "Choose an option"),
-                header: input.header ? String(input.header) : undefined,
-                options: input.options.map((o: any) =>
-                  typeof o === "string"
-                    ? { label: o }
-                    : {
-                        label: String(o.label || ""),
-                        description: o.description ? String(o.description) : undefined,
-                        preview: o.preview ? String(o.preview) : undefined,
-                      }
-                ),
-                multiple: false,
-              },
-            ],
-          };
-        }
-      }
-    }
-  }
-
   return null;
+}
+
+/** A native Pi dialog supersedes its blocking tool invocation while it is open. */
+export function timelineWithoutBlockingTool(timeline: TimelineItem[], hasActiveUiRequest: boolean): TimelineItem[] {
+  if (!hasActiveUiRequest) return timeline;
+  return timeline.filter(
+    (item) => item.kind !== "tool" || item.status !== "running" || item.name !== "ask_user_question"
+  );
 }
 
 export function resolveCurrentModel(
@@ -418,8 +354,12 @@ export function AgentPanel({
   );
 
   const questionRequest = useMemo(
-    () => resolveActiveQuestionRequest(agent, effectiveHistory?.timeline),
-    [agent, effectiveHistory?.timeline]
+    () => resolveActiveQuestionRequest(agent),
+    [agent]
+  );
+  const visibleTimeline = useMemo(
+    () => timelineWithoutBlockingTool(timeline, questionRequest !== null),
+    [timeline, questionRequest]
   );
 
   useEffect(() => {
@@ -455,7 +395,7 @@ export function AgentPanel({
             </div>
           ) : (
             <>
-              {effectiveHistory?.timeline?.map((item) => (
+              {visibleTimeline.map((item) => (
                 <TimelineRow
                   key={item.id}
                   item={item}
@@ -469,7 +409,7 @@ export function AgentPanel({
                 />
               ))}
               {questionRequest && (
-                <QuestionCard request={questionRequest} onRespond={handleRespondUi} />
+                <QuestionCard key={questionRequest.id} request={questionRequest} onRespond={handleRespondUi} />
               )}
             </>
           )}

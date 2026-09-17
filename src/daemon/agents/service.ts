@@ -15,6 +15,7 @@ import {
 } from "./rpc/index.ts";
 import { MetadataRepositories, type Agent } from "../metadata/repositories.ts";
 import { normalizeAvailableModels } from "../models/catalog.ts";
+import { parsePiExtensionUiDialog } from "./ui.ts";
 
 const MAX_LIST = 100;
 const MAX_LISTENERS = 64;
@@ -124,7 +125,10 @@ export class AgentService {
     const diagnostic = this.diagnostics.get(agentId);
     const pendingUiRequest = agent.lastKnownStatus === "stopping"
       ? undefined
-      : (process?.getPendingUiRequest() as Record<string, unknown> | undefined) ?? this.pendingUiRequests.get(agentId);
+      : (() => {
+          const pending = process?.getPendingUiRequest();
+          return pending ? parsePiExtensionUiDialog(pending) : undefined;
+        })() ?? this.pendingUiRequests.get(agentId);
     const lastKnownStatus = pendingUiRequest ? "needs-attention" : agent.lastKnownStatus;
     return {
       ...agent,
@@ -455,19 +459,19 @@ export class AgentService {
       this.emit({ agentId, type: String(event.type ?? "event"), status: currentStatus, generation: event.generation, payload });
     } else if (event.type === "agent_start" || event.type === "turn_start") {
       this.updateStatus(agentId, "running", "status", event.generation, undefined, payload);
-    } else if (
-      ["permission_request", "user_input_request"].includes(String(event.type)) ||
-      (event.type === "extension_ui_request" && !["setStatus", "setWidget", "notify"].includes(String(event.method)))
-    ) {
-      this.pendingUiRequests.set(agentId, { ...payload, type: event.type, method: event.method });
-      this.updateStatus(agentId, "needs-attention", "attention", event.generation, undefined, payload);
-    } else if (["error", "prompt_error", "extension_error"].includes(String(event.type))) {
-      this.updateStatus(agentId, "error", "attention", event.generation, undefined, payload);
     } else {
-      if (event.type === "thinking_level_changed" && typeof event.level === "string") {
-        this.repositories.agents.updateThinkingPreference(agentId, event.level);
+      const dialog = parsePiExtensionUiDialog(event);
+      if (dialog) {
+        this.pendingUiRequests.set(agentId, dialog);
+        this.updateStatus(agentId, "needs-attention", "attention", event.generation, undefined, dialog);
+      } else if (["error", "prompt_error", "extension_error"].includes(String(event.type))) {
+        this.updateStatus(agentId, "error", "attention", event.generation, undefined, payload);
+      } else {
+        if (event.type === "thinking_level_changed" && typeof event.level === "string") {
+          this.repositories.agents.updateThinkingPreference(agentId, event.level);
+        }
+        this.emit({ agentId, type: String(event.type ?? "event"), status: currentStatus, generation: event.generation, payload });
       }
-      this.emit({ agentId, type: String(event.type ?? "event"), status: currentStatus, generation: event.generation, payload });
     }
   }
 
