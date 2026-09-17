@@ -54,13 +54,22 @@ export function applyUsageEvent(history: AgentHistory | undefined, payload: Reco
     | { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number; cost?: { total?: number } }
     | undefined;
   if (!usage) return history;
+  // Session cost is cumulative and never decreases: some providers report
+  // zero (or no) cost while a turn is in flight and only finalize it on
+  // completion, so a smaller incoming total must never clobber the last
+  // known value -- otherwise the composer's cost pill blinks in and out as
+  // the call moves through sending/waiting/completed states.
+  const incomingCost = usage.cost?.total;
+  const cost = typeof incomingCost === "number" && Number.isFinite(incomingCost)
+    ? Math.max(history.usage.cost, incomingCost)
+    : history.usage.cost;
   const nextUsage = {
     input: usage.input ?? history.usage.input,
     output: usage.output ?? history.usage.output,
     cacheRead: usage.cacheRead ?? history.usage.cacheRead,
     cacheWrite: usage.cacheWrite ?? history.usage.cacheWrite,
     totalTokens: usage.totalTokens ?? history.usage.totalTokens,
-    cost: usage.cost?.total ?? history.usage.cost,
+    cost,
   };
   // Streaming usage is per-message, so its total is the live context size.
   // `message_update` records may report zero until the provider finalizes

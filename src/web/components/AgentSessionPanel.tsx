@@ -116,7 +116,15 @@ export async function loadAgentSessionWithRetry(
 export function mergeLoadedHistory(current: AgentHistory | undefined, loaded: AgentHistory | undefined): AgentHistory | undefined {
   if (!loaded) return current;
   if (!current || current.transcriptEpoch !== loaded.transcriptEpoch) return loaded;
-  return { ...loaded, timeline: current.timeline };
+  // A same-epoch refetch can race a live usage delta the client already
+  // applied (the journal lags the stream while a turn is in flight), so
+  // keep the higher cost instead of letting a stale zero blink the
+  // composer's cost pill out until the next live event re-asserts it.
+  return {
+    ...loaded,
+    timeline: current.timeline,
+    usage: { ...loaded.usage, cost: Math.max(current.usage.cost, loaded.usage.cost) },
+  };
 }
 
 /** True exactly when `mergeLoadedHistory` would discard the currently

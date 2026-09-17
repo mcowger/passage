@@ -245,6 +245,33 @@ describe("TranscriptState", () => {
     state.applyEvent("message_update", { usage: { input: 0, output: 0, totalTokens: 0 } });
     expect(state.snapshot().contextUsage.tokens).toBe(150);
   });
+
+  test("a zero or missing in-flight cost never clobbers the last known cost", () => {
+    const state = new TranscriptState();
+    state.applyEvent("message_end", { usage: { input: 100, output: 50, totalTokens: 150, cost: { total: 0.01 } } });
+    expect(state.snapshot().usage.cost).toBe(0.01);
+    // Some providers report no cost until the turn finalizes: neither form
+    // may hide the already-known price (which would blink the cost pill).
+    state.applyEvent("message_update", { usage: { input: 10, output: 5, totalTokens: 15, cost: { total: 0 } } });
+    expect(state.snapshot().usage.cost).toBe(0.01);
+    state.applyEvent("message_update", { usage: { input: 10, output: 5, totalTokens: 15 } });
+    expect(state.snapshot().usage.cost).toBe(0.01);
+    // A higher finalized total still advances the cost.
+    state.applyEvent("message_end", { usage: { input: 200, output: 100, totalTokens: 300, cost: { total: 0.02 } } });
+    expect(state.snapshot().usage.cost).toBe(0.02);
+  });
+
+  test("refreshFromJournal never lets a lagging journal clobber live cost", () => {
+    const state = new TranscriptState();
+    state.applyEvent("message_end", { usage: { input: 100, output: 50, totalTokens: 150, cost: { total: 0.01 } } });
+    state.refreshFromJournal({
+      timeline: [],
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
+      contextUsage: { tokens: null },
+      agentErrorCount: 0,
+    });
+    expect(state.snapshot().usage.cost).toBe(0.01);
+  });
 });
 
 describe("truncateRowForWire", () => {

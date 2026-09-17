@@ -155,13 +155,22 @@ export class TranscriptState {
       | { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number; cost?: { total?: number } }
       | undefined;
     if (!usage) return;
+    // Session cost is cumulative and never decreases: some providers report
+    // zero (or no) cost while a turn is in flight and only finalize it on
+    // completion, so a smaller incoming total must never clobber the last
+    // known value -- otherwise the composer's cost pill blinks in and out
+    // as the call moves through sending/waiting/completed states.
+    const incomingCost = usage.cost?.total;
+    const cost = typeof incomingCost === "number" && Number.isFinite(incomingCost)
+      ? Math.max(this.usage.cost, incomingCost)
+      : this.usage.cost;
     this.usage = {
       input: usage.input ?? this.usage.input,
       output: usage.output ?? this.usage.output,
       cacheRead: usage.cacheRead ?? this.usage.cacheRead,
       cacheWrite: usage.cacheWrite ?? this.usage.cacheWrite,
       totalTokens: usage.totalTokens ?? this.usage.totalTokens,
-      cost: usage.cost?.total ?? this.usage.cost,
+      cost,
     };
     // Streaming usage is per-message, so its total is the live context size.
     // `message_update` records may report zero until the provider finalizes
@@ -356,7 +365,10 @@ export class TranscriptState {
       if (existing && JSON.stringify(existing) === JSON.stringify(item)) continue;
       changed.push(this.upsert(item));
     }
-    this.usage = { ...history.usage };
+    // The journal can lag the live stream (an in-flight turn's cost is not
+    // journaled until Pi flushes the message), so never let a stale journal
+    // read clobber a higher cost already seen live -- see applyUsage above.
+    this.usage = { ...history.usage, cost: Math.max(this.usage.cost, history.usage.cost) };
     if (history.contextUsage?.tokens != null) this.contextTokens = history.contextUsage.tokens;
     if (history.currentModel) this.currentModel = history.currentModel;
     if (history.currentThinkingLevel) this.currentThinkingLevel = history.currentThinkingLevel;

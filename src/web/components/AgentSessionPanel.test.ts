@@ -163,6 +163,16 @@ describe("mergeLoadedHistory", () => {
     expect(merged).toBe(loaded);
     expect(merged?.timeline).toEqual([row("fresh-journal-id")]);
   });
+
+  test("same epoch: a lagging fetch never clobbers live cost with zero", () => {
+    const usage = (cost: number) => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost });
+    const current = baseline({ transcriptEpoch: 7, usage: usage(0.01) });
+    const loaded = baseline({ transcriptEpoch: 7, usage: usage(0) });
+    expect(mergeLoadedHistory(current, loaded)?.usage.cost).toBe(0.01);
+    // A genuinely higher fetched total still advances the cost.
+    const richer = baseline({ transcriptEpoch: 7, usage: usage(0.02) });
+    expect(mergeLoadedHistory(current, richer)?.usage.cost).toBe(0.02);
+  });
 });
 
 describe("historyReplaced", () => {

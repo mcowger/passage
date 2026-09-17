@@ -88,6 +88,13 @@ describe("applyUsageEvent", () => {
     expect(next?.contextUsage?.tokens).toBe(150);
   });
 
+  test("a zero or missing in-flight cost never clobbers the last known cost", () => {
+    const withCost = { ...base, usage: { ...base.usage, cost: 0.01 } };
+    expect(applyUsageEvent(withCost, { usage: { input: 1, output: 1, totalTokens: 2, cost: { total: 0 } } })?.usage.cost).toBe(0.01);
+    expect(applyUsageEvent(withCost, { usage: { input: 1, output: 1, totalTokens: 2 } })?.usage.cost).toBe(0.01);
+    expect(applyUsageEvent(withCost, { usage: { input: 1, output: 1, totalTokens: 2, cost: { total: 0.02 } } })?.usage.cost).toBe(0.02);
+  });
+
   test("never touches timeline", () => {
     const withRows = { ...base, timeline: [tool("a")] };
     const next = applyUsageEvent(withRows, { usage: { totalTokens: 5 } });
