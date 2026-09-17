@@ -3,6 +3,9 @@ import React from "react";
 import ReactDOMServer from "react-dom/server";
 import { formatDuration, formatThinkingPreview, isComposerLocked, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
+import type { WorkspaceApi } from "../api.ts";
+
+const stubApi = { imageUrl: (id: string, hash: string) => `/api/agents/${id}/images/${hash}` } as unknown as WorkspaceApi;
 
 const modelOptions: AgentCapabilities["models"] = [
   {
@@ -111,6 +114,8 @@ describe("TimelineRow", () => {
   test("renders a Pi abort as a labeled alert instead of assistant prose", () => {
     const html = ReactDOMServer.renderToStaticMarkup(
       React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
         concise: false,
         item: { kind: "assistant", id: "turn-1:terminal", text: "Request was aborted", error: "Request was aborted" },
       }),
@@ -127,6 +132,8 @@ describe("TimelineRow", () => {
   test("renders thinking block with open attribute when expanded", () => {
     const htmlOpen = ReactDOMServer.renderToStaticMarkup(
       React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
         concise: false,
         item: { kind: "thinking", id: "think-2", text: "Latest thinking" },
         expansion: {
@@ -149,6 +156,8 @@ describe("TimelineRow", () => {
 
     const htmlClosed = ReactDOMServer.renderToStaticMarkup(
       React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
         concise: false,
         item: { kind: "thinking", id: "think-1", text: "Older thinking" },
         expansion: {
@@ -170,9 +179,48 @@ describe("TimelineRow", () => {
     expect(htmlClosed).not.toContain("open=\"\"");
   });
 
+  test("renders uploaded image thumbnails in the user message card", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
+        concise: false,
+        item: {
+          kind: "user",
+          id: "u-images",
+          text: "Look",
+          images: [{ hash: `${"a".repeat(64)}`, mimeType: "image/png", name: "shot.png" }],
+        },
+      }),
+    );
+    expect(html).toContain("user-image-strip");
+    expect(html).toContain(`/api/agents/agt-test/images/${"a".repeat(64)}`);
+    expect(html).toContain("shot.png");
+  });
+
+  test("renders optimistic previews from data URLs", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
+        concise: false,
+        item: {
+          kind: "user",
+          id: "optimistic-pending",
+          text: "Attached image",
+          images: [{ hash: "", mimeType: "image/png", name: "shot.png", previewUrl: "data:image/png;base64,AAA" }],
+        },
+      }),
+    );
+    expect(html).toContain("user-image-strip");
+    expect(html).toContain("data:image/png;base64,AAA");
+  });
+
   test("renders a daemon-level error as its own chronological alert row", () => {
     const html = ReactDOMServer.renderToStaticMarkup(
       React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
         concise: false,
         item: { kind: "error", id: "err-1", text: "Pi process exited (1)" },
         expansion: {

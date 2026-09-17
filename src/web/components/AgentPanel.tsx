@@ -1,6 +1,6 @@
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { AgentCapabilities, AgentHistory, AgentSummary, SlashCommand, TimelineItem, ToolActivity } from "../../shared/domain/agents.ts";
+import type { AgentCapabilities, AgentHistory, AgentSummary, SlashCommand, TimelineItem, ToolActivity, UserImageRef } from "../../shared/domain/agents.ts";
 import type { WorkspaceSettings, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
 import { DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
 import { MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentImage } from "../../shared/protocol/agents.ts";
@@ -33,6 +33,7 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog.tsx";
 import { QuestionCard, type QuestionRequest, type QuestionOption } from "./QuestionCard.tsx";
+import { UserImageStrip } from "./UserImages.tsx";
 import { getToolDiff } from "../lib/tool-diff.ts";
 import { formatCompactTokens } from "../lib/utils.ts";
 import { RECEIVING_ACTIVITY_WINDOW_MS, STREAM_PHASE_LABELS, emptyStreamActivity, formatByteCount, type StreamActivity, type StreamPhase } from "../lib/stream-activity.ts";
@@ -63,7 +64,7 @@ export type AgentPanelProps = {
   onRefresh: () => Promise<void>;
   onModelChanged?: (agent: AgentSummary) => void;
   onArchive: () => Promise<void>;
-  onOptimisticMessage?: (message: string) => void;
+  onOptimisticMessage?: (message: string, images?: UserImageRef[]) => void;
   /** Offline transcript override for rendering verification (never live state). */
   previewHistory?: AgentHistory;
   settings?: WorkspaceSettings;
@@ -490,6 +491,8 @@ export function AgentPanel({
                 <TimelineRow
                   key={item.id}
                   item={item}
+                  agentId={agent.id}
+                  api={api}
                   concise={concise}
                   expansion={sessionExpansion}
                   latestIds={latestIds}
@@ -524,11 +527,11 @@ export function AgentPanel({
         setBusy={setBusy}
         onRefresh={onRefresh}
         onModelChanged={onModelChanged}
-        onOptimisticMessage={(message) => {
+        onOptimisticMessage={(message, images) => {
           // A user sending a new message always wants to see it, even if they
           // had scrolled up to read earlier output.
           pinnedRef.current = true;
-          onOptimisticMessage?.(message);
+          onOptimisticMessage?.(message, images);
         }}
         currentModel={currentModel}
         currentModelDisplayName={currentModelDisplayName}
@@ -622,7 +625,7 @@ type AgentComposerProps = {
   setBusy: (b: boolean) => void;
   onRefresh: () => Promise<void>;
   onModelChanged?: (agent: AgentSummary) => void;
-  onOptimisticMessage?: (message: string) => void;
+  onOptimisticMessage?: (message: string, images?: UserImageRef[]) => void;
   currentModel?: AgentCapabilities["models"][number] | { name: string; id: string; provider: string; contextWindow?: number };
   currentModelDisplayName: string;
   thinking: string;
@@ -884,12 +887,22 @@ function AgentComposerInner({
     const value = draft.trim();
     if (!value && images.length === 0) return;
     const finalMessage = value || (images.length > 0 ? "Attached image" : "");
-    const payloadImages: AgentImage[] = images.map(({ type, data, mimeType }) => ({
+    const payloadImages: AgentImage[] = images.map(({ type, data, mimeType, name }) => ({
       type,
       data,
       mimeType,
+      name,
     }));
-    onOptimisticMessage?.(finalMessage);
+    // Instant pre-echo: the daemon hasn't hashed/cached these yet, so the
+    // optimistic row carries data URLs and no hashes; the real row_upsert
+    // (with cache refs) replaces this row when it arrives.
+    const optimisticImages: UserImageRef[] = images.map(({ mimeType, name, data }) => ({
+      hash: "",
+      mimeType,
+      name,
+      previewUrl: `data:${mimeType};base64,${data}`,
+    }));
+    onOptimisticMessage?.(finalMessage, optimisticImages.length > 0 ? optimisticImages : undefined);
     void run(
       async () => {
         await api[kind](agentId, finalMessage, payloadImages.length > 0 ? payloadImages : undefined);
@@ -1285,6 +1298,8 @@ function summarizeChanges(timeline: TimelineItem[]): { fileCount: number; additi
 
 export interface TimelineRowProps {
   item: TimelineItem;
+  agentId: string;
+  api: WorkspaceApi;
   concise: boolean;
   expansion?: TimelineExpansionSettings;
   latestIds?: LatestTimelineIds;
@@ -1295,6 +1310,8 @@ export interface TimelineRowProps {
 
 export const TimelineRow = memo(function TimelineRow({
   item,
+  agentId,
+  api,
   concise,
   expansion = DEFAULT_TIMELINE_EXPANSION,
   latestIds = { latestToolIds: {} },
@@ -1367,6 +1384,9 @@ export const TimelineRow = memo(function TimelineRow({
       <div className="user-message-container">
         <div className="user-message-card">
           <p>{renderFileRefs(item.text)}</p>
+          {item.images && item.images.length > 0 && (
+            <UserImageStrip agentId={agentId} api={api} images={item.images} />
+          )}
         </div>
       </div>
     );

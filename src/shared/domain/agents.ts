@@ -85,8 +85,25 @@ export type ToolActivity = {
   error?: string;
 };
 
+export type UserImageRef = {
+  /** SHA-256 hex of the raw image bytes; addresses the daemon sidecar cache. */
+  hash: string;
+  mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  name: string;
+  /** Client-only object/data URL for the optimistic pre-echo. Never persisted or sent by the daemon. */
+  previewUrl?: string;
+};
+
+const userImageRefSchema = z.object({
+  hash: z.string().regex(/^[a-f0-9]{64}$/),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"]),
+  name: z.string().min(1).max(256),
+  previewUrl: z.string().min(1).max(8 * 1024 * 1024).optional(),
+}).strict();
+
 export type TimelineItem =
-  | { kind: "user" | "assistant" | "thinking"; id: string; text: string; lazy?: boolean; error?: string }
+  | { kind: "user"; id: string; text: string; images?: UserImageRef[]; lazy?: boolean; error?: string }
+  | { kind: "assistant" | "thinking"; id: string; text: string; lazy?: boolean; error?: string }
   | ToolActivity
   | { kind: "summary"; id: string; summaryType: "compaction" | "branch"; text: string }
   /** Daemon/process-level failure (crash, RPC error, permission denial). Not
@@ -145,7 +162,8 @@ const toolActivitySchema = z.object({
 }).strict();
 
 const timelineItemSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.enum(["user", "assistant", "thinking"]), id: z.string(), text: z.string(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("user"), id: z.string(), text: z.string(), images: z.array(userImageRefSchema).max(2).optional(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
+  z.object({ kind: z.enum(["assistant", "thinking"]), id: z.string(), text: z.string(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
   toolActivitySchema,
   z.object({ kind: z.literal("summary"), id: z.string(), summaryType: z.enum(["compaction", "branch"]), text: z.string() }).strict(),
   z.object({ kind: z.literal("error"), id: z.string(), text: z.string() }).strict(),

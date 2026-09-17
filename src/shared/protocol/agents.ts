@@ -9,6 +9,7 @@ const agentIdSchema = z.string().min(1).max(256);
 
 export const agentImageSchema = z.object({
   type: z.literal("image"),
+  name: z.string().min(1).max(256).optional(),
   data: z.string().min(1).max(MAX_AGENT_IMAGE_DATA_CHARACTERS).regex(/^[A-Za-z0-9+/]+={0,2}$/).refine((data) => {
     try {
       return atob(data).length <= MAX_AGENT_IMAGE_DATA_BYTES;

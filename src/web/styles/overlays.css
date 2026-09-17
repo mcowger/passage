@@ -43,3 +43,14 @@ internal light/dark theme ever disagrees with the app theme again. */
 .toaster [data-sonner-toast][data-styled="true"] { color: var(--popover-foreground); }
 .toaster [data-sonner-toast][data-styled="true"] [data-title],
 .toaster [data-sonner-toast][data-styled="true"] [data-description] { color: var(--popover-foreground); }
+
+/* Image lightbox */
+.image-lightbox-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, 0.65); cursor: zoom-out; }
+.image-lightbox { display: flex; flex-direction: column; gap: 8px; max-width: min(90vw, 1100px); max-height: 90vh; cursor: default; }
+.image-lightbox-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #fff; font-size: 13px; }
+.image-lightbox-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-lightbox-actions { display: flex; align-items: center; gap: 4px; }
+.image-lightbox-actions button, .image-lightbox-actions a { color: #fff; background: rgba(255, 255, 255, 0.12); border: 0; border-radius: 6px; min-width: 28px; height: 28px; display: inline-grid; place-items: center; font-size: 15px; cursor: pointer; text-decoration: none; }
+.image-lightbox-actions button:hover, .image-lightbox-actions a:hover { background: rgba(255, 255, 255, 0.25); }
+.image-lightbox-img { max-width: 100%; max-height: calc(90vh - 48px); object-fit: contain; border-radius: 8px; background: #111; }
+.image-lightbox-expired { color: #fff; font-size: 14px; font-style: italic; }

@@ -90,6 +90,24 @@ describe("TranscriptState", () => {
     expect(timeline[0].id).not.toBe(timeline[2].id);
   });
 
+  test("a user message carries image refs onto the row", () => {
+    const state = new TranscriptState();
+    const row = state.addUserMessage("Look at this", [
+      { hash: "a".repeat(64), mimeType: "image/png", name: "shot.png" },
+    ]);
+    expect(row).toEqual({
+      kind: "user",
+      id: row.id,
+      text: "Look at this",
+      images: [{ hash: "a".repeat(64), mimeType: "image/png", name: "shot.png" }],
+    });
+  });
+
+  test("a user message without images has no images field", () => {
+    const state = new TranscriptState();
+    expect(state.addUserMessage("Just text")).not.toHaveProperty("images");
+  });
+
   test("error events append a chronological, non-journaled row", () => {
     const state = new TranscriptState();
     state.applyEvent("message_update", { delta: "working" });

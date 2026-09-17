@@ -1,6 +1,7 @@
 import { mkdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { agentCapabilitiesSchema, type AgentHistory, type AgentStatus, type TimelineItem } from "../../shared/domain/agents.ts";
+import { agentCapabilitiesSchema, type AgentHistory, type AgentStatus, type TimelineItem, type UserImageRef } from "../../shared/domain/agents.ts";
+import { ImageCache } from "./images.ts";
 import { getSlashCommands, piCommandsToSlashCommands } from "./slash-commands.ts";
 import { agentImageSchema, type AgentImage } from "../../shared/protocol/agents.ts";
 import { pageHistory, readPiHistory, type HistoryPage } from "./history/index.ts";
@@ -97,6 +98,7 @@ export class AgentService {
   private readonly listLimit: number;
   private readonly pi: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
   private readonly sessionsRoot: string;
+  private readonly imageCache: ImageCache;
   private readonly abortTimeoutMs: number;
 
   constructor(
@@ -106,6 +108,8 @@ export class AgentService {
       manager?: PiRpcManager;
       listLimit?: number;
       abortTimeoutMs?: number;
+      imageCacheRoot?: string;
+      imageCacheBytes?: number;
       pi?: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
     },
   ) {
@@ -120,6 +124,10 @@ export class AgentService {
     this.listLimit = options.listLimit ?? MAX_LIST;
     this.pi = options.pi ?? {};
     this.sessionsRoot = resolve(options.sessionsRoot);
+    this.imageCache = new ImageCache(
+      options.imageCacheRoot ?? join(resolve(options.sessionsRoot), "..", "image-cache"),
+      options.imageCacheBytes,
+    );
     this.abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_ABORT_TIMEOUT_MS;
   }
 
@@ -220,9 +228,10 @@ export class AgentService {
       throw new AgentError("invalid-input", "agent is active; use steer or follow-up, or wait for cancellation");
     }
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
+    const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.imageCache.store(image))) : undefined;
     const process = await this.ensureProcess(agentId);
     this.beginRun(agentId);
-    await this.appendUserRow(agentId, text);
+    await this.appendUserRow(agentId, text, imageRefs);
     this.updateStatus(agentId, "running", "status", process.generation);
     try {
       await process.request({ type: "prompt", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
@@ -237,8 +246,9 @@ export class AgentService {
     this.validateMessage(text);
     this.rejectWhileStopping(this.requireAgent(agentId));
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
+    const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.imageCache.store(image))) : undefined;
     const process = await this.ensureProcess(agentId);
-    await this.appendUserRow(agentId, text);
+    await this.appendUserRow(agentId, text, imageRefs);
     await process.request({ type: "steer", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
   }
 
@@ -246,8 +256,9 @@ export class AgentService {
     this.validateMessage(text);
     this.rejectWhileStopping(this.requireAgent(agentId));
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
+    const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.imageCache.store(image))) : undefined;
     const process = await this.ensureProcess(agentId);
-    await this.appendUserRow(agentId, text);
+    await this.appendUserRow(agentId, text, imageRefs);
     await process.request({ type: "follow_up", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
   }
 
@@ -762,9 +773,17 @@ export class AgentService {
     this.emit({ agentId, type: "row_upsert", status, payload: { row: truncateRowForWire(row) } });
   }
 
-  private async appendUserRow(agentId: string, text: string): Promise<void> {
+  private async appendUserRow(agentId: string, text: string, images?: UserImageRef[]): Promise<void> {
     const state = await this.getTranscript(agentId);
-    this.emitRowUpsert(agentId, state.addUserMessage(text));
+    this.emitRowUpsert(agentId, state.addUserMessage(text, images));
+  }
+
+  /** Raw bytes for one cached upload, for the image download route. Touches the entry for LRU. */
+  async imageBytes(agentId: string, hash: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
+    this.requireAgent(agentId);
+    const cached = await this.imageCache.read(hash);
+    if (!cached) throw new AgentError("not-found", "image not found");
+    return cached;
   }
 
   /** Bumped whenever a `TranscriptState` instance is replaced outright (cold

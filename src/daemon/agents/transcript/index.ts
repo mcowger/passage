@@ -1,4 +1,4 @@
-import type { AgentHistory, AgentUsage, TimelineItem, ToolActivity } from "../../../shared/domain/agents.ts";
+import type { AgentHistory, AgentUsage, TimelineItem, ToolActivity, UserImageRef } from "../../../shared/domain/agents.ts";
 import type { JsonValue } from "../../../shared/protocol/index.ts";
 
 /**
@@ -134,9 +134,9 @@ export class TranscriptState {
    *  it), so this gets a permanent synthetic id like every other live row;
    *  `refreshFromJournal` deliberately never re-syncs user rows, so this id
    *  is never at risk of colliding with or being superseded by a journal id. */
-  addUserMessage(text: string): TimelineItem {
+  addUserMessage(text: string, images?: UserImageRef[]): TimelineItem {
     this.closeOpenBlock();
-    return this.upsert({ kind: "user", id: nextSyntheticId("user"), text });
+    return this.upsert({ kind: "user", id: nextSyntheticId("user"), text, ...(images?.length ? { images } : {}) });
   }
 
   setModel(provider: string, modelId: string): void {

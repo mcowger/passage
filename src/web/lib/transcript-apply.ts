@@ -1,4 +1,4 @@
-import type { AgentHistory, TimelineItem } from "../../shared/domain/agents.ts";
+import type { AgentHistory, TimelineItem, UserImageRef } from "../../shared/domain/agents.ts";
 
 const emptyHistory = (): AgentHistory => ({
   sessionId: "",
@@ -22,9 +22,9 @@ const emptyHistory = (): AgentHistory => ({
  *  arrives, instead of lingering as a permanent duplicate. */
 export const OPTIMISTIC_USER_ROW_ID = "optimistic-pending";
 
-export function addOptimisticUserMessage(history: AgentHistory | undefined, text: string): AgentHistory {
+export function addOptimisticUserMessage(history: AgentHistory | undefined, text: string, images?: UserImageRef[]): AgentHistory {
   const base = history ?? emptyHistory();
-  return { ...base, timeline: [...base.timeline, { kind: "user", id: OPTIMISTIC_USER_ROW_ID, text }] };
+  return { ...base, timeline: [...base.timeline, { kind: "user", id: OPTIMISTIC_USER_ROW_ID, text, ...(images?.length ? { images } : {}) }] };
 }
 
 /**

@@ -43,6 +43,16 @@ describe("applyRowUpsert", () => {
     expect(history.timeline).toEqual([{ kind: "user", id: "live:user:1", text: "Hello there" }]);
   });
 
+  test("an optimistic user message can carry image previews", () => {
+    const previews = [{ hash: "", mimeType: "image/png" as const, name: "shot.png", previewUrl: "data:image/png;base64,AAA" }];
+    let history: AgentHistory | undefined = addOptimisticUserMessage(undefined, "Attached image", previews);
+    expect(history.timeline).toEqual([{ kind: "user", id: OPTIMISTIC_USER_ROW_ID, text: "Attached image", images: previews }]);
+
+    history = applyRowUpsert(history, { kind: "user", id: "live:user:1", text: "Attached image", images: [{ hash: "a".repeat(64), mimeType: "image/png", name: "shot.png" }] });
+    expect(history.timeline).toHaveLength(1);
+    expect(history.timeline[0]).toMatchObject({ id: "live:user:1" });
+  });
+
   test("an unrelated row_upsert arriving before the real user row leaves the optimistic row alone", () => {
     let history: AgentHistory | undefined = addOptimisticUserMessage(undefined, "Hello there");
     history = applyRowUpsert(history, tool("a"));

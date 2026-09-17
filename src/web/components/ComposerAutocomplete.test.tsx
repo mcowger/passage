@@ -3,6 +3,9 @@ import React from "react";
 import ReactDOMServer from "react-dom/server";
 import { renderFileRefs, truncateFileRefPath, TimelineRow } from "./AgentPanel.tsx";
 import { composerSkillsFooter } from "./ComposerAutocomplete.tsx";
+import type { WorkspaceApi } from "../api.ts";
+
+const stubApi = { imageUrl: (id: string, hash: string) => `/api/agents/${id}/images/${hash}` } as unknown as WorkspaceApi;
 
 describe("composerSkillsFooter", () => {
   test("hides the footer when skills are available", () => {
@@ -82,6 +85,8 @@ describe("TimelineRow user card", () => {
   test("renders file refs as chips inside the user message card", () => {
     const out = ReactDOMServer.renderToStaticMarkup(
       React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
         concise: false,
         item: { kind: "user", id: "u1", text: "review @`src/index.ts` please" },
       }),

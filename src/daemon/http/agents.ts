@@ -5,6 +5,7 @@ import { opaqueDomainIdSchema } from "../../shared/domain/workspaces.ts";
 import { AgentError, type AgentService, type AgentSnapshot } from "../agents/service.ts";
 import { HttpInputError, readJsonBody } from "./body.ts";
 import { MAX_AGENT_IMAGE_DATA_CHARACTERS, MAX_AGENT_IMAGES, MAX_AGENT_MESSAGE_BYTES, agentImageSchema } from "../../shared/protocol/agents.ts";
+import { IMAGE_HASH_PATTERN } from "../agents/images.ts";
 
 const MAX_AGENT_JSON_BYTES = MAX_AGENT_IMAGES * MAX_AGENT_IMAGE_DATA_CHARACTERS + MAX_AGENT_MESSAGE_BYTES + 4096;
 const MAX_AGENT_SETTING_BODY_BYTES = 1024;
@@ -106,6 +107,18 @@ export function createAgentRoutes(service: AgentService): Hono {
   app.post("/api/agents/:agentId/start", async (context) => {
     try { const agentId = id(context.req.param("agentId")); await service.start(agentId); return success(publicSnapshot(service.snapshot(agentId))); }
     catch (error) { return errorResponse(error); }
+  });
+  app.get("/api/agents/:agentId/images/:hash", async (context) => {
+    try {
+      const agentId = id(context.req.param("agentId"));
+      const hash = context.req.param("hash") ?? "";
+      if (!IMAGE_HASH_PATTERN.test(hash)) throw new AgentError("invalid-input", "invalid image hash");
+      const { bytes, mimeType } = await service.imageBytes(agentId, hash);
+      return new Response(bytes as BodyInit, {
+        status: 200,
+        headers: { "Content-Type": mimeType, "Cache-Control": "public, max-age=31536000, immutable" },
+      });
+    } catch (error) { return errorResponse(error); }
   });
   app.get("/api/agents/:agentId/history", async (context) => {
     try {

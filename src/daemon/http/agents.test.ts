@@ -154,6 +154,34 @@ describe("agent HTTP API", () => {
     expect(oversized.status).toBe(400);
   });
 
+  test("prompt with images journals refs and serves the bytes", async () => {
+    const { app } = await fixture();
+    const created = await json(await app.fetch(request("/api/workspaces/workspace-1/agents", { method: "POST", body: "{}" })));
+    const agentId = String(created.id);
+    const data = Buffer.from("test-image-bytes").toString("base64");
+    const sent = await app.fetch(request(`/api/agents/${agentId}/prompt`, {
+      method: "POST",
+      body: JSON.stringify({ message: "Look", images: [{ type: "image", name: "shot.png", data, mimeType: "image/png" }] }),
+    }));
+    expect(sent.status).toBe(202);
+
+    const history = await json(await app.fetch(request(`/api/agents/${agentId}/history`)));
+    const userRow = (history.history as { timeline: Array<{ kind: string; images?: Array<{ hash: string; mimeType: string; name: string }> }> }).timeline.find((row) => row.kind === "user");
+    expect(userRow?.images).toHaveLength(1);
+    expect(userRow?.images?.[0]).toMatchObject({ mimeType: "image/png", name: "shot.png" });
+    const hash = String(userRow?.images?.[0]?.hash);
+    expect(hash).toMatch(/^[a-f0-9]{64}$/);
+
+    const served = await app.fetch(request(`/api/agents/${agentId}/images/${hash}`));
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("image/png");
+    expect(served.headers.get("cache-control")).toContain("immutable");
+    expect(Buffer.from(await served.arrayBuffer()).toString("base64")).toBe(data);
+
+    expect((await app.fetch(request(`/api/agents/${agentId}/images/not-a-hash`))).status).toBe(400);
+    expect((await app.fetch(request(`/api/agents/${agentId}/images/${"0".repeat(64)}`))).status).toBe(404);
+  });
+
   test("handles extension UI responses", async () => {
     const { app } = await fixture();
     const created = await json(await app.fetch(request("/api/workspaces/workspace-1/agents", { method: "POST", body: "{}" })));
