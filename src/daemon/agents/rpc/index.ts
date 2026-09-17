@@ -37,6 +37,7 @@ export type PiEvent = PiRecord & { sequence: number; generation: number };
 export type ReplayResult = { snapshotRequired: boolean; events: PiEvent[] };
 export type PiRpcOptions = {
   cwd: string; sessionDir: string; sessionId: string; executable?: string; executableArgs?: string[];
+  model?: string; disableTools?: boolean;
   maxCommandBytes?: number; maxRecordBytes?: number; maxEventBytes?: number; maxStderrBytes?: number;
 };
 
@@ -90,7 +91,9 @@ export class PiRpcProcess {
     const pi = options.executable ?? process.env.PASSAGE_PI_PATH ?? Bun.which("pi");
     if (!pi) throw new Error("Pi CLI was not found; set PASSAGE_PI_PATH");
     const command = options.executable ? [options.executable, ...(options.executableArgs ?? [])] : [pi];
+    if (options.model) command.push("--model", options.model);
     command.push("--mode", "rpc", "--session-dir", options.sessionDir, "--session-id", options.sessionId, "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve");
+    if (options.disableTools) command.push("--no-tools");
     this.child = Bun.spawn(command, {
       cwd: options.cwd,
       env: { ...process.env, PI_CODING_AGENT_DIR: piAgentDirectory() },

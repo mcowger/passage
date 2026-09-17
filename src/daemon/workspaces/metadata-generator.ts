@@ -1,5 +1,9 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 import { MAX_DOMAIN_LABEL_LENGTH, MAX_DOMAIN_PATH_LENGTH } from "../../shared/domain/workspaces.ts";
+import { PiRpcManager, type PiEvent, type PiRpcOptions, type PiRpcProcess } from "../agents/rpc/index.ts";
 
 export const worktreeSuggestionSchema = z.object({
   label: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH),
@@ -8,6 +12,7 @@ export const worktreeSuggestionSchema = z.object({
 }).strict();
 
 export type WorktreeSuggestion = z.infer<typeof worktreeSuggestionSchema>;
+type MetadataGeneratorPiOptions = Pick<PiRpcOptions, "executable" | "executableArgs">;
 
 export function deterministicSlugSuggestion(purpose: string): WorktreeSuggestion {
   const clean = purpose.trim().replace(/[\r\n]+/g, " ");
@@ -29,12 +34,16 @@ export function deterministicSlugSuggestion(purpose: string): WorktreeSuggestion
 }
 
 export class MetadataGenerator {
-  constructor(private readonly timeoutMs = 10_000) {}
+  private readonly manager = new PiRpcManager(1);
+
+  constructor(private readonly timeoutMs = 10_000, private readonly pi: MetadataGeneratorPiOptions = {}) {}
 
   async suggest(purpose: string, cwd?: string, model?: string): Promise<WorktreeSuggestion> {
     const fallback = deterministicSlugSuggestion(purpose);
     if (!purpose.trim()) return fallback;
 
+    let sessionDir: string | undefined;
+    let agentId: string | undefined;
     try {
       const prompt = [
         "Generate workspace metadata for a Git worktree based on this purpose description.",
@@ -45,68 +54,18 @@ export class MetadataGenerator {
         "- folder: collision-safe directory name like 'short-name--wk_abcd' (lowercase, alphanumeric with hyphens/underscores, ending with a short suffix)",
       ].join("\n");
 
-      const args = ["pi", "--mode", "rpc", ...(model?.trim() ? ["--model", model.trim()] : [])];
-      const proc = Bun.spawn(args, {
-        cwd: cwd && cwd !== "" ? cwd : undefined,
-        env: { ...process.env, NO_COLOR: "1" },
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
+      sessionDir = await mkdtemp(join(tmpdir(), "passage-worktree-metadata-"));
+      agentId = `metadata-${crypto.randomUUID()}`;
+      const piProcess = await this.manager.start(agentId, {
+        cwd: cwd?.trim() || process.cwd(),
+        sessionDir,
+        sessionId: `worktree-metadata-${crypto.randomUUID()}`,
+        model: model?.trim() || undefined,
+        disableTools: true,
+        ...this.pi,
       });
 
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise<null>((resolve) => {
-        timeoutId = setTimeout(() => {
-          try { proc.kill(); } catch {}
-          resolve(null);
-        }, this.timeoutMs);
-      });
-
-      const rpcPromise = (async (): Promise<string | null> => {
-        try {
-          const stdin = proc.stdin;
-          if (!stdin) return null;
-          const req = JSON.stringify({ type: "prompt", id: "req_suggest_1", message: prompt }) + "\n";
-          stdin.write(new TextEncoder().encode(req));
-          await stdin.flush?.();
-
-          const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-          let buffer = "";
-          let fullResponse = "";
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += new TextDecoder().decode(value);
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-
-            for (const line of lines) {
-              if (!line.trim()) continue;
-              try {
-                const parsed = JSON.parse(line) as { type?: string; message?: { content?: Array<{ type: string; text?: string }> }; text?: string; delta?: string };
-                if (parsed.type === "message" && parsed.message?.content) {
-                  for (const block of parsed.message.content) {
-                    if (block.type === "text" && block.text) fullResponse += block.text;
-                  }
-                } else if (parsed.type === "text_delta" && parsed.delta) {
-                  fullResponse += parsed.delta;
-                } else if (parsed.type === "turn_end" || parsed.type === "agent_end") {
-                  try { proc.kill(); } catch {}
-                  return fullResponse;
-                }
-              } catch {}
-            }
-          }
-          return fullResponse;
-        } catch {
-          return null;
-        }
-      })();
-
-      const result = await Promise.race([rpcPromise, timeoutPromise]);
-      if (timeoutId) clearTimeout(timeoutId);
-      try { proc.kill(); } catch {}
+      const result = await this.readSuggestion(piProcess, prompt);
 
       if (!result) return fallback;
 
@@ -122,6 +81,43 @@ export class MetadataGenerator {
       return fallback;
     } catch {
       return fallback;
+    } finally {
+      if (agentId) await this.manager.stop(agentId).catch(() => undefined);
+      if (sessionDir) await rm(sessionDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  private async readSuggestion(process: PiRpcProcess, prompt: string): Promise<string | null> {
+    let response = "";
+    let settle: (() => void) | undefined;
+    const settled = new Promise<void>((resolve) => { settle = resolve; });
+    const append = (event: PiEvent) => {
+      if (event.type === "message_update") {
+        const assistantEvent = event.assistantMessageEvent as { type?: unknown; delta?: unknown } | undefined;
+        if (assistantEvent?.type === "text_delta" && typeof assistantEvent.delta === "string") response += assistantEvent.delta;
+      } else if (event.type === "message_end") {
+        const message = event.message as { role?: unknown; content?: unknown } | undefined;
+        if (message?.role === "assistant" && Array.isArray(message.content)) {
+          const text = message.content
+            .filter((block): block is { type: "text"; text: string } => typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text" && typeof (block as { text?: unknown }).text === "string")
+            .map((block) => block.text)
+            .join("");
+          if (text) response = text;
+        }
+      } else if (event.type === "agent_settled") {
+        settle?.();
+      }
+    };
+    const unsubscribe = process.subscribe(append);
+    try {
+      await process.request({ type: "prompt", message: prompt }, this.timeoutMs);
+      await Promise.race([
+        settled,
+        new Promise<void>((_, reject) => setTimeout(() => reject(new Error("Pi metadata suggestion timed out")), this.timeoutMs)),
+      ]);
+      return response;
+    } finally {
+      unsubscribe();
     }
   }
 }
