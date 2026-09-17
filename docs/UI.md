@@ -504,9 +504,12 @@ available without covering the last assistant outcome.
 - During a run, the send-mode control explicitly exposes `Steer now` and
   `Queue follow-up`; it never silently chooses one. The active label and
   keyboard shortcut describe what will happen.
-- Steering and follow-up queues use distinct labeled/tinted chips, not
-  color-only treatment. Pi 0.84.3 does not expose per-item queue removal, so
-  Passage presents queue state and mode without promising a false removal action.
+- Follow-ups composed while a run is active stay attached to the composer
+  as queued chips above the input -- never in the timeline, never sent to Pi
+  early. Pi exposes no per-item queue removal, so Passage holds this queue
+  itself: each chip is individually retractable (plus Clear all), and the
+  queue drains in order through `follow_up` once the run settles. Steering
+  still sends immediately.
 - Abort is a separate destructive/stop control, never hidden inside Send.
 - After Stop is requested, replace run controls with a disabled `Stopping…`
   control and stop live counters immediately. Restore Send only after the

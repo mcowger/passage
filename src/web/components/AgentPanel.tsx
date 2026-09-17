@@ -55,6 +55,7 @@ import {
   PencilSparkles,
   GraduationCap,
   GitMerge,
+  X,
 } from "lucide-react";
 import { Spinner } from "./ui/spinner.tsx";
 
@@ -257,6 +258,93 @@ export function isComposerMergeRelevant(status: GitStatus | null | undefined): b
   if (!status) return false;
   const isMainWorktree = status.checkoutRoot === status.mainCheckoutRoot || status.branchRef === "main";
   return !isMainWorktree && status.aheadOfMain > 0;
+}
+
+/**
+ * A follow-up composed while the agent is running. It stays attached to the
+ * composer (never in the timeline, never sent to Pi) until the run settles,
+ * so it can be retracted per-item. Ephemeral and browser-local by design:
+ * Pi exposes no per-item queue removal, so Passage holds the queue itself
+ * instead of forwarding it to Pi's internal queue early.
+ */
+export type QueuedFollowUp = {
+  id: string;
+  text: string;
+  images: Array<AgentImage & { name: string }>;
+  createdAt: number;
+};
+
+function newQueuedFollowUpId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return `queued-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function createQueuedFollowUp(text: string, images: Array<AgentImage & { name: string }>): QueuedFollowUp {
+  return { id: newQueuedFollowUpId(), text, images: [...images], createdAt: Date.now() };
+}
+
+export function removeQueuedFollowUp(queue: QueuedFollowUp[], id: string): QueuedFollowUp[] {
+  return queue.filter((item) => item.id !== id);
+}
+
+/** Attached queue strip rendered directly above the composer input. */
+export function QueuedFollowUpList({
+  queue,
+  disabled,
+  onRetract,
+  onClear,
+}: {
+  queue: QueuedFollowUp[];
+  disabled?: boolean;
+  onRetract: (id: string) => void;
+  onClear: () => void;
+}) {
+  if (queue.length === 0) return null;
+  return (
+    <div
+      className="composer-queue"
+      role="group"
+      aria-label={`${queue.length} queued follow-up${queue.length === 1 ? "" : "s"}, attached to the composer`}
+    >
+      <div className="composer-queue-header">
+        <span className="composer-queue-title">
+          <Clock size={12} aria-hidden="true" />
+          Queued · sends when this run settles
+        </span>
+        {queue.length > 1 && (
+          <button type="button" className="composer-queue-clear" onClick={onClear} disabled={disabled}>
+            Clear all
+          </button>
+        )}
+      </div>
+      <ul className="composer-queue-list">
+        {queue.map((item, index) => (
+          <li key={item.id} className="composer-queue-item">
+            <span className="composer-queue-index" aria-hidden="true">{index + 1}</span>
+            <span className="composer-queue-text" title={item.text}>{item.text}</span>
+            {item.images.length > 0 && (
+              <span
+                className="composer-queue-images"
+                title={item.images.map((image) => image.name).join(", ")}
+              >
+                {item.images.length} image{item.images.length === 1 ? "" : "s"}
+              </span>
+            )}
+            <button
+              type="button"
+              className="composer-queue-retract"
+              onClick={() => onRetract(item.id)}
+              disabled={disabled}
+              title="Retract this follow-up"
+              aria-label={`Retract queued follow-up ${index + 1}`}
+            >
+              <X size={13} aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 /**
@@ -729,6 +817,7 @@ export function AgentPanel({
         workspaceId={agent.workspaceId}
         running={running}
         stopping={stopping}
+        idle={agent.status === "idle"}
         streamActive={streamActive}
         streamPhase={streamPhase}
         receiving={receiving}
@@ -845,6 +934,8 @@ type AgentComposerProps = {
   workspaceId: string;
   running: boolean;
   stopping: boolean;
+  /** True only when the agent status is exactly `idle`: the settle signal that drains the attached queue. */
+  idle: boolean;
   streamActive: boolean;
   streamPhase: StreamPhase | null;
   receiving: boolean;
@@ -936,6 +1027,7 @@ function AgentComposerInner({
   workspaceId,
   running,
   stopping,
+  idle,
   streamActive,
   streamPhase,
   receiving,
@@ -974,6 +1066,8 @@ function AgentComposerInner({
   const composerInputRef = useRef<ComposerEditorHandle>(null);
   const reservedImageCount = useRef(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [queue, setQueue] = useState<QueuedFollowUp[]>([]);
+  const dispatchingRef = useRef(false);
   const [caret, setCaret] = useState<number | null>(null);
   const [compactConfirmOpen, setCompactConfirmOpen] = useState(false);
   const [isMobileComposer, setIsMobileComposer] = useState(() => currentViewportIsMobileComposer());
@@ -1054,6 +1148,9 @@ function AgentComposerInner({
     setImages([]);
     setCtxDetailsOpen(false);
     reservedImageCount.current = 0;
+    // The attached queue is ephemeral and browser-local: switching agents drops it.
+    setQueue([]);
+    dispatchingRef.current = false;
   }, [draftKey]);
 
   useEffect(() => {
@@ -1151,6 +1248,73 @@ function AgentComposerInner({
     );
   };
 
+  /**
+   * Attach a follow-up to the composer instead of sending it: while the run
+   * is active the item lives only in this local queue (above the input, out
+   * of the timeline), where each item stays retractable until it dispatches.
+   */
+  const queueFollowUp = () => {
+    const value = draft.trim();
+    if ((!value && images.length === 0) || stopping) return;
+    setQueue((current) => [...current, createQueuedFollowUp(value || "Attached image", images)]);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setDraft("");
+    localStorage.removeItem(draftKey);
+    setImages([]);
+    reservedImageCount.current = 0;
+    setComposerError("");
+  };
+
+  const retractQueued = (id: string) => {
+    if (dispatchingRef.current) return;
+    setQueue((current) => removeQueuedFollowUp(current, id));
+  };
+
+  const clearQueued = () => {
+    if (dispatchingRef.current) return;
+    setQueue([]);
+  };
+
+  // Attached follow-ups enter the chat only once the run settles: while the
+  // agent is idle the queue drains in order through `follow_up`. A failed
+  // send stops the drain, restores the unsent remainder to the front, and
+  // surfaces the error -- nothing silently disappears from the queue.
+  useEffect(() => {
+    if (!idle || stopping || busy || dispatchingRef.current || queue.length === 0) return;
+    dispatchingRef.current = true;
+    setBusy(true);
+    setComposerError("");
+    void (async () => {
+      const pending = [...queue];
+      setQueue([]);
+      for (const item of pending) {
+        const payloadImages: AgentImage[] = item.images.map(({ type, data, mimeType, name }) => ({
+          type,
+          data,
+          mimeType,
+          name,
+        }));
+        const optimisticImages: UserImageRef[] = item.images.map(({ mimeType, name, data }) => ({
+          hash: "",
+          mimeType,
+          name,
+          previewUrl: `data:${mimeType};base64,${data}`,
+        }));
+        onOptimisticMessage?.(item.text, optimisticImages.length > 0 ? optimisticImages : undefined);
+        try {
+          await api.followUp(agentId, item.text, payloadImages.length > 0 ? payloadImages : undefined);
+        } catch (cause) {
+          const failedIndex = pending.indexOf(item);
+          setQueue((current) => [...pending.slice(failedIndex), ...current]);
+          setComposerError(cause instanceof Error ? cause.message : "Agent command failed");
+          break;
+        }
+      }
+      setBusy(false);
+      dispatchingRef.current = false;
+    })();
+  }, [idle, stopping, busy, queue, agentId, api, onOptimisticMessage, setBusy]);
+
   const addImages = async (files: FileList | File[] | null) => {
     if (!files) return;
     let reserved = 0;
@@ -1238,6 +1402,7 @@ function AgentComposerInner({
           <span className="del-count">-{changeSummary.deletions}</span>
         </div>
       )}
+      <QueuedFollowUpList queue={queue} disabled={busy || stopping} onRetract={retractQueued} onClear={clearQueued} />
       <div className="composer-card composer-autocomplete-anchor">
         <ComposerAutocomplete
           open={suggestionOpen}
@@ -1467,9 +1632,9 @@ function AgentComposerInner({
                   variant="secondary"
                   size="xs"
                   className="composer-action-btn"
-                  onClick={() => send("followUp")}
+                  onClick={queueFollowUp}
                   disabled={busy}
-                  title="Queue follow-up"
+                  title="Queue follow-up — stays attached to the composer until this run settles"
                   aria-label="Queue follow-up"
                 >
                   <Clock size={14} aria-hidden="true" />

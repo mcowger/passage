@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
+import { createQueuedFollowUp, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 
@@ -261,6 +261,63 @@ describe("TimelineRow", () => {
     );
     expect(html).toContain("Agent error");
     expect(html).toContain("Pi process exited (1)");
+  });
+});
+
+describe("attached follow-up queue", () => {
+  test("creates uniquely identified items that snapshot the composer images", () => {
+    const images = [{ type: "image" as const, data: "AA", mimeType: "image/png" as const, name: "shot.png" }];
+    const first = createQueuedFollowUp("Verify the fix", images);
+    const second = createQueuedFollowUp("Verify the fix", images);
+    expect(first.text).toBe("Verify the fix");
+    expect(first.images).toEqual(images);
+    expect(first.images).not.toBe(images);
+    expect(second.id).not.toBe(first.id);
+  });
+
+  test("retract removes only the targeted item, preserving order", () => {
+    const queue = [createQueuedFollowUp("one", []), createQueuedFollowUp("two", []), createQueuedFollowUp("three", [])];
+    const next = removeQueuedFollowUp(queue, queue[1].id);
+    expect(next.map((item) => item.text)).toEqual(["one", "three"]);
+    expect(queue).toHaveLength(3);
+  });
+
+  test("renders nothing when the queue is empty", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(QueuedFollowUpList, { queue: [], onRetract: () => undefined, onClear: () => undefined }),
+    );
+    expect(html).toBe("");
+  });
+
+  test("renders attached chips with per-item retract and clear-all", () => {
+    const queue = [
+      createQueuedFollowUp("Verify the fix", []),
+      createQueuedFollowUp("Check edge cases", [
+        { type: "image" as const, data: "AA", mimeType: "image/png" as const, name: "shot.png" },
+      ]),
+    ];
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(QueuedFollowUpList, { queue, onRetract: () => undefined, onClear: () => undefined }),
+    );
+    expect(html).toContain("composer-queue");
+    expect(html).toContain("sends when this run settles");
+    expect(html).toContain("Verify the fix");
+    expect(html).toContain("1 image");
+    expect(html).toContain('aria-label="Retract queued follow-up 1"');
+    expect(html).toContain('aria-label="Retract queued follow-up 2"');
+    expect(html).toContain("Clear all");
+  });
+
+  test("omits clear-all for a single queued item", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(QueuedFollowUpList, {
+        queue: [createQueuedFollowUp("solo", [])],
+        onRetract: () => undefined,
+        onClear: () => undefined,
+      }),
+    );
+    expect(html).toContain("composer-queue");
+    expect(html).not.toContain("Clear all");
   });
 });
 

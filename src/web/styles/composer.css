@@ -45,6 +45,105 @@
 .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-running); animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
+/* Attached follow-up queue: items composed while the run is active stay
+ * pinned to the composer (above the input, out of the timeline) until the
+ * run settles, with a per-item retract and a clear-all. */
+.composer-queue {
+  margin: 0 0 6px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 6px 8px;
+}
+.composer-queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.composer-queue-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.composer-queue-clear {
+  border: 0;
+  background: none;
+  padding: 2px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.composer-queue-clear:hover { color: var(--danger); }
+.composer-queue-clear:disabled { opacity: 0.5; cursor: default; }
+.composer-queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.composer-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+.composer-queue-index {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.composer-queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
+}
+.composer-queue-images {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+.composer-queue-retract {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.composer-queue-retract:hover { color: var(--danger); background: var(--danger-subtle); }
+.composer-queue-retract:disabled { opacity: 0.5; cursor: default; }
+
 .composer-card {
   background: var(--composer-bg, var(--surface));
   border: 1px solid var(--composer-border, var(--border));
