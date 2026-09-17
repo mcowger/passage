@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MetadataRepositories, MetadataStore } from "../metadata/index.ts";
 import { WorktreeService } from "../workspaces/worktrees.ts";
+import { MetadataGenerator } from "../workspaces/metadata-generator.ts";
 import { createWorktreeRoutes } from "./worktrees.ts";
 import { projectSchema } from "../../shared/domain/workspaces.ts";
 
@@ -17,7 +18,7 @@ async function fixture() {
   roots.push(root);
   const store = new MetadataStore(join(root, "metadata.sqlite"));
   const repos = new MetadataRepositories(store.db);
-  const service = new WorktreeService(repos);
+  const service = new WorktreeService(repos, undefined, new MetadataGenerator(50, { executable: "/does/not/exist" }));
   const app = createWorktreeRoutes(service);
   return { root, store, repos, app };
 }

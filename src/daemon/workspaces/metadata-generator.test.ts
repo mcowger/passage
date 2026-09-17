@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { deterministicSlugSuggestion, MetadataGenerator, worktreeSuggestionSchema } from "./metadata-generator.ts";
 
+const piScript = `let buffer = ""; process.stdin.on("data", (chunk) => { buffer += chunk; const lines = buffer.split("\\n"); buffer = lines.pop() ?? ""; for (const line of lines) { if (!line) continue; const request = JSON.parse(line); if (request.type === "get_state") { process.stdout.write(JSON.stringify({ type: "response", id: request.id, command: "get_state", success: true }) + "\\n"); continue; } if (request.type !== "prompt") continue; process.stdout.write(JSON.stringify({ type: "response", id: request.id, command: "prompt", success: true }) + "\\n"); process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "{\\\"label\\\":\\\"Webhook retries\\\",\\\"branch\\\":\\\"fix/webhook-retries\\\"," } }) + "\\n"); process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "{\\\"label\\\":\\\"Webhook retries\\\",\\\"branch\\\":\\\"fix/webhook-retries\\\",\\\"folder\\\":\\\"webhook-retries--wk_abcd\\\"}" }] } }) + "\\n"); process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n"); } });`;
+
 describe("MetadataGenerator", () => {
   it("generates deterministic slug fallback correctly", () => {
     const suggestion = deterministicSlugSuggestion("Fix invoice retry calculation in payment flow");
@@ -22,8 +24,18 @@ describe("MetadataGenerator", () => {
     expect(worktreeSuggestionSchema.safeParse(special).success).toBe(true);
   });
 
-  it("suggests metadata using fallback when Pi process is mocked/unavailable", async () => {
-    const generator = new MetadataGenerator(50);
+  it("reads the finalized assistant message from Pi RPC events", async () => {
+    const generator = new MetadataGenerator(1_000, { executable: process.execPath, executableArgs: ["-e", piScript] });
+    const result = await generator.suggest("Refactor websocket client reconnect loop", "/tmp", "test/model");
+    expect(result).toEqual({
+      label: "Webhook retries",
+      branch: "fix/webhook-retries",
+      folder: "webhook-retries--wk_abcd",
+    });
+  });
+
+  it("uses the fallback when Pi is unavailable", async () => {
+    const generator = new MetadataGenerator(50, { executable: "/does/not/exist" });
     const result = await generator.suggest("Refactor websocket client reconnect loop");
     expect(result.label).toBeDefined();
     expect(result.branch).toBeDefined();
