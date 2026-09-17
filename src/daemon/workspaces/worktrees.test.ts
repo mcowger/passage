@@ -193,14 +193,60 @@ describe("WorktreeService removal and reconciliation", () => {
     expect(f.repositories.workspaces.get(workspace.id)).toBeUndefined();
   });
 
-  test("rejects removal of an unowned worktree", async () => {
+  test("rejects removal of an unowned worktree without force, allows with force", async () => {
     const f = await fixture();
     const wtPath = join(f.root, "wt-unowned");
     await git(f.repo, "worktree", "add", "-b", "unowned-branch", wtPath);
     const imported = await f.worktreeService.importWorktree(f.project.id, { path: wtPath });
 
-    await expect(f.worktreeService.remove(imported.id)).rejects.toMatchObject({
+    await expect(f.worktreeService.remove(imported.id, false)).rejects.toMatchObject({
       code: "not-owned",
+    });
+
+    // With force = true, unowned worktree removal succeeds
+    await f.worktreeService.remove(imported.id, true);
+    expect(f.repositories.workspaces.get(imported.id)).toBeUndefined();
+    expect(await Bun.file(wtPath).exists().catch(() => false)).toBe(false);
+  });
+
+  test("allows force-removing a repair-state worktree", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "branch-repair");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const workspace = await f.worktreeService.create(f.project.id, location.id, "branch-repair", "Repair State", "wt-repair");
+
+    // Manually transition workspace into repair state
+    f.repositories.workspaces.save({ ...workspace, ownershipState: "repair", repairDetail: "simulated error" });
+
+    // Without force, should be rejected
+    await expect(f.worktreeService.remove(workspace.id, false)).rejects.toMatchObject({
+      code: "not-owned",
+    });
+
+    // With force, repair-state worktree is removed cleanly
+    await f.worktreeService.remove(workspace.id, true);
+    expect(f.repositories.workspaces.get(workspace.id)).toBeUndefined();
+    expect(await Bun.file(workspace.cwd).exists().catch(() => false)).toBe(false);
+  });
+
+  test("force delete treats already-missing workspace as idempotent success", async () => {
+    const f = await fixture();
+    // Non-existent ID without force throws not-found
+    await expect(f.worktreeService.remove("wsp_nonexistent", false)).rejects.toMatchObject({
+      code: "not-found",
+    });
+
+    // Non-existent ID with force succeeds cleanly
+    await expect(f.worktreeService.remove("wsp_nonexistent", true)).resolves.toBeUndefined();
+  });
+
+  test("refuses to delete main checkout even with force", async () => {
+    const f = await fixture();
+    const defaultWs = await f.workspaceService.ensureDefaultWorkspace(f.project.id);
+    await expect(f.worktreeService.remove(defaultWs.id, true)).rejects.toMatchObject({
+      code: "main-checkout",
     });
   });
 

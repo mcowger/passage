@@ -123,8 +123,19 @@ export class WorktreeService {
   }
   async remove(workspaceId: string, force = false): Promise<void> {
     const w = this.repositories.workspaces.get(workspaceId);
-    if (!w || w.kind !== "worktree") throw new WorktreeError("not-found", "Workspace not found");
-    if (w.ownershipState !== "owned") throw new WorktreeError("not-owned", "Passage ownership record required");
+    if (!w) {
+      if (force) return;
+      throw new WorktreeError("not-found", "Workspace not found");
+    }
+    if (w.kind === "main-checkout" || resolve(w.cwd) === resolve(w.mainRepositoryRoot ?? "")) {
+      throw new WorktreeError("main-checkout", "Main checkout cannot be removed");
+    }
+    if (w.kind !== "worktree") {
+      throw new WorktreeError("not-found", "Workspace not found");
+    }
+    if (w.ownershipState !== "owned" && !force) {
+      throw new WorktreeError("not-owned", "Passage ownership record required");
+    }
     if (w.markerPath) {
       await rm(w.markerPath, { force: true }).catch(() => {});
     }
@@ -140,9 +151,15 @@ export class WorktreeService {
       throw new WorktreeError("git-failed", err instanceof Error ? err.message : "Failed to get git status");
     });
     if ((status.dirty || status.conflicted) && !force) throw new WorktreeError("force-required", "Explicit force confirmation required");
-    if (resolve(w.cwd) === resolve(w.mainRepositoryRoot ?? "")) throw new WorktreeError("main-checkout", "Main checkout cannot be removed");
     const result = await this.command(w.mainRepositoryRoot ?? w.cwd, ["worktree", "remove", ...(force ? ["--force"] : []), w.cwd]);
-    if (result.code !== 0) throw this.mapGitFailure(result.stderr, w.cwd, false);
+    if (result.code !== 0) {
+      if (force) {
+        await rm(w.cwd, { recursive: true, force: true }).catch(() => {});
+        await this.command(w.mainRepositoryRoot ?? process.cwd(), ["worktree", "prune"]).catch(() => {});
+      } else {
+        throw this.mapGitFailure(result.stderr, w.cwd, false);
+      }
+    }
     this.repositories.workspaces.delete(workspaceId);
   }
 
