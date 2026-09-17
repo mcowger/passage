@@ -274,7 +274,7 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
         ) : (
           <Button size="xs" onClick={() => void handleOpen()} title="Start this preview">Start</Button>
         )}
-        <Button size="xs" variant="ghost" onClick={onClose} title="Close preview pane (preview keeps running)">✕</Button>
+        <Button size="xs" variant="ghost" onClick={onClose} title="Close and stop this preview">✕</Button>
       </div>
 
       {notice && (

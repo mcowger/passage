@@ -5,7 +5,7 @@ import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.t
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import type { WebPreview } from "../shared/domain/previews.ts";
 import type { PaneTab, WorkspaceLayout, LayoutNode } from "../shared/domain/layout.ts";
-import { addTabToGroup, countAgentTabs, createDefaultLayout, findFirstDeadTerminalTab, findTab, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs, setActiveTabInTree, updateTabInTree } from "../shared/domain/layout.ts";
+import { addTabToGroup, countTabsOfKind, createDefaultLayout, findFirstDeadTerminalTab, findTab, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs, setActiveTabInTree, updateTabInTree } from "../shared/domain/layout.ts";
 import type { WorkspaceSettings } from "../shared/domain/settings.ts";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
 import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
@@ -391,12 +391,18 @@ function App() {
   const selectedTerminal = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
   const isGitWorkspace = workspace?.mainRepositoryRoot != null;
 
-  // Agents exist only while they have an open canvas pane, so the top-bar count
-  // reflects the agent tabs actually present for the current workspace.
+  // Resources are ended when their canvas pane closes, so the top-bar counts
+  // reflect the tabs actually present for the current workspace rather than
+  // any durable rows left behind by an earlier session.
   const openAgentCount = useMemo(() => {
     if (!layout) return 0;
-    return countAgentTabs(layout.root, new Set(agents.map((agent) => agent.id)));
+    return countTabsOfKind(layout.root, "agent", new Set(agents.map((agent) => agent.id)));
   }, [layout, agents]);
+
+  const openPreviewCount = useMemo(() => {
+    if (!layout) return 0;
+    return countTabsOfKind(layout.root, "preview", new Set(previews.map((preview) => preview.id)));
+  }, [layout, previews]);
 
   const handleLayoutChange = useCallback(
     (nextLayout: WorkspaceLayout) => {
@@ -673,7 +679,7 @@ function App() {
     }
   };
 
-  const closeAgentTab = async (tabId: string) => {
+  const closeAgentTab = useCallback(async (tabId: string) => {
     if (!tabId.startsWith("agent-") || !selectedWorkspaceId) return;
     const agentId = tabId.slice("agent-".length);
     if (!agents.some((agent) => agent.id === agentId)) return;
@@ -684,7 +690,31 @@ function App() {
     } catch (cause) {
       setAgentError(cause instanceof Error ? cause.message : "Unable to close agent session");
     }
-  };
+  }, [api, agents, loadAgents, selectedAgentId, selectedWorkspaceId]);
+
+  // Closing a canvas tab ends the underlying resource: agents are archived,
+  // terminals are terminated, previews are stopped and deleted. No resource is
+  // left running behind a closed tab.
+  const endTabResource = useCallback((tabId: string) => {
+    if (tabId.startsWith("agent-")) {
+      void closeAgentTab(tabId);
+      return;
+    }
+    if (tabId.startsWith("terminal-")) {
+      const terminalId = tabId.slice("terminal-".length);
+      setTerminals((current) => current.filter((terminal) => terminal.id !== terminalId));
+      setSelectedTerminalId((current) => (current === terminalId ? undefined : current));
+      void api.deleteTerminal(terminalId).catch(() => {});
+      if (selectedWorkspaceId) void loadTerminals(selectedWorkspaceId, false);
+      return;
+    }
+    if (tabId.startsWith("preview-")) {
+      const previewId = tabId.slice("preview-".length);
+      setPreviews((current) => current.filter((preview) => preview.id !== previewId));
+      setSelectedPreviewId((current) => (current === previewId ? undefined : current));
+      void api.deletePreview(previewId).catch(() => {});
+    }
+  }, [api, closeAgentTab, loadTerminals, selectedWorkspaceId]);
 
   const handleSelectAgent = (id: string) => {
     setSelectedAgentId(id);
@@ -717,13 +747,14 @@ function App() {
   };
 
   const closeTabNow = useCallback((tabId: string) => {
+    endTabResource(tabId);
     if (layout && selectedWorkspaceId) {
       const nextRoot = removeTabFromTree(layout.root, tabId);
       handleLayoutChange(nextRoot ? { ...layout, root: nextRoot } : createDefaultLayout(selectedWorkspaceId));
     }
     if (tabId.startsWith("editor-")) setOpenEditorPath(undefined);
     if (tabId.startsWith("diff-")) setOpenDiffPath(undefined);
-  }, [layout, selectedWorkspaceId, handleLayoutChange]);
+  }, [endTabResource, layout, selectedWorkspaceId, handleLayoutChange]);
 
   const handleEditorDirtyChange = useCallback((tabId: string, path: string, isDirty: boolean, save: () => Promise<boolean>) => {
     editorSaveHandlers.current.set(tabId, save);
@@ -944,7 +975,7 @@ function App() {
               setPreviews((current) => current.map((p) => (p.id === updated.id ? updated : p)));
             }}
             onClose={() => {
-              // Closing a pane closes only the view, never the preview.
+              // Closing the pane stops and removes the preview.
               closeTabNow(`preview-${currentPreview.id}`);
               setActiveTab("overview");
             }}
@@ -1120,7 +1151,7 @@ function App() {
                     }
                   }}
                 >
-                  ◉ Preview {previews.length > 0 && <span className="tab-badge">{previews.length}</span>}
+                  ◉ Preview {openPreviewCount > 0 && <span className="tab-badge">{openPreviewCount}</span>}
                 </button>
                 <button
                   className={`nav-tab ${activeTab === "explorer" ? "active" : ""}`}
@@ -1185,7 +1216,7 @@ function App() {
                       setPendingDirtyClose({ tabId, path: dirtyPath });
                       return false;
                     }
-                    void closeAgentTab(tabId);
+                    endTabResource(tabId);
                     if (tabId.startsWith("editor-")) setOpenEditorPath(undefined);
                     if (tabId.startsWith("diff-")) setOpenDiffPath(undefined);
                   }}

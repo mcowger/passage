@@ -71,9 +71,7 @@ export function TerminalTabPane({
       <TerminalPanel
         key={currentTerm.id}
         terminal={currentTerm}
-        api={api}
         onClose={onClose}
-        onTerminated={onTerminated}
       />
     );
   }

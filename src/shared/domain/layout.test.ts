@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   addTabToGroup,
   countAgentTabs,
+  countTabsOfKind,
   createDefaultLayout,
   findFirstDeadTerminalTab,
   findNode,
@@ -128,6 +129,20 @@ describe("split-tree layout domain operations", () => {
     expect(countAgentTabs(root)).toBe(3);
     expect(countAgentTabs(root, new Set(["a", "b"]))).toBe(2);
     expect(countAgentTabs(createDefaultLayout("ws_1").root, new Set(["a"]))).toBe(0);
+  });
+
+  test("counts distinct preview tabs targeting known previews", () => {
+    const layout = createDefaultLayout("ws_1");
+    const previewOne: PaneTab = { id: "preview-1", kind: "preview", title: "Preview 1", targetId: "p1" };
+    const previewTwo: PaneTab = { id: "preview-2", kind: "preview", title: "Preview 2", targetId: "p2" };
+
+    let root = addTabToGroup(layout.root, layout.root.id, previewOne);
+    root = addTabToGroup(root, layout.root.id, previewTwo);
+
+    expect(countTabsOfKind(root, "preview", new Set(["p1", "p2"]))).toBe(2);
+    // A durable preview row with no open tab must not contribute to the count.
+    expect(countTabsOfKind(root, "preview", new Set(["p1"]))).toBe(1);
+    expect(countTabsOfKind(root, "preview", new Set())).toBe(0);
   });
 
   test("migrates layout from valid version or falls back to default", () => {
