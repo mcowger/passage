@@ -316,9 +316,9 @@ toolbar (Back, Forward, Reload, address, viewport, Take control, Stop, close),
 a canvas rendering the newest JPEG frame at the remote viewport's aspect ratio,
 and explicit connection states over the last frame when the stream freezes.
 Only one attached client holds the input/viewport lease; other clients are
-view-only until they explicitly take control. Closing the pane closes only the
-view, never the preview. On viewports below 640px the preview is a full-screen
-destination with touch-mapped pointer input.
+view-only until they explicitly take control. Closing the pane stops and removes
+the preview, so no preview is left running without a tab. On viewports below
+640px the preview is a full-screen destination with touch-mapped pointer input.
 
 Every canvas tab shows resource icon, title, relevant status, unsaved/changed
 marker where appropriate, and close control. Pane splitting/moving is primarily
@@ -333,9 +333,11 @@ direct manipulation:
   `Move`, `Split right`, `Split down`, `Move to inspector`, `Close`, and `Reset
   workspace layout` for keyboard and assistive-technology users.
 
-Closing a tab removes a view, not the underlying agent, terminal, workspace, or
-file. A terminal can be closed only through its own terminal action; an agent
-is archived only through an explicit lifecycle action.
+Closing a tab ends the resource that owns it: an agent is archived, a terminal
+is terminated, and a preview is stopped and removed. Editors, diffs, explorer,
+changes, and overview are views over durable files/workspaces and leave those
+untouched, apart from the unsaved-editor confirmation. Resources never run
+un-represented behind a closed tab.
 
 ### Contextual right inspector
 

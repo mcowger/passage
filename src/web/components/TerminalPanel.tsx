@@ -4,17 +4,14 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalSummary } from "../../shared/domain/terminals.ts";
-import type { WorkspaceApi } from "../api.ts";
 import { connectTerminalSocket, type TerminalSocket } from "../terminalSocket.ts";
 
 type TerminalProps = {
   terminal: TerminalSummary;
-  api: WorkspaceApi;
   onClose: () => void;
-  onTerminated?: () => void;
 };
 
-export function TerminalPanel({ terminal, api, onClose, onTerminated }: TerminalProps) {
+export function TerminalPanel({ terminal, onClose }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -26,7 +23,6 @@ export function TerminalPanel({ terminal, api, onClose, onTerminated }: Terminal
   const [dimensions, setDimensions] = useState({ cols: terminal.columns, rows: terminal.rows });
   const [status, setStatus] = useState<"running" | "exited">(terminal.status);
   const [exitCode, setExitCode] = useState<number | null>(terminal.exitCode);
-  const [terminating, setTerminating] = useState(false);
 
   const handleResize = useCallback(() => {
     if (animationFrameRef.current !== null) {
@@ -166,14 +162,10 @@ export function TerminalPanel({ terminal, api, onClose, onTerminated }: Terminal
     termRef.current?.clear();
   };
 
-  const handleTerminate = async () => {
-    if (terminating) return;
-    setTerminating(true);
-    try {
-      await api.deleteTerminal(terminal.id);
-      onTerminated?.();
-      onClose();
-    } catch {}
+  // Closing the pane terminates the shell; closeTabNow owns the deletion so
+  // the canvas tab and the terminal process end together.
+  const handleTerminate = () => {
+    onClose();
   };
 
   return (
@@ -209,7 +201,6 @@ export function TerminalPanel({ terminal, api, onClose, onTerminated }: Terminal
           <button
             className="danger-button small"
             onClick={handleTerminate}
-            disabled={terminating}
             title="Terminate shell process"
           >
             Kill
@@ -217,7 +208,7 @@ export function TerminalPanel({ terminal, api, onClose, onTerminated }: Terminal
           <button
             className="icon-button"
             onClick={onClose}
-            title="Close terminal view"
+            title="Close and terminate terminal"
             aria-label="Close"
           >
             ×

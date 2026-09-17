@@ -119,13 +119,17 @@ export function findTab(
   return null;
 }
 
-export function countAgentTabs(node: LayoutNode, agentIds?: ReadonlySet<string>): number {
+export function countTabsOfKind(
+  node: LayoutNode,
+  kind: PaneTabKind,
+  targetIds?: ReadonlySet<string>
+): number {
   const seen = new Set<string>();
   const visit = (current: LayoutNode) => {
     if (current.type === "tabs") {
       for (const tab of current.tabs) {
-        if (tab.kind !== "agent" || tab.targetId === undefined) continue;
-        if (agentIds && !agentIds.has(tab.targetId)) continue;
+        if (tab.kind !== kind || tab.targetId === undefined) continue;
+        if (targetIds && !targetIds.has(tab.targetId)) continue;
         seen.add(tab.targetId);
       }
       return;
@@ -134,6 +138,10 @@ export function countAgentTabs(node: LayoutNode, agentIds?: ReadonlySet<string>)
   };
   visit(node);
   return seen.size;
+}
+
+export function countAgentTabs(node: LayoutNode, agentIds?: ReadonlySet<string>): number {
+  return countTabsOfKind(node, "agent", agentIds);
 }
 
 export function findNode(node: LayoutNode, nodeId: string): LayoutNode | null {
