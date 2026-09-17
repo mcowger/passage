@@ -98,6 +98,10 @@
   color: var(--accent);
 }
 .composer-stat-sep { opacity: 0.45; margin: 0 1px; }
+.composer-ctx-cost { display: contents; }
+@media (max-width: 640px) {
+  .composer-ctx-cost { display: none; }
+}
 
 .composer-icon-btn {
   height: 26px;

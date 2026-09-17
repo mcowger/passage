@@ -40,12 +40,8 @@ import {
   CircleAlert,
   Square,
   ArrowUp,
-  Expand,
-  Shrink,
   Plus,
   Pencil,
-  AtSign,
-  Slash,
 } from "lucide-react";
 
 const STREAMING_STATS_INTERVAL_MS = 300;
@@ -356,12 +352,6 @@ export function AgentPanel({
     setConcise(localStorage.getItem(conciseKey) === "true");
   }, [conciseKey]);
 
-  const toggleConcise = () => {
-    const next = !concise;
-    setConcise(next);
-    localStorage.setItem(conciseKey, String(next));
-  };
-
   const model = effectiveHistory?.currentModel
     ? `${effectiveHistory.currentModel.provider}/${effectiveHistory.currentModel.modelId}`
     : agent.modelPreference ?? "model unavailable";
@@ -471,8 +461,6 @@ export function AgentPanel({
         api={api}
         busy={busy}
         setBusy={setBusy}
-        concise={concise}
-        toggleConcise={toggleConcise}
         onRefresh={onRefresh}
         onModelChanged={onModelChanged}
         onOptimisticMessage={(message) => {
@@ -551,8 +539,6 @@ type AgentComposerProps = {
   api: WorkspaceApi;
   busy: boolean;
   setBusy: (b: boolean) => void;
-  concise: boolean;
-  toggleConcise: () => void;
   onRefresh: () => Promise<void>;
   onModelChanged?: (agent: AgentSummary) => void;
   onOptimisticMessage?: (message: string) => void;
@@ -624,8 +610,6 @@ function AgentComposerInner({
   api,
   busy,
   setBusy,
-  concise,
-  toggleConcise,
   onRefresh,
   onModelChanged,
   onOptimisticMessage,
@@ -725,13 +709,6 @@ function AgentComposerInner({
     if (!command) return false;
     acceptCommand(command);
     return true;
-  };
-
-  const insertTriggerChar = (char: "@" | "/") => {
-    const position = caret ?? draft.length;
-    const value = `${draft.slice(0, position)}${char}${draft.slice(position)}`;
-    updateDraft(value);
-    placeCaret(position + 1);
   };
 
   useEffect(() => {
@@ -1011,26 +988,6 @@ function AgentComposerInner({
                 }}
               />
             </label>
-            <button
-              type="button"
-              className="composer-icon-btn"
-              onClick={() => insertTriggerChar("@")}
-              title="Mention a workspace file (@)"
-              aria-label="Mention a workspace file"
-              disabled={stopping}
-            >
-              <AtSign size={14} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="composer-icon-btn"
-              onClick={() => insertTriggerChar("/")}
-              title="Browse slash commands (/)"
-              aria-label="Browse slash commands"
-              disabled={stopping}
-            >
-              <Slash size={14} aria-hidden="true" />
-            </button>
             {contextTokens !== null && contextTokens > 0 && (
               <div className="composer-ctx-wrapper" ref={ctxDetailsRef}>
                 <button
@@ -1051,10 +1008,10 @@ function AgentComposerInner({
                   />
                   <span>{contextPct}%</span>
                   {usage?.cost !== undefined && usage.cost > 0 && (
-                    <>
+                    <span className="composer-ctx-cost">
                       <span className="composer-stat-sep">·</span>
                       <span>${usage.cost.toFixed(2)}</span>
-                    </>
+                    </span>
                   )}
                 </button>
 
@@ -1093,16 +1050,6 @@ function AgentComposerInner({
             )}
           </div>
           <div className="composer-toolbar-right">
-            <button
-              type="button"
-              className="composer-icon-btn"
-              onClick={toggleConcise}
-              title={concise ? "Switch to Detailed mode" : "Switch to Concise mode"}
-              aria-label={concise ? "Switch to Detailed mode" : "Switch to Concise mode"}
-              aria-pressed={concise}
-            >
-              {concise ? <Shrink size={14} aria-hidden="true" /> : <Expand size={14} aria-hidden="true" />}
-            </button>
             <DisplayOptionsPopover
               expansion={sessionExpansion}
               onExpansionChange={onSessionExpansionChange}
