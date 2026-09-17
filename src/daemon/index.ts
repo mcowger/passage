@@ -104,6 +104,13 @@ const terminalManager = new TerminalManager(workspaceService);
 const previewManager = new WebPreviewManager(repositories, workspaceService);
 const agentService = new AgentService(repositories, {
   sessionsRoot: process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(metadataPath), "sessions"),
+  // Agent tool calls (e.g. `git commit` via Pi's bash tool) mutate the repo
+  // outside the Git HTTP routes, so the service reports likely Git mutations
+  // here and the daemon publishes them as `git-status-changed` invalidations
+  // (invalidation-only; receivers refetch). Never throws.
+  onWorkspaceGitChanged: (workspaceId) => {
+    workspaceEvents.emitGitStatus({ workspaceId, reason: "commit" });
+  },
 });
 const agentEvents = new AgentEventHub(agentService);
 const responses = new IdempotencyCache<{ fingerprint: string; response: string }>();

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { MetadataStore } from "../metadata/database.ts";
 import { MetadataRepositories, type Workspace } from "../metadata/repositories.ts";
-import { AgentService } from "./service.ts";
+import { AgentService, isGitCommitToolEvent } from "./service.ts";
 import { PiRpcManager } from "./rpc/index.ts";
 
 const script = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'||r.type==='steer'||r.type==='follow_up')process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');const data=r.type==='get_available_models'?{models:[{provider:'test',id:'model',name:'Model',api:'test',input:['text'],authenticated:true,supportedThinkingLevels:['medium','high']}]}:r.type==='get_available_thinking_levels'?{levels:['medium','high']}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
@@ -255,6 +255,88 @@ describe("transcript row ordering (regression: reorder/duplicate chat rows)", ()
     expect(errorRow).toBeTruthy();
     expect((errorRow as { text: string }).text).toContain("Pi process exited (7)");
 
+    await service.shutdown();
+    f.store.close();
+  });
+});
+
+describe("agent-side git invalidations (merge button freshness)", () => {
+  test("isGitCommitToolEvent matches completed commits only", () => {
+    const commit = { toolCallId: "t", toolName: "bash", args: { command: "git commit -m test" } };
+    expect(isGitCommitToolEvent("tool_execution_end", { ...commit, isError: false })).toBe(true);
+    expect(isGitCommitToolEvent("tool_execution_end", { toolCallId: "t", result: "  [main abc123] commit via script\n 1 file changed" })).toBe(false);
+    expect(isGitCommitToolEvent("tool_execution_end", { toolCallId: "t", args: { command: "git -C /repo commit -m test" }, isError: false })).toBe(true);
+    expect(isGitCommitToolEvent("tool_execution_end", { toolCallId: "t", args: { command: "cd /repo && git commit -m test" }, isError: false })).toBe(true);
+    // Not a completion: the commit has not happened yet at call time.
+    expect(isGitCommitToolEvent("tool_call", { ...commit })).toBe(false);
+    expect(isGitCommitToolEvent("tool_execution_start", { ...commit })).toBe(false);
+    // Failed calls mutated nothing.
+    expect(isGitCommitToolEvent("tool_execution_end", { ...commit, isError: true })).toBe(false);
+    // Unrelated commands stay silent.
+    expect(isGitCommitToolEvent("tool_execution_end", { toolCallId: "t", args: { command: "git status" }, isError: false })).toBe(false);
+    expect(isGitCommitToolEvent("tool_execution_end", { toolCallId: "t", args: { command: "ls -la" }, isError: false })).toBe(false);
+    expect(isGitCommitToolEvent("tool_execution_end", { toolCallId: "t", isError: false })).toBe(false);
+  });
+
+  test("a completed agent-side git commit invalidates mid-run, before settlement", async () => {
+    const f = await make();
+    // Emits a git-commit tool completion but never settles: proves the
+    // invalidation comes from commit detection, not the settle backstop.
+    const commitScript = `let streaming=true;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n');process.stdout.write(JSON.stringify({type:'tool_execution_end',toolCallId:'t1',toolName:'bash',args:{command:'git commit -m test'},isError:false})+'\\n')}const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+    const invalidated: string[] = [];
+    const service = new AgentService(f.repos, {
+      sessionsRoot: join(f.root, "git-commit-sessions"),
+      manager: new PiRpcManager(1),
+      pi: { executable: process.execPath, executableArgs: ["-e", commitScript] },
+      onWorkspaceGitChanged: (workspaceId) => invalidated.push(workspaceId),
+    });
+    const agent = await service.create("w");
+    await service.prompt(agent.id, "commit the work");
+    await Bun.sleep(50);
+    expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+    expect(invalidated).toEqual(["w"]);
+    await service.shutdown();
+    f.store.close();
+  });
+
+  test("non-git tool output stays silent mid-run; settlement still invalidates", async () => {
+    const f = await make();
+    const settleScript = `let streaming=false;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n');process.stdout.write(JSON.stringify({type:'tool_execution_end',toolCallId:'t1',toolName:'bash',args:{command:'ls -la'},result:'total 0',isError:false})+'\\n')}if(r.type==='steer'){streaming=false;process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n')}const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+    const invalidated: string[] = [];
+    const service = new AgentService(f.repos, {
+      sessionsRoot: join(f.root, "git-settle-sessions"),
+      manager: new PiRpcManager(1),
+      pi: { executable: process.execPath, executableArgs: ["-e", settleScript] },
+      onWorkspaceGitChanged: (workspaceId) => invalidated.push(workspaceId),
+    });
+    const agent = await service.create("w");
+    await service.prompt(agent.id, "list files");
+    await Bun.sleep(50);
+    expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+    expect(invalidated).toEqual([]);
+    await service.steer(agent.id, "wrap up");
+    await Bun.sleep(50);
+    expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+    expect(invalidated).toEqual(["w"]);
+    await service.shutdown();
+    f.store.close();
+  });
+
+  test("a throwing git listener never breaks the agent event chain", async () => {
+    const f = await make();
+    const events: string[] = [];
+    const service = new AgentService(f.repos, {
+      sessionsRoot: join(f.root, "git-throw-sessions"),
+      manager: new PiRpcManager(1),
+      pi: { executable: process.execPath, executableArgs: ["-e", "process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n');process.stdout.write(JSON.stringify({type:'tool_execution_end',toolCallId:'t1',args:{command:'git commit -m x'},isError:false})+'\\n');process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n')}const data=r.type==='get_state'?{isStreaming:false,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})"] },
+      onWorkspaceGitChanged: () => { throw new Error("listener boom"); },
+    });
+    service.subscribe((event) => events.push(event.type));
+    const agent = await service.create("w");
+    await service.prompt(agent.id, "commit");
+    await Bun.sleep(50);
+    expect(events).toContain("settled");
+    expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
     await service.shutdown();
     f.store.close();
   });

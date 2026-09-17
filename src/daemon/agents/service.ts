@@ -27,6 +27,13 @@ const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_SHORT_VALUE_LENGTH = 256;
 const MAX_RUNTIME_DIAGNOSTICS = 100;
 const DEFAULT_ABORT_TIMEOUT_MS = 30_000;
+/** Upper bound on the tool payload text scanned for a `git commit` invocation. */
+const MAX_GIT_SCAN_BYTES = 8192;
+/** Matches a `git commit` invocation inside a shell command (allowing global
+ *  flags such as `git -C <dir> commit`). Command separators are excluded so
+ *  `echo git foo; commit` does not match. A miss only delays the refresh
+ *  until run settlement; a false positive only costs one quiet refetch. */
+const GIT_COMMIT_PATTERN = /\bgit(?:\.exe)?\b[^|;&\n]*\bcommit\b/;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const encoder = new TextEncoder();
 
@@ -80,6 +87,25 @@ export class AgentError extends Error {
   }
 }
 
+/** True when a tool event looks like a successfully completed `git commit`
+ *  invocation. Only completion events count: at call time the commit has not
+ *  happened yet, so invalidating then would refetch unchanged status. Failed
+ *  calls mutated nothing. The check is tool-agnostic (Pi tool names and arg
+ *  shapes are version-sensitive); a false positive only costs one quiet
+ *  client refetch. */
+export function isGitCommitToolEvent(type: string, payload: Record<string, unknown>): boolean {
+  if (type !== "tool_execution_end" || payload.isError) return false;
+  const candidates = [payload.args, payload.input, payload.result, payload.partialResult];
+  let haystack = "";
+  for (const candidate of candidates) {
+    if (candidate === undefined) continue;
+    haystack += (typeof candidate === "string" ? candidate : JSON.stringify(candidate) ?? "") + "\n";
+    if (haystack.length >= MAX_GIT_SCAN_BYTES) break;
+  }
+  if (haystack.length > MAX_GIT_SCAN_BYTES) haystack = haystack.slice(0, MAX_GIT_SCAN_BYTES);
+  return GIT_COMMIT_PATTERN.test(haystack);
+}
+
 export class AgentService {
   private readonly listeners = new Set<(event: AgentServiceEvent) => void>();
   private readonly subscriptions = new Map<string, RuntimeSubscription>();
@@ -105,6 +131,7 @@ export class AgentService {
   private readonly sessionsRoot: string;
   private readonly imageCache: ImageCache;
   private readonly abortTimeoutMs: number;
+  private readonly onWorkspaceGitChanged?: (workspaceId: string) => void;
 
   constructor(
     private readonly repositories: MetadataRepositories,
@@ -116,6 +143,9 @@ export class AgentService {
       imageCacheRoot?: string;
       imageCacheBytes?: number;
       pi?: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
+      /** Called (never-throw) when an agent run likely mutated its workspace's
+       *  Git state, so the daemon can invalidate subscribed Git views. */
+      onWorkspaceGitChanged?: (workspaceId: string) => void;
     },
   ) {
     if (!options.sessionsRoot) throw new AgentError("invalid-input", "sessionsRoot is required");
@@ -134,6 +164,7 @@ export class AgentService {
       options.imageCacheBytes,
     );
     this.abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_ABORT_TIMEOUT_MS;
+    this.onWorkspaceGitChanged = options.onWorkspaceGitChanged;
   }
 
   subscribe(listener: (event: AgentServiceEvent) => void): () => boolean {
@@ -588,7 +619,20 @@ export class AgentService {
     const payload = this.sanitizeEventPayload(rawPayload) as Record<string, unknown>;
     await this.applyTranscriptEvent(agentId, String(event.type ?? "event"), payload);
 
+    // An agent-side `git commit` (Pi bash tool or any other tool) mutates the
+    // repo outside Passage's Git HTTP routes, so no `git-status-changed`
+    // invalidation would otherwise fire and the merge button / changes list
+    // stay stale until a manual refresh. Invalidate immediately so subscribed
+    // views re-check status mid-run; their quiet refetch bypasses op locks.
+    if (isGitCommitToolEvent(String(event.type ?? "event"), payload)) {
+      this.notifyWorkspaceGitChanged(agent.workspaceId);
+    }
+
     if (event.type === "agent_settled") {
+      // Backstop: a run may have mutated Git state through a path the
+      // commit heuristic misses (helper scripts, aliases, rebase/merge), so
+      // reconcile Git views after every settlement.
+      this.notifyWorkspaceGitChanged(agent.workspaceId);
       this.pendingUiRequests.delete(agentId);
       await this.reconcile(agentId);
       this.endRun(agentId);
@@ -874,6 +918,14 @@ export class AgentService {
     for (const listener of this.listeners) {
       try { listener(event); } catch {}
     }
+  }
+
+  /** Never-throw Git invalidation fan-out: a broken callback must not fail
+   *  the serialized agent event chain. */
+  private notifyWorkspaceGitChanged(workspaceId: string): void {
+    try {
+      this.onWorkspaceGitChanged?.(workspaceId);
+    } catch {}
   }
 
   private requireWorkspace(workspaceId: string) {
