@@ -116,9 +116,29 @@ button.timeline-concise-badge {
   font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.4;
+  overflow: auto;
+  overflow-y: auto;
   overflow-x: auto;
-  max-height: 260px;
+  max-height: min(75vh, 650px);
   white-space: pre-wrap;
+  word-break: break-word;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  resize: vertical;
+}
+.tool-input-pre::-webkit-scrollbar,
+.tool-output-pre::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.tool-input-pre::-webkit-scrollbar-thumb,
+.tool-output-pre::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.tool-input-pre::-webkit-scrollbar-thumb:hover,
+.tool-output-pre::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
 }
 .tool-output-pre.error { border-color: #fecaca; background: #fff5f5; color: #991b1b; }
 .dark .tool-output-pre.error, [data-theme-mode="dark"] .tool-output-pre.error {
@@ -228,10 +248,14 @@ button.timeline-concise-badge {
   font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.4;
+  overflow: auto;
+  overflow-y: auto;
   overflow-x: auto;
-  max-height: 35vh;
+  max-height: min(65vh, 500px);
   white-space: pre-wrap;
   word-break: break-word;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 .tool-floating-copy {
   position: absolute;
