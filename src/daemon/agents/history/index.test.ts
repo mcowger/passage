@@ -157,6 +157,25 @@ describe("Pi history projection", () => {
     expect(history.agentErrorCount).toBe(1);
   });
 
+  test("keeps a terminal error ahead of its retained unexecuted tool call", () => {
+    const source = [
+      line(header),
+      line({ type: "message", id: "u1", parentId: null, timestamp: "t", message: { role: "user", content: "Try" } }),
+      line({ type: "message", id: "a1", parentId: "u1", timestamp: "t", message: { role: "assistant", content: [
+        { type: "thinking", thinking: "Plan the request" },
+        { type: "toolCall", id: "tool-1", name: "bash", arguments: { command: "bun test" } },
+      ], errorMessage: "OpenAI Responses stream ended before a terminal response event" } }),
+    ].join("");
+    const history = parsePiJsonl(source, revision(source));
+
+    expect(history.timeline.map((item) => item.kind)).toEqual(["user", "thinking", "assistant", "tool"]);
+    expect(history.timeline[2]).toMatchObject({
+      id: "a1:terminal",
+      error: "OpenAI Responses stream ended before a terminal response event",
+    });
+    expect(history.timeline[3]).toMatchObject({ id: "tool-1", status: "running" });
+  });
+
   test("detects append versus rewrite using the previous content fingerprint", async () => {
     const directory = await mkdtemp(join(tmpdir(), "passage-history-"));
     directories.push(directory);
