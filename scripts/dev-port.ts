@@ -7,11 +7,19 @@
 //   PORT="$(bun scripts/dev-port.ts)" bun --watch run src/daemon/index.ts
 //
 // Stability comes from hashing the canonical worktree root, so each checkout
-// keeps its own port across restarts. Every candidate is occupancy-checked
-// (TCP connect to 127.0.0.1) and bumped until a free port is found.
+// keeps its own port across restarts.
+//
+// The port is NEVER bumped. If the intended port already has a listener:
+// - when the listener is owned by the live PID recorded in the dev server
+//   pidfile (.data/dev.pid, or PASSAGE_PID_FILE), the dev server is already
+//   running and the same port is printed;
+// - otherwise a CRITICAL error is printed to both STDOUT and STDERR and the
+//   script exits non-zero. A foreign listener on the intended port means
+//   something is wrong; the agent must stop and ask the user for help rather
+//   than pick a different port.
 //
 // Two modes:
-// - Manual (`bun run dev`): precedence for the starting candidate is explicit
+// - Manual (`bun run dev`): precedence for the intended port is explicit
 //   PORT, then PASEO_PORT (set by the Paseo worktree runner, which routes
 //   traffic to it), then the stable hash.
 // - Paseo portScript (`worktree.servicePorts.portScript` in paseo.json):
@@ -21,13 +29,15 @@
 //   PASEO_PORT are ignored because Paseo has not assigned this service a
 //   port yet; the hash is taken over the worktree path Paseo passes in.
 
-import { realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 
 const RANGE_LO = 3000;
 const RANGE_HI = 3999;
 const RANGE_SIZE = RANGE_HI - RANGE_LO + 1;
-const MAX_PROBES = 1000;
-const CONNECT_TIMEOUT_MS = 300;
+const LISTEN_STATE = "0A";
+
+const DEFAULT_PID_FILE = join(import.meta.dir, "..", ".data", "dev.pid");
 
 export function fnv1a32(input: string): number {
   let hash = 0x811c9dc5;
@@ -63,37 +73,15 @@ export function worktreeRoot(cwd: string = process.cwd()): string {
   }
 }
 
-async function isOccupied(port: number): Promise<boolean> {
-  try {
-    const socket = await Promise.race([
-      // NB: Bun.connect requires at least a data/drain handler, otherwise it
-      // rejects even when the TCP connect succeeds (and every port would
-      // look free).
-      Bun.connect({ hostname: "127.0.0.1", port, socket: { data() {} } }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("connect timeout")), CONNECT_TIMEOUT_MS)),
-    ]);
-    try {
-      socket.end();
-    } catch {
-      // Already closed; the successful connect is what matters.
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function resolveStart(env: Record<string, string | undefined>): { start: number; wrap: boolean } {
+export function resolveStart(env: Record<string, string | undefined>): number {
   for (const key of ["PORT", "PASEO_PORT"] as const) {
     const raw = env[key]?.trim();
     if (raw === undefined || raw === "") continue;
     const parsed = Number(raw);
-    if (Number.isInteger(parsed) && parsed > 0 && parsed < 65536) {
-      return { start: parsed, wrap: parsed >= RANGE_LO && parsed <= RANGE_HI };
-    }
+    if (Number.isInteger(parsed) && parsed > 0 && parsed < 65536) return parsed;
     console.error(`dev-port: ignoring invalid ${key}=${JSON.stringify(raw)}`);
   }
-  return { start: stableBasePort(worktreeRoot()), wrap: true };
+  return stableBasePort(worktreeRoot());
 }
 
 // Detect Paseo portScript invocation: extra positional args past the runtime
@@ -108,18 +96,111 @@ export function portScriptWorktreePath(
   return env.PASEO_WORKTREE_PATH?.trim() || argv[5]?.trim() || null;
 }
 
+// Mirrors scripts/dev-stop.ts so both agree on where the dev server records
+// its PID.
+export function resolvePidFile(env: Record<string, string | undefined> = process.env): string {
+  const custom = env.PASSAGE_PID_FILE?.trim();
+  if (custom) {
+    return isAbsolute(custom) ? custom : join(process.cwd(), custom);
+  }
+  return DEFAULT_PID_FILE;
+}
+
+// Returns the pid recorded in the pidfile when that process is still alive,
+// otherwise null.
+export function readLivePid(pidFile: string): number | null {
+  if (!existsSync(pidFile)) return null;
+  let raw = "";
+  try {
+    raw = readFileSync(pidFile, "utf8").trim();
+  } catch {
+    return null;
+  }
+  const pid = Number(raw);
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return null;
+  }
+  return pid;
+}
+
+// Parses /proc/net/tcp (or tcp6) content and returns the socket inodes
+// LISTENing on the given port.
+export function parseListeningInodes(procNetTcp: string, port: number): Set<string> {
+  const inodes = new Set<string>();
+  const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
+  for (const line of procNetTcp.split("\n")) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 10) continue;
+    const localAddress = parts[1];
+    const state = parts[3];
+    if (state !== LISTEN_STATE) continue;
+    if (!localAddress?.endsWith(`:${hexPort}`)) continue;
+    const inode = parts[9];
+    if (inode && inode !== "0") inodes.add(inode);
+  }
+  return inodes;
+}
+
+export function listeningInodesForPort(port: number): Set<string> {
+  const inodes = new Set<string>();
+  for (const path of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+    try {
+      for (const inode of parseListeningInodes(readFileSync(path, "utf8"), port)) {
+        inodes.add(inode);
+      }
+    } catch {
+      // Missing or unreadable /proc file; treat as no listeners there.
+    }
+  }
+  return inodes;
+}
+
+// Checks whether the given process holds at least one of the socket inodes.
+export function pidOwnsSocketInode(pid: number, inodes: ReadonlySet<string>): boolean {
+  if (inodes.size === 0) return false;
+  let fds: string[];
+  try {
+    fds = readdirSync(`/proc/${pid}/fd`);
+  } catch {
+    return false;
+  }
+  for (const fd of fds) {
+    let target: string;
+    try {
+      target = readlinkSync(`/proc/${pid}/fd/${fd}`);
+    } catch {
+      continue;
+    }
+    const match = /^socket:\[(\d+)\]$/.exec(target);
+    if (match && inodes.has(match[1])) return true;
+  }
+  return false;
+}
+
 if (import.meta.main) {
   const scriptWorktree = portScriptWorktreePath(Bun.argv, process.env);
-  const { start, wrap } = scriptWorktree === null
-    ? resolveStart(process.env)
-    : { start: stableBasePort(scriptWorktree), wrap: true };
-  for (let attempt = 0; attempt < MAX_PROBES; attempt += 1) {
-    const port = wrap ? RANGE_LO + ((start - RANGE_LO + attempt) % RANGE_SIZE) : start + attempt;
-    if (!(await isOccupied(port))) {
+  const port = scriptWorktree === null ? resolveStart(process.env) : stableBasePort(scriptWorktree);
+
+  const listeners = listeningInodesForPort(port);
+  if (listeners.size > 0) {
+    const pidFile = resolvePidFile(process.env);
+    const pid = readLivePid(pidFile);
+    if (pid !== null && pidOwnsSocketInode(pid, listeners)) {
+      console.error(`dev-port: dev server (PID ${pid}) is already running on port ${port}`);
       console.log(port);
       process.exit(0);
     }
+    const message =
+      `CRITICAL: dev-port: intended port ${port} for this worktree is occupied by a process ` +
+      `other than this worktree's dev server (pidfile: ${pidFile}). Do NOT bump to another ` +
+      `port or start a second server. Stop and ask the user for help.`;
+    console.error(message);
+    console.log(message);
+    process.exit(1);
   }
-  console.error("dev-port: no free port found");
-  process.exit(1);
+
+  console.log(port);
 }

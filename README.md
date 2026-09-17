@@ -32,7 +32,7 @@ bun run dev
 ```
 
 The daemon picks a stable per-worktree port in `3000`–`3999` via
-`scripts/dev-port.ts` (hashed from the worktree path, bumped while occupied).
+`scripts/dev-port.ts` (hashed from the worktree path).
 Set `PORT` to override it.
 
 Useful checks:
