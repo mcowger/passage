@@ -69,6 +69,8 @@ describe("frpc helpers", () => {
 			"3456",
 			"--sd",
 			"passage-worktree",
+			"--host-header-rewrite",
+			"localhost",
 		]);
 	});
 
