@@ -775,11 +775,11 @@ function AgentComposerInner({
         aria-hidden={!streamActive}
       >
         {streamActive && (
-          <>
+          <div className="composer-status-pill">
             <span className="pulse-dot" />
             <span className="composer-status-duration">{formatDuration(elapsedSeconds)}</span>
             <LiveStreamingStats tokens={streamingTokens} tokensPerSecond={streamingTokensPerSecond} />
-          </>
+          </div>
         )}
       </div>
       {changeSummary && (
