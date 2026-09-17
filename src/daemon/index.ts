@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Hono } from "hono";
+import { honoLogger } from "@logtape/hono";
 import { AgentService } from "./agents/service.ts";
 import { AgentEventHub } from "./agents/events/index.ts";
 import { createAgentRoutes } from "./http/agents.ts";
@@ -23,6 +24,7 @@ import { TerminalManager } from "./terminals/manager.ts";
 import { WebPreviewManager } from "./previews/manager.ts";
 import { isAllowedPreviewRequest } from "./previews/relay.ts";
 import { createPreviewRoutes } from "./http/previews.ts";
+import { configureLogging, errorFields, logger } from "./logging.ts";
 import {
   MAX_PREVIEW_MESSAGE_BYTES,
   MAX_PREVIEW_UPSTREAM_BYTES,
@@ -59,6 +61,8 @@ const MAX_AGENT_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_WORKSPACE_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_INFLIGHT_COMMANDS = 256;
 const UNKNOWN_REQUEST_ID = "unknown";
+await configureLogging();
+const log = logger("daemon");
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
 const defaultDataRoot = join(import.meta.dir, "..", "..", ".data");
 const metadataPath = process.env.PASSAGE_DB_PATH ?? join(defaultDataRoot, "passage.sqlite");
@@ -96,6 +100,34 @@ const agentEvents = new AgentEventHub(agentService);
 const responses = new IdempotencyCache<{ fingerprint: string; response: string }>();
 const inflightResponses = new Map<string, { fingerprint: string; response: Promise<string> }>();
 const app = new Hono();
+app.use("*", honoLogger({
+  category: ["hono", "http"],
+  context: { include: ["requestId", "method", "path", "userAgent"] },
+  format: (context, responseTime) => ({
+    event: "http.request",
+    method: context.req.method,
+    path: context.req.path,
+    status: context.res.status,
+    durationMs: responseTime,
+    userAgent: context.req.header("user-agent"),
+  }),
+  skip: (context) => context.req.path === "/api/health",
+}));
+app.use("*", async (context, next) => {
+  await next();
+  if (context.res.status >= 400) {
+    logger("http").warn("HTTP request returned an error status", {
+      event: "http.error_status",
+      method: context.req.method,
+      path: context.req.path,
+      status: context.res.status,
+    });
+  }
+});
+app.onError((error, context) => {
+  logger("http").error("HTTP request failed", { event: "http.error", path: context.req.path, ...errorFields(error) });
+  return context.json({ error: "internal-error" }, 500);
+});
 app.get("/api/health", (context) => context.json({ ok: true }));
 app.get("/api/daemon/snapshot", (context) => context.json({
   protocolVersion: PROTOCOL_VERSION,
@@ -128,15 +160,19 @@ const previewUpstreams = new WeakMap<Bun.ServerWebSocket<SocketData>, WebSocket>
 function sendPreviewError(socket: Bun.ServerWebSocket<SocketData>, message: string): void {
   try {
     socket.sendText(JSON.stringify({ type: "error", message: message.slice(0, 512) }));
-  } catch {}
+  } catch (error) {
+    logger("ws").warn("Preview error response could not be sent", { event: "ws.preview_error_send_failed", ...errorFields(error) });
+  }
 }
 
 async function attachPreviewUpstream(socket: Bun.ServerWebSocket<SocketData>, previewId: string): Promise<void> {
+  const previewLog = logger("preview").with({ previewId });
   // A disconnected preview may still have a live agent-browser session;
   // reattach to it so a suspended client resumes at the newest frame.
   if (previewManager.previewStatus(previewId) !== "ready") {
     const reattached = await previewManager.rediscover(previewId);
     if (!reattached) {
+      previewLog.warn("Preview could not be rediscovered", { event: "preview.rediscover_failed" });
       sendPreviewError(socket, "Preview is not running");
       socket.close(1011, "preview is not running");
       return;
@@ -144,6 +180,7 @@ async function attachPreviewUpstream(socket: Bun.ServerWebSocket<SocketData>, pr
   }
   const streamPort = previewManager.streamPortFor(previewId);
   if (streamPort === null) {
+    previewLog.warn("Preview stream port is unavailable", { event: "preview.stream_unavailable" });
     sendPreviewError(socket, "Preview is not running");
     socket.close(1011, "preview is not running");
     return;
@@ -152,6 +189,7 @@ async function attachPreviewUpstream(socket: Bun.ServerWebSocket<SocketData>, pr
   try {
     upstream = new WebSocket(`ws://127.0.0.1:${streamPort}/?pacing=ack&maxFps=${PREVIEW_UPSTREAM_FPS}`);
   } catch {
+    previewLog.warn("Preview stream connection failed", { event: "preview.upstream_connect_failed" });
     sendPreviewError(socket, "Preview stream is unavailable");
     socket.close(1011, "preview stream unavailable");
     return;
@@ -170,12 +208,14 @@ async function attachPreviewUpstream(socket: Bun.ServerWebSocket<SocketData>, pr
     if (!previewUpstreamMessageSchema.safeParse(value).success) return;
     try {
       if (socket.sendText(text) <= 0) {
+        previewLog.warn("Preview client could not receive a frame", { event: "preview.client_slow" });
         try { upstream.close(); } catch {}
         socket.close(1013, "client cannot receive preview frames");
       }
     } catch {}
   });
   const dropUpstream = () => {
+    previewLog.info("Preview upstream closed", { event: "preview.upstream_closed" });
     previewManager.markDisconnected(previewId);
     try { upstream.close(); } catch {}
     previewUpstreams.delete(socket);
@@ -214,7 +254,9 @@ function handlePreviewSocketMessage(socket: Bun.ServerWebSocket<SocketData>, pre
   }
   try {
     upstream.send(JSON.stringify(data));
-  } catch {}
+  } catch (error) {
+    logger("ws").warn("Preview message could not be sent upstream", { event: "ws.preview_send_error", previewId, ...errorFields(error) });
+  }
 }
 
 function sendSocketJson(socket: Bun.ServerWebSocket<SocketData>, value: unknown): void {
@@ -371,6 +413,7 @@ export const server = Bun.serve<SocketData>({
   fetch(request, server) {
     const url = new URL(request.url);
     if (url.pathname === "/ws") {
+      log.debug("WebSocket upgrade requested", { event: "ws.upgrade", path: url.pathname });
       return server.upgrade(request, { data: { kind: "agent", subscriptions: new Map(), workspaceSubscriptions: new Map() } })
         ? undefined
         : new Response("WebSocket upgrade failed", { status: 400 });
@@ -380,6 +423,7 @@ export const server = Bun.serve<SocketData>({
       const parts = url.pathname.split("/");
       const terminalId = parts[3];
       const clientId = url.searchParams.get("clientId") || `client_${crypto.randomUUID()}`;
+      logger("ws").debug("Terminal WebSocket upgrade requested", { event: "ws.upgrade", channel: "terminal", terminalId });
       return server.upgrade(request, { data: { kind: "terminal", terminalId, clientId } })
         ? undefined
         : new Response("Terminal WebSocket upgrade failed", { status: 400 });
@@ -393,6 +437,7 @@ export const server = Bun.serve<SocketData>({
       // Ownership check: unknown IDs never reach the relay.
       if (previewManager.previewWorkspace(previewId) === null) return new Response("Preview not found", { status: 404 });
       const clientId = url.searchParams.get("clientId") || `client_${crypto.randomUUID()}`;
+      logger("ws").debug("Preview WebSocket upgrade requested", { event: "ws.upgrade", channel: "preview", previewId });
       return server.upgrade(request, { data: { kind: "preview", previewId, clientId } })
         ? undefined
         : new Response("Preview WebSocket upgrade failed", { status: 400 });
@@ -402,6 +447,7 @@ export const server = Bun.serve<SocketData>({
   },
   websocket: {
     open(socket) {
+      logger("ws").info("WebSocket opened", { event: "ws.open", channel: socket.data.kind, ...(socket.data.kind === "terminal" ? { terminalId: socket.data.terminalId } : {}), ...(socket.data.kind === "preview" ? { previewId: socket.data.previewId } : {}) });
       if (socket.data.kind === "terminal") {
         const { terminalId, clientId } = socket.data;
         terminalManager.attach(terminalId, {
@@ -504,6 +550,7 @@ export const server = Bun.serve<SocketData>({
       }
     },
     close(socket) {
+      logger("ws").info("WebSocket closed", { event: "ws.close", channel: socket.data.kind, ...(socket.data.kind === "terminal" ? { terminalId: socket.data.terminalId } : {}), ...(socket.data.kind === "preview" ? { previewId: socket.data.previewId } : {}) });
       if (socket.data.kind === "terminal") {
         terminalManager.detach(socket.data.terminalId, socket.data.clientId);
       } else if (socket.data.kind === "preview") {
@@ -520,13 +567,14 @@ export const server = Bun.serve<SocketData>({
   },
 });
 
-console.warn("Passage has no application authentication; expose it only on a trusted network or behind an authenticated proxy/VPN.");
-console.log(`Passage listening on ${server.url}`);
+log.warn("Passage has no application authentication; expose it only on a trusted network or behind an authenticated proxy/VPN.", { event: "daemon.authentication_disabled" });
+log.info("Passage listening", { event: "daemon.started", port });
 
 let shuttingDown = false;
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  log.info("Passage shutdown started", { event: "daemon.shutdown_started" });
   if (pidPath && existsSync(pidPath)) {
     try {
       if (readFileSync(pidPath, "utf8").trim() === String(process.pid)) {
@@ -540,6 +588,7 @@ async function shutdown(): Promise<void> {
   await agentService.shutdown();
   await server.stop(true);
   metadata.close();
+  log.info("Passage shutdown completed", { event: "daemon.shutdown_completed" });
 }
 
 process.once("SIGINT", () => { void shutdown().finally(() => process.exit(0)); });

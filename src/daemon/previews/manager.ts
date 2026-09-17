@@ -12,6 +12,7 @@ import {
 } from "../../shared/domain/previews.ts";
 import type { MetadataRepositories } from "../metadata/repositories.ts";
 import type { WorkspaceService } from "../workspaces/service.ts";
+import { errorFields, logger } from "../logging.ts";
 
 export const PREVIEW_SESSION_NAMESPACE = "passage";
 export const PREVIEW_SESSION_PREFIX = "pp-";
@@ -259,6 +260,7 @@ export class WebPreviewManager {
       } catch (cause) {
         record.runtime.status = "error";
         record.runtime.lastError = cause instanceof Error ? cause.message.slice(0, 512) : "Preview failed to start";
+        logger("preview").error("Preview failed to start", { event: "preview.start_failed", previewId: record.meta.id, ...errorFields(cause) });
       }
       return this.snapshot(record);
     });
@@ -272,11 +274,14 @@ export class WebPreviewManager {
       record.runtime.status = "stopping";
       try {
         await this.runner.run(["--session", sessionNameFor(record.meta.id), "close"], { timeoutMs: 15_000 });
-      } catch {}
+      } catch (cause) {
+        logger("preview").warn("Preview close command failed", { event: "preview.stop_failed", previewId: record.meta.id, ...errorFields(cause) });
+      }
       record.runtime.status = "stopped";
       record.runtime.streamPort = null;
       record.runtime.currentUrl = null;
       record.runtime.leaseHolderId = null;
+      logger("preview").info("Preview stopped", { event: "preview.stopped", previewId: record.meta.id });
       return this.snapshot(record);
     });
   }
@@ -389,6 +394,7 @@ export class WebPreviewManager {
         record.runtime.status = "ready";
         return true;
       } catch {
+        logger("preview").warn("Preview rediscovery failed", { event: "preview.rediscover_failed", previewId: record.meta.id });
         return false;
       }
     });
