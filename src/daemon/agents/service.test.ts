@@ -88,6 +88,29 @@ test("requires explicit steering or follow-up while an agent is running", async 
   f.store.close();
 });
 
+test("recovers a stale running status left behind by a daemon restart", async () => {
+  const f = await make();
+  const agent = await f.service.create("w");
+  // Wait out create()'s background boot so no start is pending, then drop
+  // the live process to simulate a daemon restart (in-memory run state is
+  // gone but the DB still says `running`).
+  await f.service.capabilities(agent.id);
+  await f.service.stop(agent.id);
+  f.repos.agents.updateStatus(agent.id, "running");
+  // Reads report (and persist) idle so the UI stops showing generation in
+  // flight on reload/new systems.
+  expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("idle");
+  // A stale `running` with no live process must not force the client onto
+  // `steer` (a silent no-op when idle); `prompt` starts a fresh run.
+  f.repos.agents.updateStatus(agent.id, "running");
+  await f.service.prompt(agent.id, "hello after restart");
+  await Bun.sleep(20);
+  expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  await f.service.shutdown();
+  f.store.close();
+});
+
 test("anchors an active run to one stable start timestamp and clears it on settlement", async () => {
   const f = await make();
   const runSpanScript = `let streaming=false;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n');setTimeout(()=>{streaming=false;process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n')},40)}const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;

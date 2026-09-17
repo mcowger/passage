@@ -149,7 +149,6 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   const [nextBefore, setNextBefore] = useState<number>();
   const [loadingOlder, setLoadingOlder] = useState(false);
   const generation = useRef(0);
-  const statusRef = useRef(initialAgent.status);
   const historyRef = useRef<AgentHistory | undefined>(undefined);
   historyRef.current = history;
   // Written on every relayed `pi` frame (a ref, not state, so a frame burst
@@ -160,16 +159,21 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   onAgentChangedRef.current = onAgentChanged;
 
   const updateAgent = useCallback((next: AgentSummary) => {
-    statusRef.current = next.status;
     setAgent(next);
     onAgentChangedRef.current?.(next);
   }, []);
 
-  const updateLoadedAgent = useCallback((next: AgentSummary) => {
-    const status = statusRef.current === "running" && next.status !== "running" ? "running" : next.status;
-    updateAgent({ ...next, status });
-  }, [updateAgent]);
-
+  // Trust freshly fetched summaries as-is: a previous revision kept a stale
+  // `running` status over an idle REST response to avoid a flicker when an
+  // HTTP fetch raced a live run, but that veto never cleared when the
+  // `settled` event was missed (daemon restart, new system / new browser
+  // with an empty replay buffer), leaving the composer stuck showing
+  // "generation in flight" and sending `steer` (a no-op when idle) instead
+  // of `prompt`. Timeline safety for racing fetches is handled by
+  // `mergeLoadedHistory` (transcript epoch), and a genuinely running agent
+  // re-asserts `running` via the next socket status / `row_upsert` envelope,
+  // so a brief stale-idle flash self-heals while a stuck-running state does
+  // not.
   const load = useCallback(async (isInitial = false): Promise<AgentSessionLoadResult> => {
     const currentGeneration = ++generation.current;
     if (isInitial) setLoading(true);
@@ -177,7 +181,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       agentId: initialAgent.id,
       api,
       isCurrent: () => currentGeneration === generation.current,
-      onSummary: updateLoadedAgent,
+      onSummary: updateAgent,
       onHistory: (loaded, loadedNextBefore) => {
         if (historyReplaced(historyRef.current, loaded)) setNextBefore(loadedNextBefore);
         setHistory((current) => mergeLoadedHistory(current, loaded));
@@ -186,7 +190,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       onError: setError,
       onSettled: () => setLoading(false),
     });
-  }, [api, initialAgent.id, updateLoadedAgent]);
+  }, [api, initialAgent.id, updateAgent]);
 
   // Retry once on failure so a transient mobile suspend or dropped stream
   // recovers without a manual reload, on both first load and reconcile.
@@ -219,7 +223,6 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   }, [api, initialAgent.id, nextBefore]);
 
   useEffect(() => {
-    statusRef.current = initialAgent.status;
     setAgent(initialAgent);
     setHistory(undefined);
     setCapabilities(undefined);
@@ -240,9 +243,6 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
           && envelopePayload.runStartedAt > 0
           ? envelopePayload.runStartedAt
           : undefined;
-        if (state.status) {
-          statusRef.current = state.status;
-        }
         if (state.status || runStartedAt !== undefined) {
           setAgent((current) => {
             const next = {

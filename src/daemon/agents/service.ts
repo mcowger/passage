@@ -208,13 +208,25 @@ export class AgentService {
     const agent = this.requireAgent(agentId);
     const process = this.manager.get(agentId);
     const diagnostic = this.diagnostics.get(agentId);
-    const pendingUiRequest = agent.lastKnownStatus === "stopping"
+    // A persisted `running`/`stopping` status with no live Pi process and
+    // no boot in flight is stale: the in-memory run state (runStartedAt,
+    // subscriptions, event chains) is gone after a daemon restart, and no
+    // further socket event will ever correct it. Report (and persist) idle
+    // so the UI stops showing "generation in flight" and the composer
+    // sends `prompt` instead of a no-op `steer`. While a boot is pending
+    // the status is genuinely unknown, so leave it alone.
+    let baseStatus = agent.lastKnownStatus;
+    if ((baseStatus === "running" || baseStatus === "stopping") && !process && !this.pendingStarts.has(agentId)) {
+      baseStatus = "idle";
+      try { this.repositories.agents.updateStatus(agentId, baseStatus); } catch {}
+    }
+    const pendingUiRequest = baseStatus === "stopping"
       ? undefined
       : (() => {
           const pending = process?.getPendingUiRequest();
           return pending ? parsePiExtensionUiDialog(pending) : undefined;
         })() ?? this.pendingUiRequests.get(agentId);
-    const lastKnownStatus = pendingUiRequest ? "needs-attention" : agent.lastKnownStatus;
+    const lastKnownStatus = pendingUiRequest ? "needs-attention" : baseStatus;
     return {
       ...agent,
       lastKnownStatus,
@@ -233,12 +245,24 @@ export class AgentService {
   list(workspaceId: string, limit = this.listLimit): AgentSnapshot[] {
     this.requireWorkspace(workspaceId);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > this.listLimit) throw new AgentError("invalid-input", "invalid list limit");
-    return this.repositories.agents.listForWorkspace(workspaceId, limit).map((agent) => ({
-      ...agent,
-      live: this.manager.get(agent.id) !== undefined,
-      persisted: agent.piSessionPath !== null,
-      ...(this.runStartedAt.has(agent.id) ? { runStartedAt: this.runStartedAt.get(agent.id)! } : {}),
-    }));
+    return this.repositories.agents.listForWorkspace(workspaceId, limit).map((agent) => {
+      // Same stale-status correction as snapshot(): no live process and no
+      // boot in flight means a persisted `running`/`stopping` can never
+      // settle via the event stream, so surface idle instead of a stuck
+      // spinner in the sidebar/agent tabs.
+      let lastKnownStatus = agent.lastKnownStatus;
+      if ((lastKnownStatus === "running" || lastKnownStatus === "stopping") && this.manager.get(agent.id) === undefined && !this.pendingStarts.has(agent.id)) {
+        lastKnownStatus = "idle";
+        try { this.repositories.agents.updateStatus(agent.id, lastKnownStatus); } catch {}
+      }
+      return {
+        ...agent,
+        lastKnownStatus,
+        live: this.manager.get(agent.id) !== undefined,
+        persisted: agent.piSessionPath !== null,
+        ...(this.runStartedAt.has(agent.id) ? { runStartedAt: this.runStartedAt.get(agent.id)! } : {}),
+      };
+    });
   }
 
   async create(workspaceId: string, title = "Agent"): Promise<AgentSnapshot> {
@@ -323,7 +347,11 @@ export class AgentService {
     this.validateMessage(text);
     const agent = this.requireAgent(agentId);
     this.rejectWhileStopping(agent);
-    if (agent.lastKnownStatus === "running") {
+    // Only reject when a run is genuinely live. After a daemon restart the
+    // DB can still say `running` with no Pi process behind it; blocking
+    // `prompt` then forces the client onto `steer`, which is a silent no-op
+    // when idle and strands the user's message with no response.
+    if (agent.lastKnownStatus === "running" && (this.manager.get(agentId) !== undefined || this.pendingStarts.has(agentId))) {
       throw new AgentError("invalid-input", "agent is active; use steer or follow-up, or wait for cancellation");
     }
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
