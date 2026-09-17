@@ -42,6 +42,7 @@ describe("QuestionCard", () => {
         {
           question: "Which option should we focus on next?",
           header: "Next topic",
+          allowOther: true,
           options: [
             { label: "Project status", description: "Get a concise update on the workspace." },
             { label: "Code review", description: "Review files and run tests." },
@@ -103,16 +104,25 @@ describe("QuestionCard", () => {
     expect(html).toContain("First?");
   });
 
-  test("input method renders a textarea for custom answers", () => {
+  test("input method preserves Pi's native placeholder and prefill", () => {
     const request: QuestionRequest = {
       id: "q-4",
       method: "input",
-      questions: [{ question: "Your name?", header: "Name", options: [] }],
+      questions: [{ question: "Your name?", header: "Name", options: [], placeholder: "Ada", prefill: "Grace" }],
     };
     const html = ReactDOMServer.renderToString(
       React.createElement(QuestionCard, { request, onRespond: respond })
     );
     expect(html).toContain("<textarea");
-    expect(html).toContain("Other");
+    expect(html).toContain("placeholder=\"Ada\"");
+    expect(html).toContain(">Grace</textarea>");
+  });
+
+  test("native Pi select does not invent a custom answer", () => {
+    const request = singleRequest();
+    const html = ReactDOMServer.renderToString(
+      React.createElement(QuestionCard, { request, onRespond: respond })
+    );
+    expect(html).not.toContain("Other…");
   });
 });

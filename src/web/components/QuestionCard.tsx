@@ -29,6 +29,9 @@ export interface QuestionInfo {
   header?: string;
   options: QuestionOption[];
   multiple?: boolean;
+  allowOther?: boolean;
+  placeholder?: string;
+  prefill?: string;
 }
 
 export interface QuestionRequest {
@@ -62,7 +65,12 @@ export function QuestionCard({ request, onRespond }: QuestionCardProps) {
     return initial;
   });
   // Custom text values per question index
-  const [customText, setCustomText] = useState<Record<number, string>>({});
+  const [customText, setCustomText] = useState<Record<number, string>>(() => {
+    const prefill = request.questions[0]?.prefill;
+    const initial: Record<number, string> = {};
+    if (typeof prefill === "string") initial[0] = prefill;
+    return initial;
+  });
 
   const questions = useMemo(() => request.questions ?? [], [request.questions]);
   const isSummaryTab = activeTab === SUMMARY_TAB;
@@ -221,6 +229,7 @@ export function QuestionCard({ request, onRespond }: QuestionCardProps) {
   const selectedForActive = selectedOptions[activeIndex] ?? [];
   const isCustomActive = Boolean(customMode[activeIndex]);
   const isMultiple = Boolean(activeQuestion?.multiple);
+  const acceptsCustomAnswer = request.method === "input" || request.method === "editor" || activeQuestion?.allowOther === true;
 
   return (
     <Card className="w-full my-2 text-sm gap-0 py-0 overflow-hidden border border-border/40 shadow-xs">
@@ -393,31 +402,32 @@ export function QuestionCard({ request, onRespond }: QuestionCardProps) {
                 );
               })}
 
-              {/* Custom "Other..." option */}
-              <button
-                type="button"
-                onClick={handleSelectCustom}
-                disabled={isResponding}
-                className={cn(
-                  "w-full px-2.5 py-2 text-left rounded-lg transition-all border cursor-pointer",
-                  isCustomActive ? "bg-accent/20 border-border/40" : "hover:bg-muted/30 border-transparent",
-                  isResponding && "opacity-60 cursor-not-allowed"
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  <Edit3 className={cn("h-3.5 w-3.5", isCustomActive ? "text-primary" : "text-muted-foreground/60")} />
-                  <span className={cn("text-sm", isCustomActive ? "text-foreground font-medium" : "text-muted-foreground")}>
-                    Other…
-                  </span>
-                </div>
-              </button>
+              {activeQuestion?.allowOther && (
+                <button
+                  type="button"
+                  onClick={handleSelectCustom}
+                  disabled={isResponding}
+                  className={cn(
+                    "w-full px-2.5 py-2 text-left rounded-lg transition-all border cursor-pointer",
+                    isCustomActive ? "bg-accent/20 border-border/40" : "hover:bg-muted/30 border-transparent",
+                    isResponding && "opacity-60 cursor-not-allowed"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <Edit3 className={cn("h-3.5 w-3.5", isCustomActive ? "text-primary" : "text-muted-foreground/60")} />
+                    <span className={cn("text-sm", isCustomActive ? "text-foreground font-medium" : "text-muted-foreground")}>
+                      Other…
+                    </span>
+                  </div>
+                </button>
+              )}
 
-              {isCustomActive && (
+              {acceptsCustomAnswer && isCustomActive && (
                 <div className="pl-6 pr-2 pt-1">
                   <Textarea
                     value={customText[activeIndex] ?? ""}
                     onChange={(e) => handleCustomChange(e.target.value)}
-                    placeholder="Type your answer..."
+                    placeholder={activeQuestion?.placeholder ?? "Type your answer..."}
                     disabled={isResponding}
                     rows={2}
                     className="min-h-[56px] resize-y"

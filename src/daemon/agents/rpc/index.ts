@@ -7,6 +7,7 @@ import {
   MAX_AGENT_MESSAGE_BYTES,
   type AgentImage,
 } from "../../../shared/protocol/agents.ts";
+import { parsePiExtensionUiDialog } from "../ui.ts";
 
 export type PiRecord = { type?: string; id?: string; [key: string]: unknown };
 export type PiImageBlock = AgentImage;
@@ -113,7 +114,7 @@ export class PiRpcProcess {
       if (record.success === false) request.reject(new Error(String(record.error ?? "Pi command failed"))); else request.resolve(record);
       return;
     }
-    if (record.type === "extension_ui_request" && !["setStatus", "setWidget", "notify"].includes(String(record.method))) {
+    if (parsePiExtensionUiDialog(record)) {
       this.pendingUiRequest = record;
     } else if (record.type === "agent_settled" || record.type === "turn_end") {
       this.pendingUiRequest = undefined;

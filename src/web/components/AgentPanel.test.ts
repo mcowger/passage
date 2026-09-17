@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { formatDuration, isComposerLocked, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, TimelineRow } from "./AgentPanel.tsx";
+import { formatDuration, isComposerLocked, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 
 const modelOptions: AgentCapabilities["models"] = [
@@ -233,34 +233,6 @@ describe("resolveActiveQuestionRequest", () => {
     persisted: true,
   };
 
-  test("resolves structured questions from pendingUiRequest", () => {
-    const agent: AgentSummary = {
-      ...baseAgent,
-      pendingUiRequest: {
-        id: "prompt-1",
-        questions: [
-          {
-            question: "Which destination?",
-            header: "Destination",
-            options: [
-              { label: "A floating city", description: "Above clouds" },
-              { label: "An underground library", description: "Beneath mountain" },
-            ],
-            multiple: false,
-          },
-        ],
-      },
-    };
-
-    const req = resolveActiveQuestionRequest(agent);
-    expect(req).not.toBeNull();
-    expect(req?.id).toBe("prompt-1");
-    expect(req?.questions).toHaveLength(1);
-    expect(req?.questions[0].header).toBe("Destination");
-    expect(req?.questions[0].options).toHaveLength(2);
-    expect(req?.questions[0].options[0].label).toBe("A floating city");
-  });
-
   test("resolves select dialog from pendingUiRequest", () => {
     const agent: AgentSummary = {
       ...baseAgent,
@@ -321,69 +293,6 @@ describe("resolveActiveQuestionRequest", () => {
     expect(req?.questions[0].options).toEqual([]);
   });
 
-  test("resolves question tool from timeline when tool is running", () => {
-    const timeline: TimelineItem[] = [
-      {
-        kind: "tool",
-        id: "call-1",
-        name: "ask_user_question",
-        status: "running",
-        significant: true,
-        input: {
-          questions: [
-            {
-              question: "Pick a fruit",
-              header: "Fruit",
-              options: [{ label: "Apple" }, { label: "Banana" }],
-            },
-          ],
-        },
-      },
-    ];
-
-    const req = resolveActiveQuestionRequest(baseAgent, timeline);
-    expect(req).not.toBeNull();
-    expect(req?.id).toBe("call-1");
-    expect(req?.questions[0].question).toBe("Pick a fruit");
-    expect(req?.questions[0].header).toBe("Fruit");
-    expect(req?.questions[0].options).toHaveLength(2);
-  });
-
-  test("resolves flat tool input arguments from timeline", () => {
-    const timeline: TimelineItem[] = [
-      {
-        kind: "tool",
-        id: "call-flat",
-        name: "ask_user_question",
-        status: "running",
-        significant: true,
-        input: {
-          question: "Which option should we focus on next?",
-          header: "Next topic",
-          options: [
-            { label: "Project status", description: "Get a concise update." },
-            { label: "Code review", description: "Review files and tests." },
-            { label: "Documentation", description: "Refine docs." },
-            { label: "New idea", description: "Brainstorm new ideas." },
-          ],
-        },
-      },
-    ];
-
-    const req = resolveActiveQuestionRequest(baseAgent, timeline);
-    expect(req).not.toBeNull();
-    expect(req?.id).toBe("call-flat");
-    expect(req?.questions[0].header).toBe("Next topic");
-    expect(req?.questions[0].question).toBe("Which option should we focus on next?");
-    expect(req?.questions[0].options).toHaveLength(4);
-    expect(req?.questions[0].options.map((o) => o.label)).toEqual([
-      "Project status",
-      "Code review",
-      "Documentation",
-      "New idea",
-    ]);
-  });
-
   test("resolves select dialog with formatted strings and filters sentinels", () => {
     const agent: AgentSummary = {
       ...baseAgent,
@@ -411,9 +320,21 @@ describe("resolveActiveQuestionRequest", () => {
       "Get a concise update on the current state of the Passage workspace."
     );
     expect(req?.questions[0].options[3].label).toBe("New idea");
+    expect(req?.questions[0].allowOther).toBe(true);
   });
 
-  test("returns null when neither pendingUiRequest nor running question tool exists", () => {
-    expect(resolveActiveQuestionRequest(baseAgent, [])).toBeNull();
+  test("uses only Pi's native dialog request, never tool call input", () => {
+    expect(resolveActiveQuestionRequest(baseAgent)).toBeNull();
+  });
+
+  test("hides a blocking tool row while Pi's native dialog is open", () => {
+    const timeline: TimelineItem[] = [
+      { kind: "tool", id: "question-tool", name: "ask_user_question", input: {}, status: "running", significant: true },
+      { kind: "tool", id: "read-tool", name: "read", input: {}, status: "running", significant: true },
+      { kind: "assistant", id: "assistant", text: "Waiting for your answer" },
+    ];
+
+    expect(timelineWithoutBlockingTool(timeline, true).map((item) => item.id)).toEqual(["read-tool", "assistant"]);
+    expect(timelineWithoutBlockingTool(timeline, false)).toEqual(timeline);
   });
 });
