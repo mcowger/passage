@@ -5,6 +5,7 @@ import type { WorkspaceSettings } from "../../shared/domain/settings.ts";
 import { subscribeAgent } from "../agentSocket.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { addOptimisticUserMessage, applyRowUpsert, applyUsageEvent } from "../lib/transcript-apply.ts";
+import { deriveStreamPhase, type StreamActivity } from "../lib/stream-activity.ts";
 import { AgentPanel } from "./AgentPanel.tsx";
 
 export type AgentSessionPanelProps = {
@@ -130,6 +131,9 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   const statusRef = useRef(initialAgent.status);
   const historyRef = useRef<AgentHistory | undefined>(undefined);
   historyRef.current = history;
+  // Written on every relayed `pi` frame (a ref, not state, so a frame burst
+  // never adds a render); the pill samples it on its own interval tick.
+  const streamActivityRef = useRef<StreamActivity>({ lastFrameAt: 0, phase: null });
   const loadingOlderRef = useRef(false);
   const onAgentChangedRef = useRef(onAgentChanged);
   onAgentChangedRef.current = onAgentChanged;
@@ -201,6 +205,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
     setNextBefore(undefined);
     loadingOlderRef.current = false;
     setLoadingOlder(false);
+    streamActivityRef.current = { lastFrameAt: 0, phase: null };
     void loadWithRetry(true);
 
     const subscription = subscribeAgent(
@@ -231,6 +236,11 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
         if (value && typeof value === "object" && "type" in value) {
           const type = (value as { type?: string }).type;
           const payload = envelopePayload;
+          streamActivityRef.current.lastFrameAt = Date.now();
+          if (typeof type === "string") {
+            const phase = deriveStreamPhase(type, payload);
+            if (phase) streamActivityRef.current.phase = phase;
+          }
           if (type === "attention" && payload?.id) {
             setAgent((current) => {
               const next = { ...current, pendingUiRequest: payload };
@@ -278,6 +288,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       hasMoreHistory={nextBefore !== undefined}
       loadingMoreHistory={loadingOlder}
       onLoadMoreHistory={loadOlder}
+      streamActivityRef={streamActivityRef}
     />
   );
 }

@@ -27,9 +27,6 @@
   border: 1px solid var(--border);
   border-radius: 999px;
 }
-.composer-status-pill .live-streaming-stats {
-  display: contents;
-}
 .composer-status-duration {
   font-weight: 600;
   color: var(--foreground);

@@ -12,9 +12,9 @@
 .timeline > :last-child {
   margin-bottom: 4px;
 }
-.live-streaming-stats { display: inline-flex; align-items: center; align-self: flex-start; gap: 6px; min-height: 22px; padding: 2px 7px; color: var(--muted); background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 999px; font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
-.live-streaming-token-count { color: var(--foreground); }
-.live-streaming-rate { padding: 1px 5px; color: var(--accent); background: var(--accent-subtle); border-radius: 5px; font-weight: 650; }
+.live-stream-phase { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.live-stream-phase.is-receiving { color: var(--accent); }
+.live-stream-phase.is-receiving svg { animation: pulse 1.4s ease-in-out infinite; }
 .timeline-loading-more { flex: none; margin: 0; padding: 4px 0; text-align: center; font-size: 12px; }
 .empty-transcript { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 200px; text-align: center; color: var(--muted); margin: auto 0; }
 .empty-transcript-icon { font-size: 28px; color: var(--accent); margin-bottom: 6px; }

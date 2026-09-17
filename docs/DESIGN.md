@@ -604,8 +604,10 @@ orchestration.
 Each run displays concise local facts where available: input/output/cache-read/
 cache-write tokens, model cost from Pi persisted usage, current-window context
 occupancy (`contextUsage` with click-for-details), start time
-(`runStartedAt`), live streaming tokens/tok/s/elapsed, tool durations, and
-lifetime session totals from Pi history. Runtime timing is labeled unavailable
+(`runStartedAt`), a live activity phase (thinking/responding/composing tool
+call/running tool/receiving tool result) plus elapsed time, sampled from the
+relayed Pi frame stream rather than estimated from message text, tool
+durations, and lifetime session totals from Pi history. Runtime timing is labeled unavailable
 rather than guessed after an unobserved restart. These are local UI
 diagnostics, not telemetry: nothing is sent to Passage or a third party.
 
