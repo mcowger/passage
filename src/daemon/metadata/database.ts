@@ -22,7 +22,8 @@ export const MIGRATIONS: readonly Migration[] = [
         id TEXT PRIMARY KEY, project_id TEXT NOT NULL, kind TEXT NOT NULL,
         cwd TEXT NOT NULL, checkout_root TEXT, main_repository_root TEXT, branch_ref TEXT,
         display_label TEXT NOT NULL, location_id TEXT, ownership_state TEXT NOT NULL,
-        archived_at TEXT,
+        marker_id TEXT, marker_path TEXT, repair_detail TEXT, archived_at TEXT,
+        layout_json TEXT, preferences_json TEXT,
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
         FOREIGN KEY (location_id) REFERENCES worktree_locations(id) ON DELETE SET NULL
       );
@@ -32,41 +33,6 @@ export const MIGRATIONS: readonly Migration[] = [
         model_preference TEXT, thinking_preference TEXT, last_known_status TEXT NOT NULL,
         archived_at TEXT, FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
       );
-      CREATE TABLE layouts (
-        workspace_id TEXT PRIMARY KEY, layout_schema_version INTEGER NOT NULL,
-        split_tree_json TEXT NOT NULL, modified_at TEXT NOT NULL,
-        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-      );
-      CREATE TABLE workspace_settings (
-        workspace_id TEXT PRIMARY KEY, settings_schema_version INTEGER NOT NULL,
-        preferences_json TEXT NOT NULL, modified_at TEXT NOT NULL,
-        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-      );
-      CREATE TABLE metadata_jobs (
-        id TEXT PRIMARY KEY, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
-        prompt_fingerprint TEXT NOT NULL, candidate_json TEXT, accepted_at TEXT
-      );
-      CREATE TABLE session_index (
-        pi_session_path TEXT PRIMARY KEY, mtime INTEGER NOT NULL, size INTEGER NOT NULL,
-        index_version INTEGER NOT NULL, workspace_id TEXT, agent_id TEXT,
-        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL,
-        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE SET NULL
-      );
-    `,
-  },
-  {
-    version: 2,
-    name: "worktree_ownership_repair",
-    sql: `
-      ALTER TABLE workspaces ADD COLUMN marker_id TEXT;
-      ALTER TABLE workspaces ADD COLUMN marker_path TEXT;
-      ALTER TABLE workspaces ADD COLUMN repair_detail TEXT;
-    `,
-  },
-  {
-    version: 3,
-    name: "web_previews",
-    sql: `
       CREATE TABLE web_previews (
         id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, display_label TEXT NOT NULL,
         target_url TEXT NOT NULL, viewport_json TEXT NOT NULL,

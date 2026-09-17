@@ -37,7 +37,7 @@ Persistent Bun daemon
 | Deployment | Single-user daemon that is LAN-accessible by default. Application authentication is out of scope; the operator may place it behind upstream authentication. |
 | Agent runtime | Pi only, integrated through one `pi --mode rpc` process per active agent. No provider abstraction in v1. |
 | Canonical agent history | Pi JSONL sessions, including branches, compaction, and usage records. Passage never maintains a duplicate transcript. |
-| Other persistence | A small local SQLite registry holds only Passage metadata, indexes, preferences, and pane layouts; it is never authoritative for Pi-derived data. |
+| Other persistence | A small local SQLite registry holds only Passage metadata, preferences, and pane layouts; it is never authoritative for Pi-derived data. |
 | Runtime | Bun end to end. Bun starts and supervises the pinned `pi` executable directly; Pi uses its supported shebang runtime. Passage has no separate Node daemon, implementation layer, or fallback sidecar. |
 | Initial host support | Linux x64. Other platforms require their own Bun native terminal and packaging gates before support is claimed. |
 | UI | React, Bun HTML imports, Tailwind CSS, and shadcn/ui. Bun handles development rendering, bundling, and production packaging. |
@@ -218,16 +218,31 @@ from accidentally resizing a terminal actively used from a desktop browser.
 Use `bun:sqlite` with ordered SQL migrations. Keep schemas small and use JSON
 only for versioned structured preferences/layouts rather than generic blobs.
 
+SQLite is the durable state file, not an invitation to model every value as a
+separate relation. Add a table only when records have an independent lifecycle,
+need their own bounded query, or require database-enforced references. Keep
+strictly one-to-one workspace state on `workspaces`: layout and preferences are
+targeted JSON-column updates, not separate repositories. Disposable indexes and
+unused future-facing records do not belong in SQLite; rebuild them in memory if
+a measured read path later needs them.
+
+Snapshot reads stay bounded and set-oriented. Load projects, workspaces, and
+enabled locations once each, then group or filter them in memory. Do not issue
+one child query per project when the complete bounded collection is already
+small. The absence of complex joins is intentional; SQLite remains useful for
+atomic durable updates, foreign-key checks, and cleanup of independently owned
+records.
+
+Before the first user release, the schema is one clean version-1 baseline rather
+than a history of development-only migrations. After users have durable data,
+schema changes use ordered migrations and never rewrite an applied migration.
+
 | Record | Essential fields |
 | --- | --- |
 | `projects` | opaque ID, configured root path, canonical real path, display label, archived timestamp |
 | `worktree_locations` | opaque ID, global/project scope, display label, configured root path, canonical root, enabled flag |
-| `workspaces` | opaque ID, project ID, kind, `cwd`, checkout root, main repository root, branch/ref, display label, location ID, ownership state, archive timestamp |
+| `workspaces` | opaque ID, project ID, kind, `cwd`, checkout root, main repository root, branch/ref, display label, location ID, ownership state, archive timestamp, versioned layout JSON, workspace preferences JSON |
 | `agents` | opaque ID, workspace ID, Pi session ID/path, generated or overridden title, model/thinking preference, last known status, archive timestamp |
-| `layouts` | workspace ID, layout schema version, split-tree JSON, modified timestamp |
-| `workspace_settings` | workspace ID, editor/terminal/diff preferences that belong to the workspace |
-| `metadata_jobs` | job ID, target type/ID, prompt fingerprint, candidate result, accepted timestamp; no agent transcript |
-| `session_index` | Pi session path, mtime/size/index version, workspace/agent link when known; a discardable lookup cache built from direct JSONL reads |
 
 All primary identities are opaque IDs. Paths are attributes, never database
 keys. The registry stores both configured and canonical paths: configured paths

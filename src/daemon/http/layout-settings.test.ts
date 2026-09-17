@@ -45,14 +45,12 @@ describe("layout and settings HTTP API", () => {
       )
     ).json();
 
-    // Default layout GET
     const defaultLayoutRes = await f.app.fetch(request(`/api/workspaces/${workspace.id}/layout`));
     expect(defaultLayoutRes.status).toBe(200);
     const defaultLayout = await defaultLayoutRes.json();
     expect(defaultLayout.version).toBe(1);
     expect(defaultLayout.root.type).toBe("tabs");
 
-    // Save customized layout PUT
     const customLayout = createDefaultLayout(workspace.id, {
       id: "agent-1",
       kind: "agent",
@@ -69,7 +67,6 @@ describe("layout and settings HTTP API", () => {
     const savedLayout = await putRes.json();
     expect(savedLayout.root.tabs[0].title).toBe("Agent 1");
 
-    // GET after PUT returns updated layout
     const getUpdatedRes = await f.app.fetch(request(`/api/workspaces/${workspace.id}/layout`));
     const getUpdated = await getUpdatedRes.json();
     expect(getUpdated.root.tabs[0].title).toBe("Agent 1");
@@ -97,13 +94,11 @@ describe("layout and settings HTTP API", () => {
       )
     ).json();
 
-    // Default settings GET
     const getRes = await f.app.fetch(request(`/api/workspaces/${workspace.id}/settings`));
     expect(getRes.status).toBe(200);
     const settings = await getRes.json();
     expect(settings.themeId).toBe(DEFAULT_WORKSPACE_SETTINGS.themeId);
 
-    // Save customized settings PUT
     const customSettings = {
       ...DEFAULT_WORKSPACE_SETTINGS,
       themeId: "passage-light",

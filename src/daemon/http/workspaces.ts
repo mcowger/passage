@@ -49,7 +49,6 @@ export const createWorkspaceRoutes = (service: WorkspaceService, hooks?: { onArc
   app.get("/api/worktree-locations", (context) => { try { return success(service.listAllLocations()); } catch (error) { return errorResponse(error); } });
   app.patch("/api/worktree-locations/:locationId", async (context) => { try { const input = locationEnabledInput.parse(await readJsonBody(context.req.raw)); return success(await service.setLocationEnabled(id(context, "locationId"), input.enabled)); } catch (error) { return errorResponse(error); } });
 
-  // Layout routes
   app.get("/api/workspaces/:workspaceId/layout", (context) => {
     try {
       return success(service.getLayout(id(context, "workspaceId")));
@@ -66,7 +65,6 @@ export const createWorkspaceRoutes = (service: WorkspaceService, hooks?: { onArc
     }
   });
 
-  // Settings routes
   app.get("/api/workspaces/:workspaceId/settings", (context) => {
     try {
       return success(service.getSettings(id(context, "workspaceId")));
@@ -83,7 +81,6 @@ export const createWorkspaceRoutes = (service: WorkspaceService, hooks?: { onArc
     }
   });
 
-  // Customization packs
   app.get("/api/customization/themes", () => success(BUILTIN_THEMES));
   app.get("/api/customization/fonts", () => success(BUILTIN_FONTS));
   app.get("/api/customization/tool-renderers", () => success(BUILTIN_TOOL_RENDERERS));

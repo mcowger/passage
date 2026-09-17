@@ -65,20 +65,18 @@ afterEach(async () => {
 describe("metadata persistence", () => {
   test("migrates an empty database and reopens idempotently", async () => {
     const { path, store } = await open();
-    expect(store.schemaVersion).toBe(3);
+    expect(store.schemaVersion).toBe(1);
     store.close();
     const reopened = new MetadataStore(path);
-    expect(reopened.schemaVersion).toBe(3);
+    expect(reopened.schemaVersion).toBe(1);
     reopened.close();
   });
 
   test("round trips every metadata record", async () => {
     const { store, repositories } = await open();
     seed(repositories);
-    repositories.layouts.save({ workspaceId: "workspace-1", layoutSchemaVersion: 1, splitTree: { type: "tabs" }, modifiedAt: "2026-08-28T00:00:00Z" });
-    repositories.workspaceSettings.save({ workspaceId: "workspace-1", settingsSchemaVersion: 1, preferences: { wrap: true }, modifiedAt: "2026-08-28T00:00:00Z" });
-    repositories.metadataJobs.save({ id: "job-1", targetType: "workspace", targetId: "workspace-1", promptFingerprint: "fingerprint", candidate: { label: "Suggested" }, acceptedAt: null });
-    repositories.sessionIndex.save({ piSessionPath: "/sessions/one.jsonl", mtime: 1, size: 2, indexVersion: 1, workspaceId: "workspace-1", agentId: "agent-1" });
+    repositories.workspaces.saveLayout("workspace-1", { version: 1, root: { type: "tabs" } });
+    repositories.workspaces.savePreferences("workspace-1", { wrap: true });
     repositories.webPreviews.save({ id: "preview-1", workspaceId: "workspace-1", displayLabel: "Preview", targetUrl: "http://localhost:3000/", viewport: { width: 1280, height: 800, deviceScaleFactor: 1 }, createdAt: "2026-09-16T00:00:00Z", updatedAt: "2026-09-16T00:00:00Z" });
     expect(repositories.webPreviews.get("preview-1")?.targetUrl).toBe("http://localhost:3000/");
     expect(repositories.webPreviews.listForWorkspace("workspace-1", 10).length).toBe(1);
@@ -87,10 +85,20 @@ describe("metadata persistence", () => {
     expect(repositories.worktreeLocations.get("location-1")?.enabled).toBe(true);
     expect(repositories.workspaces.get("workspace-1")?.branchRef).toBe("main");
     expect(repositories.agents.get("agent-1")?.piSessionId).toBe("pi-session-1");
-    expect(repositories.layouts.get<{ type: string }>("workspace-1")?.splitTree.type).toBe("tabs");
-    expect(repositories.workspaceSettings.get<{ wrap: boolean }>("workspace-1")?.preferences.wrap).toBe(true);
-    expect(repositories.metadataJobs.get<{ label: string }>("job-1")?.candidate?.label).toBe("Suggested");
-    expect(repositories.sessionIndex.get("/sessions/one.jsonl")?.agentId).toBe("agent-1");
+    expect(repositories.workspaces.getLayout<{ version: number; root: { type: string } }>("workspace-1")?.root.type).toBe("tabs");
+    expect(repositories.workspaces.getPreferences<{ wrap: boolean }>("workspace-1")?.wrap).toBe(true);
+    store.close();
+  });
+
+  test("updates workspace documents without replacing workspace metadata", async () => {
+    const { store, repositories } = await open();
+    seed(repositories);
+    repositories.workspaces.saveLayout("workspace-1", { version: 1, root: { type: "tabs" } });
+    repositories.workspaces.savePreferences("workspace-1", { wrap: true });
+
+    expect(repositories.workspaces.get("workspace-1")?.displayLabel).toBe("Main");
+    expect(repositories.workspaces.getLayout<{ version: number }>("workspace-1")?.version).toBe(1);
+    expect(repositories.workspaces.getPreferences<{ wrap: boolean }>("workspace-1")?.wrap).toBe(true);
     store.close();
   });
 
