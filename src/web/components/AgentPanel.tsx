@@ -44,7 +44,11 @@ import {
   ArrowUp,
   Plus,
   Pencil,
-  Zap,
+  Brain,
+  MessageSquareMore,
+  FilePenLine,
+  Wrench,
+  PencilSparkles,
   GraduationCap,
 } from "lucide-react";
 
@@ -570,6 +574,14 @@ export function formatThinkingPreview(text: string, maxLength = 70): string {
     .slice(0, maxLength);
 }
 
+const STREAM_PHASE_ICONS = {
+  thinking: Brain,
+  responding: MessageSquareMore,
+  "composing-tool-call": FilePenLine,
+  "running-tool": Wrench,
+  "receiving-tool-result": PencilSparkles,
+} as const satisfies Record<StreamPhase, typeof Brain>;
+
 const LiveStreamPhase = memo(function LiveStreamPhase({
   phase,
   receiving,
@@ -578,12 +590,13 @@ const LiveStreamPhase = memo(function LiveStreamPhase({
   receiving: boolean;
 }) {
   if (!phase) return null;
+  const Icon = STREAM_PHASE_ICONS[phase];
   return (
     <span
       className={`live-stream-phase${receiving ? " is-receiving" : ""}`}
       title={receiving ? "Receiving data from Pi" : "Waiting for Pi"}
     >
-      <Zap size={11} aria-hidden="true" />
+      <Icon size={11} aria-hidden="true" />
       {STREAM_PHASE_LABELS[phase]}
     </span>
   );
