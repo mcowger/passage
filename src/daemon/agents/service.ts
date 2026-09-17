@@ -12,8 +12,8 @@ import {
   type PiEvent,
   type PiExtensionUiResponse,
   type PiLifecycleEvent,
+  type PiProcessHandle,
   type PiRpcOptions,
-  type PiRpcProcess,
 } from "./rpc/index.ts";
 import { MetadataRepositories, type Agent } from "../metadata/repositories.ts";
 import { normalizeAvailableModels } from "../models/catalog.ts";
@@ -58,7 +58,7 @@ type RuntimeDiagnostic = {
 };
 
 type Cancellation = {
-  process: PiRpcProcess;
+  process: PiProcessHandle;
   generation: number;
 };
 
@@ -67,6 +67,7 @@ export type AgentCapabilities = ReturnType<typeof agentCapabilitiesSchema.parse>
 export type AgentSnapshot = Agent & {
   live: boolean;
   persisted: boolean;
+  transport?: "holder" | "direct";
   generation?: number;
   stderr?: string[];
   stderrTruncated?: boolean;
@@ -186,10 +187,10 @@ export class AgentService {
     if (options.maxActiveAgents !== undefined && (!Number.isSafeInteger(options.maxActiveAgents) || options.maxActiveAgents < 1)) {
       throw new AgentError("invalid-input", "invalid max active agents");
     }
-    this.manager = options.manager ?? new PiRpcManager(options.maxActiveAgents);
+    this.sessionsRoot = resolve(options.sessionsRoot);
+    this.manager = options.manager ?? new PiRpcManager(options.maxActiveAgents, { sessionsRoot: this.sessionsRoot, piDefaults: options.pi });
     this.listLimit = options.listLimit ?? MAX_LIST;
     this.pi = options.pi ?? {};
-    this.sessionsRoot = resolve(options.sessionsRoot);
     this.attachmentCache = new AttachmentCache(
       options.attachmentCacheRoot ?? join(resolve(options.sessionsRoot), "..", "attachment-cache"),
       options.attachmentCacheBytes,
@@ -231,6 +232,7 @@ export class AgentService {
       ...agent,
       lastKnownStatus,
       live: process !== undefined,
+      transport: process ? process.transport : undefined,
       persisted: agent.piSessionPath !== null,
       ...(pendingUiRequest ? { pendingUiRequest } : {}),
       ...(this.runStartedAt.has(agentId) ? { runStartedAt: this.runStartedAt.get(agentId)! } : {}),
@@ -651,7 +653,7 @@ export class AgentService {
     return stopped;
   }
 
-  async shutdown(): Promise<void> {
+  async shutdown(options?: { stopHolders?: boolean }): Promise<void> {
     // Let create()'s background boots finish (they clean up their own map
     // entries) so they never write to a closed database after this returns.
     await Promise.allSettled([...this.pendingStarts.values()]);
@@ -667,13 +669,21 @@ export class AgentService {
     this.transcripts.clear();
     this.transcriptSeeds.clear();
     this.transcriptEpochs.clear();
-    await this.manager.shutdown();
+    // Detach, don't stop: holders (and their pi children) survive daemon
+    // restarts by design. Per-agent stop/archive sends `passage_stop`;
+    // daemon shutdown only drops the socket client side. Tests that need
+    // the old kill-everything teardown pass `{ stopHolders: true }`.
+    if (options?.stopHolders) await this.manager.shutdown();
+    else await this.manager.detachAll();
   }
 
-  private attach(agentId: string, process: PiRpcProcess): void {
+  private attach(agentId: string, process: PiProcessHandle): void {
     const current = this.subscriptions.get(agentId);
     if (current?.generation === process.generation) return;
     this.detach(agentId);
+    if (process.transport === "holder") {
+      logger("agent").info("Agent attached to surviving holder", { event: "holder.attached", agentId, generation: process.generation });
+    }
     this.subscriptions.set(agentId, {
       generation: process.generation,
       unsubscribeEvents: process.subscribe((event) => this.enqueueEvent(agentId, event)),
@@ -1120,7 +1130,24 @@ export class AgentService {
     }
   }
 
-  private async ensureProcess(agentId: string): Promise<PiRpcProcess> {
+  /** Orphan sweep on daemon boot (before serving agent commands): join
+   * holder sockets against agent records + liveness. Kills anything with
+   * no live, unarchived agent; dead sockets for live agents respawn lazily
+   * on next use. Never throws. */
+  async sweepOrphanHolders(): Promise<{ kept: string[]; killed: string[]; respawned: string[] }> {
+    try {
+      return await this.manager.sweep((agentId) => {
+        const agent = this.repositories.agents.get(agentId);
+        if (!agent) return undefined;
+        return { archived: agent.archivedAt !== null };
+      });
+    } catch (error) {
+      logger("agent").warn("Holder sweep failed", { event: "holder.sweep_failed", ...errorFields(error) });
+      return { kept: [], killed: [], respawned: [] };
+    }
+  }
+
+  private async ensureProcess(agentId: string): Promise<PiProcessHandle> {
     this.requireAgent(agentId);
     // A prompt/steer/etc. racing create()'s background boot must run after
     // it (the old await-create ordering), not beside its trailing
@@ -1129,14 +1156,23 @@ export class AgentService {
     await this.awaitPendingStart(agentId);
     let process = this.manager.get(agentId);
     if (!process) {
-      await this.start(agentId);
-      process = this.manager.get(agentId);
+      // Attach-first: a holder that outlived a daemon restart keeps the
+      // run alive; only spawn when no live holder answers (same as a
+      // crashed pi today, with resume-from-JSONL as the fallback).
+      try {
+        await this.manager.attach(agentId, { sessionDir: this.sessionDirectory(agentId) });
+        process = this.manager.get(agentId);
+      } catch {}
+      if (!process) {
+        await this.start(agentId);
+        process = this.manager.get(agentId);
+      }
     }
     if (!process) throw new AgentError("not-running", "agent process could not be started");
     return process;
   }
 
-  private requireProcess(agentId: string): PiRpcProcess {
+  private requireProcess(agentId: string): PiProcessHandle {
     this.requireAgent(agentId);
     const process = this.manager.get(agentId);
     if (!process) throw new AgentError("not-running", "agent process is not running");

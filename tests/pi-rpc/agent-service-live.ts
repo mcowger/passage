@@ -85,7 +85,7 @@ export async function runAgentServiceAcceptance(): Promise<void> {
       throw new Error("Agent service did not resume the same Pi session");
     }
   } finally {
-    await service.shutdown();
+    await service.shutdown({ stopHolders: true });
     store.close();
     await rm(root, { recursive: true, force: true });
   }
@@ -136,7 +136,7 @@ export async function runAgentServiceAbortAcceptance(): Promise<void> {
       throw new Error("Pi agent did not return to idle after confirmed cancellation");
     }
   } finally {
-    await service.shutdown();
+    await service.shutdown({ stopHolders: true });
     store.close();
     await rm(root, { recursive: true, force: true });
   }

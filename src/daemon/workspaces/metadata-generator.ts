@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { MAX_DOMAIN_LABEL_LENGTH, MAX_DOMAIN_PATH_LENGTH } from "../../shared/domain/workspaces.ts";
-import { PiRpcManager, type PiEvent, type PiRpcOptions, type PiRpcProcess } from "../agents/rpc/index.ts";
+import { PiRpcManager, type PiEvent, type PiProcessHandle, type PiRpcOptions } from "../agents/rpc/index.ts";
 
 export const worktreeSuggestionSchema = z.object({
   label: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH),
@@ -87,7 +87,7 @@ export class MetadataGenerator {
     }
   }
 
-  private async readSuggestion(process: PiRpcProcess, prompt: string): Promise<string | null> {
+  private async readSuggestion(process: PiProcessHandle, prompt: string): Promise<string | null> {
     let response = "";
     let settle: (() => void) | undefined;
     const settled = new Promise<void>((resolve) => { settle = resolve; });

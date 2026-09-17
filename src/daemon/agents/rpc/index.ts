@@ -85,6 +85,7 @@ const CUSTOM_ANSWER_ROW = /^(?:\d+\.\s*)?(?:Type something\.?|Other\b.*)$/i;
 export class PiRpcProcess {
   readonly child: Bun.Subprocess<"pipe", "pipe", "pipe">;
   readonly generation: number;
+  readonly transport = "direct" as const;
   readonly events: PiEvent[] = [];
   readonly stderr: string[] = [];
   lifecycle: PiLifecycle = "running";
@@ -296,27 +297,178 @@ export class PiRpcProcess {
   }
 }
 
+/** Either transport behind one agent: direct-spawn child (tests/fallback)
+ * or a detached holder reached over its Unix socket (production default).
+ * Both expose the same framing/correlation surface so `AgentService` code
+ * above the manager does not change. */
+export type PiProcessHandle = PiRpcProcess | import("./holder-transport.ts").HolderPiProcess;
+
+export type PiRpcManagerOptions = {
+  /** Sessions root (`<root>/<agentId>/rpc.sock`). Falls back to
+   * `dirname(options.sessionDir)` per start when unset (tests). */
+  sessionsRoot?: string;
+  /** Force direct-spawn even when holder is available (tests only). */
+  direct?: boolean;
+  /** Extra Pi flags forwarded to freshly spawned holders. */
+  piDefaults?: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
+};
+
+function holderEnabled(option: boolean | undefined): boolean {
+  if (option !== undefined) return option;
+  const flag = process.env.PASSAGE_PI_HOLDER;
+  if (flag === "0" || flag?.toLowerCase() === "false") return false;
+  return true;
+}
+
 export class PiRpcManager {
-  private readonly processes = new Map<string, PiRpcProcess>(); private readonly starts = new Map<string, Promise<PiRpcProcess>>(); private readonly generations = new Map<string, number>();
+  private readonly processes = new Map<string, PiProcessHandle>(); private readonly starts = new Map<string, Promise<PiProcessHandle>>(); private readonly generations = new Map<string, number>();
+  private readonly sessionsRoot?: string;
+  private readonly forceDirect: boolean;
+  private readonly piDefaults: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
   // Every open (non-archived) agent holds a slot until archived or the
   // daemon restarts -- there is no idle eviction -- so this needs headroom
   // for realistic concurrent-open-agent counts, not just concurrent runs.
   // Each idle `pi --mode rpc` process costs roughly 150-200MB RSS.
-  constructor(private readonly maxActiveAgents = 32) { if (!Number.isSafeInteger(maxActiveAgents) || maxActiveAgents < 1) throw new Error("maxActiveAgents must be positive"); }
-  start(agentId: string, options: PiRpcOptions) {
+  constructor(private readonly maxActiveAgents = 32, options?: PiRpcManagerOptions) {
+    if (!Number.isSafeInteger(maxActiveAgents) || maxActiveAgents < 1) throw new Error("maxActiveAgents must be positive");
+    this.sessionsRoot = options?.sessionsRoot;
+    this.forceDirect = options?.direct === true;
+    this.piDefaults = options?.piDefaults ?? {};
+  }
+  private useHolder(): boolean { return !this.forceDirect && holderEnabled(undefined); }
+  /** Holder path only when the manager was explicitly wired with a sessions
+   * root (production). Test managers built bare (`new PiRpcManager(n)`)
+   * always take the direct-spawn fallback, as do runs with
+   * `PASSAGE_PI_HOLDER=0`. */
+  private holderRoot(options: PiRpcOptions): string | undefined {
+    if (!this.useHolder() || !this.sessionsRoot) return undefined;
+    if (!options.sessionDir || !options.sessionId) return undefined;
+    return this.sessionsRoot;
+  }
+  start(agentId: string, options: PiRpcOptions): Promise<PiProcessHandle> {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(agentId)) return Promise.reject(new Error("invalid agentId"));
     const live = this.processes.get(agentId); if (live?.lifecycle === "running") return Promise.resolve(live); this.processes.delete(agentId);
     const existing = this.starts.get(agentId); if (existing) return existing;
     for (const [id, process] of this.processes) if (process.lifecycle !== "running") this.processes.delete(id);
     if (this.processes.size + this.starts.size >= this.maxActiveAgents) return Promise.reject(new Error("maximum active Pi agents reached"));
-    const generation = (this.generations.get(agentId) ?? 0) + 1;
-    const start = Promise.resolve().then(async () => { const process = new PiRpcProcess(options, generation); this.generations.set(agentId, generation); this.processes.set(agentId, process); try { await process.request({ type: "get_state" }); return process; } catch (error) { await process.shutdown(); if (this.processes.get(agentId) === process) this.processes.delete(agentId); throw error; } }).finally(() => this.starts.delete(agentId));
+    const start: Promise<PiProcessHandle> = Promise.resolve().then(async () => {
+      const root = this.holderRoot(options);
+      if (root) {
+        return this.startHolder(agentId, options, root);
+      }
+      return this.startDirect(agentId, options);
+    }).finally(() => this.starts.delete(agentId));
     this.starts.set(agentId, start); return start;
+  }
+  private async startDirect(agentId: string, options: PiRpcOptions): Promise<PiProcessHandle> {
+    const generation = (this.generations.get(agentId) ?? 0) + 1;
+    const process = new PiRpcProcess(options, generation); this.generations.set(agentId, generation); this.processes.set(agentId, process); try { await process.request({ type: "get_state" }); return process; } catch (error) { await process.shutdown(); if (this.processes.get(agentId) === process) this.processes.delete(agentId); throw error; }
+  }
+  private async startHolder(agentId: string, options: PiRpcOptions, sessionsRoot: string): Promise<PiProcessHandle> {
+    const { ensureHolder, readGeneration } = await import("../holder/spawn.ts");
+    const { socketPathFor } = await import("../holder/protocol.ts");
+    const { HolderPiProcess } = await import("./holder-transport.ts");
+    const sessionDir = options.sessionDir;
+    // Generation survives daemon restarts via holder.json: a fresh holder
+    // bumps it, a re-attach reuses the live holder's generation.
+    const ack = await ensureHolder({
+      agentId,
+      sessionsRoot,
+      sessionId: options.sessionId,
+      cwd: options.cwd,
+      generation: readGeneration(sessionDir) + 1,
+      // Explicit per-start values win; undefined must not clobber manager
+      // defaults (service passes only cwd/sessionDir/sessionId).
+      pi: {
+        ...this.piDefaults,
+        ...(options.executable !== undefined ? { executable: options.executable } : {}),
+        ...(options.executableArgs !== undefined ? { executableArgs: options.executableArgs } : {}),
+        ...(options.model !== undefined ? { model: options.model } : {}),
+        ...(options.disableTools !== undefined ? { disableTools: options.disableTools } : {}),
+        ...(options.maxCommandBytes !== undefined ? { maxCommandBytes: options.maxCommandBytes } : {}),
+        ...(options.maxRecordBytes !== undefined ? { maxRecordBytes: options.maxRecordBytes } : {}),
+        ...(options.maxEventBytes !== undefined ? { maxEventBytes: options.maxEventBytes } : {}),
+        ...(options.maxStderrBytes !== undefined ? { maxStderrBytes: options.maxStderrBytes } : {}),
+      },
+    });
+    const generation = typeof ack.generation === "number" && ack.generation > 0 ? ack.generation : readGeneration(sessionDir);
+    const process = new HolderPiProcess({
+      agentId,
+      socketPath: socketPathFor(sessionDir),
+      generation,
+      maxCommandBytes: options.maxCommandBytes,
+      maxRecordBytes: options.maxRecordBytes,
+      maxEventBytes: options.maxEventBytes,
+      maxStderrBytes: options.maxStderrBytes,
+    });
+    this.generations.set(agentId, generation); this.processes.set(agentId, process);
+    try { await process.connect(); await process.request({ type: "get_state" }); return process; } catch (error) { process.destroy(); if (this.processes.get(agentId) === process) this.processes.delete(agentId); throw error; }
+  }
+  /** Reconnect to a live holder that outlived a daemon restart (vs `start`
+   * which spawns when none exists). Throws when no live holder answers. */
+  async attach(agentId: string, options?: Partial<PiRpcOptions>): Promise<PiProcessHandle> {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(agentId)) throw new Error("invalid agentId");
+    const live = this.processes.get(agentId); if (live?.lifecycle === "running") return live;
+    const existing = this.starts.get(agentId); if (existing) return existing;
+    const root = this.sessionsRoot ?? (options?.sessionDir ? options.sessionDir.replace(/[/\\][^/\\]+[/\\]?$/, "") : undefined);
+    if (!root) throw new Error("sessions root is required to attach");
+    const { readGeneration } = await import("../holder/spawn.ts");
+    const { socketPathFor } = await import("../holder/protocol.ts");
+    const { HolderPiProcess } = await import("./holder-transport.ts");
+    const sessionDir = options?.sessionDir ?? `${root}/${agentId}`;
+    const generation = Math.max(readGeneration(sessionDir), this.generations.get(agentId) ?? 0);
+    if (generation < 1) throw new Error("no holder generation recorded");
+    const process = new HolderPiProcess({
+      agentId,
+      socketPath: socketPathFor(sessionDir),
+      generation,
+      maxCommandBytes: options?.maxCommandBytes,
+      maxRecordBytes: options?.maxRecordBytes,
+      maxEventBytes: options?.maxEventBytes,
+      maxStderrBytes: options?.maxStderrBytes,
+    });
+    const attach: Promise<PiProcessHandle> = (async () => {
+      await process.connect();
+      this.generations.set(agentId, generation); this.processes.set(agentId, process);
+      await process.request({ type: "get_state" });
+      return process;
+    })().finally(() => this.starts.delete(agentId));
+    this.starts.set(agentId, attach);
+    try { return await attach; } catch (error) { process.destroy(); if (this.processes.get(agentId) === process) this.processes.delete(agentId); throw error; }
+  }
+  /** Boot sweep: kill holders with no live, unarchived agent; report
+   * respawns (dead socket + live agent) for lazy restart on next use. */
+  async sweep(lookup: (agentId: string) => { archived: boolean } | undefined): Promise<{ kept: string[]; killed: string[]; respawned: string[] }> {
+    if (!this.sessionsRoot) return { kept: [], killed: [], respawned: [] };
+    const { sweepHolders } = await import("../holder/spawn.ts");
+    return sweepHolders(this.sessionsRoot, lookup, (agentId) => this.stop(agentId));
+  }
+  transportFor(agentId: string): "holder" | "direct" | undefined {
+    const process = this.processes.get(agentId);
+    if (!process) return undefined;
+    return (process as PiProcessHandle).transport;
   }
   get(agentId: string) { const process = this.processes.get(agentId); if (process && process.lifecycle !== "running") { this.processes.delete(agentId); return undefined; } return process; }
   async stop(agentId: string, timeoutMs?: number) { const process = this.processes.get(agentId); if (!process) return; await process.shutdown(timeoutMs); if (this.processes.get(agentId) === process) this.processes.delete(agentId); }
   async shutdown() {
     await Promise.allSettled(this.starts.values());
     await Promise.all([...this.processes].map(([agentId]) => this.stop(agentId)));
+  }
+  /** Daemon shutdown: detach from holders WITHOUT stopping them (runs
+   * survive daemon restarts — that is the feature) while still reaping
+   * direct-spawn children. Explicit per-agent stop/archive still goes
+   * through `stop()` → `passage_stop`. */
+  async detachAll() {
+    await Promise.allSettled(this.starts.values());
+    await Promise.all([...this.processes].map(async ([agentId, process]) => {
+      try {
+        if (process.transport === "holder") {
+          (process as import("./holder-transport.ts").HolderPiProcess).destroy();
+        } else {
+          await process.shutdown();
+        }
+      } catch {}
+      if (this.processes.get(agentId) === process) this.processes.delete(agentId);
+    }));
   }
 }

@@ -2,9 +2,38 @@
 
 ## Status
 
-Proposed. Not implemented. This document is the plan of record for keeping
+Implemented (holder-default). This document is the plan of record for keeping
 Passage agents alive across daemon restarts (deploy, `bun --watch` reload,
 crash) while preserving a guaranteed way to shut Pi children down.
+
+What landed:
+
+- Same-binary dispatch (`passage pi-holder <agentId> …`, `passage
+  shutdown-holders`, `passage pi-status [agentId]`) in `src/daemon/index.ts`,
+  before SQLite/Hono/serve/pidfile setup; holder entrypoint in
+  `src/daemon/agents/holder/cli.ts`.
+- Holder runtime (`holder/server.ts`, dependency-light: no SQLite/HTTP) with
+  verbatim byte-proxy, bounded replay + stderr, hello/replay/ping/status/
+  stop control frames (`holder/protocol.ts`), pi-exit linger, and idle
+  timeout (`PASSAGE_HOLDER_IDLE_MS`, default 24h; never fires mid-run
+  because pi output resets the idle clock).
+- Daemon socket transport (`rpc/holder-transport.ts`) with the same
+  `request()`/`subscribe()` surface; `PiRpcManager` is holder-first with
+  generation persisted in `holder.json` (bumped per fresh holder, reused on
+  attach). Bare `new PiRpcManager(n)` managers (unit tests) and
+  `PASSAGE_PI_HOLDER=0` keep the direct-spawn fallback.
+- Attach-first reconnect in `AgentService.ensureProcess`, boot orphan sweep
+  (`sweepOrphanHolders`, called before serving), `passage_stop` on
+  stop/archive, detach-without-stop on daemon shutdown, and
+  `POST /api/daemon/shutdown?holders=true`.
+- Spawning prefers `systemd-run --user --scope --unit passage-pi-<id>.scope`
+  with a detached fallback (`PASSAGE_HOLDER_NO_SYSTEMD=1` forces fallback).
+- `bun run deploy` keeps holders by default; `bun run deploy --stop-agents`
+  shuts them down first for a clean slate.
+- Suites: `holder/protocol.test.ts` (validation, sweep matrix),
+  `holder/server.test.ts` (proxy, replay, reconnect, teardown, sweep),
+  `rpc/holder.test.ts` (restart survival + clean stop through real holder
+  processes), plus a service-level boot-sweep test.
 
 ## Problem
 
