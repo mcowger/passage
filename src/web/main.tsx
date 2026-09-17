@@ -860,6 +860,19 @@ function App() {
     setDrawerOpen(false);
   };
 
+  // After a merged workspace is deleted, land on the home empty state rather
+  // than auto-selecting another workspace. refreshWorkspaces otherwise picks
+  // the first candidate, so clear the selection again once it settles.
+  const handleWorkspaceRemoved = useCallback(async () => {
+    setSelectedWorkspaceId(undefined);
+    setSelectedAgentId(undefined);
+    setSelectedTerminalId(undefined);
+    setSelectedPreviewId(undefined);
+    setActiveTab("agent");
+    await refreshWorkspaces();
+    setSelectedWorkspaceId(undefined);
+  }, [refreshWorkspaces]);
+
   // Render tab content for SplitCanvas & single-pane mode
   const renderTabContent = (tab: PaneTab): ReactNode => {
     if (!workspace || !project) {
@@ -993,6 +1006,7 @@ function App() {
             api={api}
             onOpenFile={openEditorFile}
             onOpenDiff={openDiffFile}
+            onWorkspaceDeleted={handleWorkspaceRemoved}
           />
         );
 

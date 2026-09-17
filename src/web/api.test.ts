@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createWorkspaceApi, WorkspaceApiError } from "./api.ts";
+import { createWorkspaceApi, friendlyApiError, WorkspaceApiError } from "./api.ts";
 
 const snapshot = { projects: [], workspaces: [], locations: [] };
 test("client requests and validates snapshots", async () => {
@@ -11,6 +11,13 @@ test("client requests and validates snapshots", async () => {
 test("client reports API errors", async () => {
   const api = createWorkspaceApi(async () => Response.json({ error: "invalid-root", message: "Directory does not exist or is inaccessible" }, { status: 400 }));
   expect(api.snapshot()).rejects.toThrow("Directory does not exist or is inaccessible");
+});
+test("contextual fallback wins over the generic transport message", () => {
+  // An unclassified 5xx must not mask the caller's operation-specific message.
+  expect(friendlyApiError(new WorkspaceApiError("request-failed", 500), "Could not merge into main. Resolve any conflicts and try again."))
+    .toBe("Could not merge into main. Resolve any conflicts and try again.");
+  // Known codes still map to their curated copy.
+  expect(friendlyApiError(new WorkspaceApiError("not-found", 404), "fallback")).toContain("not found");
 });
 test("client serializes mutations", async () => {
   let request: Request | undefined;

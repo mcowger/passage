@@ -16,6 +16,12 @@ type Result = { stdout: string; stderr: string; code: number; truncated: boolean
 
 export class GitError extends Error { constructor(message: string, public readonly stderr = "", public readonly code = -1) { super(message); this.name = "GitError"; } }
 
+/** First meaningful line from a failed Git command, for curated error messages. */
+const gitDetail = (cause: unknown): string => {
+  const text = cause instanceof GitError ? cause.stderr || cause.message : "";
+  return (text.split("\n")[0] ?? "").trim().replace(/^(fatal|error):\s*/i, "").replace(/\.$/, "");
+};
+
 export class GitService {
   private active = 0;
   private waiting: (() => void)[] = [];
@@ -128,7 +134,33 @@ export class GitService {
     if (conflicted) {
       throw new GitError("Merge conflicts would occur", paths.length > 0 ? `Conflicting files: ${paths.join(", ")}` : "Resolve conflicts before merging into main");
     }
-    await this.run(source.mainCheckoutRoot, ["merge", "--no-edit", source.branchRef], { timeoutMs: 30_000, ...options });
+    await this.rebaseOntoMain(source.checkoutRoot, main.branchRef, source.branchRef, options);
+    try {
+      await this.run(source.mainCheckoutRoot, ["merge", "--ff-only", source.branchRef], { timeoutMs: 30_000, ...options });
+    } catch (cause) {
+      const detail = gitDetail(cause);
+      throw new GitError(`Could not fast-forward "${main.branchRef}" to "${source.branchRef}"${detail ? `: ${detail}` : ""}`);
+    }
+  }
+
+  /** Replay the source branch onto main before merging so main only ever
+   *  fast-forwards. A conflicted or blocked rebase is aborted and reported,
+   *  leaving the branch exactly as it was. */
+  private async rebaseOntoMain(cwd: string, mainRef: string, branchRef: string, options?: Options): Promise<void> {
+    try {
+      await this.run(cwd, ["rebase", mainRef], { timeoutMs: 30_000, ...options });
+    } catch (cause) {
+      const paths = await this.unmergedPaths(cwd, options).catch(() => []);
+      await this.run(cwd, ["rebase", "--abort"], { timeoutMs: 30_000, ...options }).catch(() => {});
+      const detail = paths.length > 0 ? `conflicting files: ${paths.join(", ")}` : gitDetail(cause);
+      throw new GitError(`Could not rebase "${branchRef}" onto "${mainRef}"${detail ? `: ${detail}` : ""}. Resolve the branch and try again.`);
+    }
+  }
+
+  /** Repo-relative paths left unmerged by an in-progress Git operation. */
+  private async unmergedPaths(cwd: string, options?: Options): Promise<string[]> {
+    const result = await this.run(cwd, ["diff", "--name-only", "--diff-filter=U"], options);
+    return [...new Set(result.stdout.split("\n").map((line) => line.trim()).filter(Boolean))];
   }
   async diff(cwd: string, target: "staged" | "working-tree" = "working-tree", options?: Options): Promise<GitDiff[]> { const args = ["diff", "--no-ext-diff", "--no-color", "--unified=3", "--binary", ...(target === "staged" ? ["--cached"] : [])]; const r = await this.run(cwd, args, options); if (r.truncated) return [{ path: "", binary: false, oversized: true, truncated: true, additions: 0, deletions: 0, hunks: [] }]; const result: GitDiff[] = []; let current: GitDiff | undefined; let hunk: DiffHunk | undefined; for (const line of r.stdout.split("\n")) { if (line.startsWith("diff --git ")) { const m = /^diff --git a\/(.*) b\/(.*)$/.exec(line); current = { path: m?.[2] ?? "", oldPath: m?.[1], binary: false, oversized: false, truncated: false, additions: 0, deletions: 0, hunks: [] }; result.push(current); hunk = undefined; } else if (line.startsWith("Binary files") || line.startsWith("GIT binary patch")) { if (current) current.binary = true; } else if (line.startsWith("@@ ") && current) { const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)/.exec(line); if (m) { hunk = { oldStart: +m[1], oldLines: +(m[2] ?? 1), newStart: +m[3], newLines: +(m[4] ?? 1), header: m[5], lines: [] }; current.hunks.push(hunk); } } else if (hunk && /^[ +\-]/.test(line)) { const kind: DiffLine["kind"] = line[0] === "+" ? "added" : line[0] === "-" ? "removed" : "context"; hunk.lines.push({ kind, text: line.slice(1) }); if (current) { if (kind === "added") current.additions++; if (kind === "removed") current.deletions++; } } }
     if (target === "working-tree" && !r.truncated) {

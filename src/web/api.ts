@@ -53,7 +53,6 @@ const FRIENDLY_API_ERRORS: Record<string, string> = {
   "invalid-id": "Invalid identifier. Refresh and try again.",
   "invalid-cursor": "The listing expired. Refresh and try again.",
   "body-too-large": "The request was too large.",
-  "request-failed": "Request failed. Check your connection and try again.",
   "conflict": "That conflicts with the current state. Refresh and try again.",
   "force-required": "That would discard uncommitted changes. Confirm a force delete to proceed.",
   "git-failed": "The git operation failed. Check the repository state and try again.",

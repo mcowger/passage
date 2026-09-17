@@ -217,4 +217,45 @@ describe("git HTTP API", () => {
 
     f.store.close();
   });
+  test("reports a conflicted pre-merge rebase as a 422 with a specific message", async () => {
+    const f = await fixture();
+    const worktree = join(f.root, "rebase-conflict-worktree");
+    await runGit(f.root, ["worktree", "add", "-b", "feature", worktree]);
+    // Feature edits then reverts the line, so the final merge is clean but
+    // replaying its middle commit onto main conflicts.
+    await writeFile(join(worktree, "README.md"), "# Feature");
+    await runGit(worktree, ["commit", "-am", "feature edit"]);
+    await writeFile(join(worktree, "README.md"), "# Init");
+    await runGit(worktree, ["commit", "-am", "feature revert"]);
+    await writeFile(join(f.root, "README.md"), "# Main");
+    await runGit(f.root, ["commit", "-am", "main edit"]);
+    const workspace = workspaceSchema.parse({
+      id: "wsp_rebase_conflict",
+      projectId: "prj_git",
+      kind: "worktree",
+      cwd: worktree,
+      checkoutRoot: worktree,
+      mainRepositoryRoot: f.root,
+      branchRef: "feature",
+      displayLabel: "Rebase Feature",
+      locationId: null,
+      ownershipState: "owned",
+      markerId: null,
+      markerPath: null,
+      repairDetail: null,
+      archivedAt: null,
+    });
+    f.repos.workspaces.save(workspace);
+
+    const response = await f.app.fetch(request(`/api/workspaces/${workspace.id}/git/merge`, { method: "POST", body: "{}" }));
+    expect(response.status).toBe(422);
+    const body = await response.json() as { error: string; message?: string };
+    expect(body.error).toBe("git-failed");
+    expect(body.message).toContain("Could not rebase");
+    expect(body.message).toContain("README.md");
+    expect(body.message).not.toBe("Request failed. Check your connection and try again.");
+    expect(await readFile(join(f.root, "README.md"), "utf8")).toBe("# Main");
+
+    f.store.close();
+  });
 });

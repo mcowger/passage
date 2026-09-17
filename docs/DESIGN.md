@@ -637,8 +637,10 @@ budgets), structured file summaries (added/modified/deleted/renamed/untracked/
 conflict/binary/submodule, staged vs. working-tree flags), and worktree
 creation/refresh/safe removal. Mutations: `stage`, `unstage`, `stage-all`,
 `unstage-all`, `discard` (refuses unmerged paths), `commit` (returns new
-HEAD), `pull --ff-only`, `fetch --prune`, `merge` into main with
-`merge-tree --write-tree` preflight. The client receives a normalized
+HEAD), `pull --ff-only`, `fetch --prune`, and `merge` into main: the source
+branch is replayed onto main with `git rebase` (aborted and reported if it
+conflicts), then main fast-forwards, gated by a `merge-tree --write-tree`
+conflict preflight. The client receives a normalized
 status/diff model and never parses porcelain on the main UI path.
 
 ### Worktree lifecycle
