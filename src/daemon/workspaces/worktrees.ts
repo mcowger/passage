@@ -157,18 +157,23 @@ export class WorktreeService {
       this.repositories.workspaces.delete(workspaceId);
       return;
     }
-    const status = await this.git.status(w.cwd).catch((err) => {
-      if (force) return { dirty: false, conflicted: false };
-      throw new WorktreeError("git-failed", err instanceof Error ? err.message : "Failed to get git status");
-    });
-    if ((status.dirty || status.conflicted) && !force) throw new WorktreeError("force-required", "Explicit force confirmation required");
     const result = await this.command(w.mainRepositoryRoot ?? w.cwd, ["worktree", "remove", ...(force ? ["--force"] : []), w.cwd]);
     if (result.code !== 0) {
       if (force) {
         await rm(w.cwd, { recursive: true, force: true }).catch(() => {});
         await this.command(w.mainRepositoryRoot ?? process.cwd(), ["worktree", "prune"]).catch(() => {});
       } else {
-        throw this.mapGitFailure(result.stderr, w.cwd, false);
+        // Let Git decide what is safe to remove. A clean, merged worktree
+        // succeeds here with no force prompt. Anything Git refuses (dirty,
+        // untracked, unmerged, locked) surfaces as force-required so the UI
+        // can offer the force retry as a second step.
+        const detail = result.stderr.trim().split("\n").at(-1) ?? "";
+        throw new WorktreeError(
+          "force-required",
+          detail
+            ? `Git refused to remove the worktree: ${detail} Retry with force to discard it.`
+            : "Git refused to remove the worktree. Retry with force to discard it.",
+        );
       }
     }
     this.repositories.workspaces.delete(workspaceId);
