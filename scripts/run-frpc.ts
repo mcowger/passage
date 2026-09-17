@@ -13,8 +13,8 @@
 // - FRPC_SUBDOMAIN_HOST (optional public hostname suffix)
 //
 // The tunneled target port resolves from PASEO_SERVICE_DEV_PORT (the dev
-// peer service's port, injected by Paseo), falling back to PORT for manual
-// `bun scripts/run-frpc.ts` runs outside Paseo.
+// peer service's port, injected by Paseo), then PORT, then the stable
+// worktree port selected by scripts/dev-port.ts for manual runs.
 
 import { basename } from "node:path";
 import { spawn } from "node:child_process";
@@ -25,6 +25,7 @@ import {
 	getRepositoryName,
 	isFrpcAvailable,
 } from "./frpc";
+import { stableBasePort, worktreeRoot } from "./dev-port";
 
 export function resolveWorktreeDir(
 	env: Record<string, string | undefined>,
@@ -35,6 +36,7 @@ export function resolveWorktreeDir(
 
 export function resolveLocalPort(
 	env: Record<string, string | undefined>,
+	cwd = process.cwd(),
 ): { port: number } | { error: string } {
 	for (const key of ["PASEO_SERVICE_DEV_PORT", "PORT"] as const) {
 		const raw = env[key]?.trim();
@@ -45,10 +47,7 @@ export function resolveLocalPort(
 		}
 		return { error: `invalid ${key}=${JSON.stringify(raw)}` };
 	}
-	return {
-		error:
-			"no local port: start the dev service first (PASEO_SERVICE_DEV_PORT) or set PORT",
-	};
+	return { port: stableBasePort(worktreeRoot(resolveWorktreeDir(env, cwd))) };
 }
 
 if (import.meta.main) {
@@ -82,13 +81,13 @@ if (import.meta.main) {
 		process.exit(0);
 	}
 
-	const resolved = resolveLocalPort(process.env);
+	const worktreeDir = resolveWorktreeDir(process.env, process.cwd());
+	const resolved = resolveLocalPort(process.env, worktreeDir);
 	if ("error" in resolved) {
 		console.error(`[frpc] Tunnel disabled: ${resolved.error}.`);
 		process.exit(1);
 	}
 
-	const worktreeDir = resolveWorktreeDir(process.env, process.cwd());
 	const repositoryName = getRepositoryName(worktreeDir);
 	const worktreeName = basename(worktreeDir);
 	const { subdomain, url } = buildFrpcEndpoint(
