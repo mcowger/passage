@@ -85,10 +85,7 @@ export function applyStreamEvent(
     let found = false;
     for (let index = timeline.length - 1; index >= 0; index -= 1) {
       const item = timeline[index];
-      if (item && item.kind === "user") {
-        // Stop scanning backwards at the user turn boundary
-        break;
-      }
+      if (item && item.kind === "user") break;
       if (item && item.kind === "assistant") {
         timeline[index] = { ...item, text: item.text + delta };
         found = true;
@@ -107,19 +104,11 @@ export function applyStreamEvent(
 
   if (thinkingDelta) {
     const timeline = [...base.timeline];
-    let found = false;
-    for (let index = timeline.length - 1; index >= 0; index -= 1) {
-      const item = timeline[index];
-      if (item && item.kind === "user") {
-        break;
-      }
-      if (item && item.kind === "thinking") {
-        timeline[index] = { ...item, text: item.text + thinkingDelta };
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
+    const index = timeline.length - 1;
+    if (timeline[index]?.kind === "thinking") {
+      const item = timeline[index] as { kind: "thinking"; id: string; text: string; lazy?: boolean; error?: string };
+      timeline[index] = { ...item, text: item.text + thinkingDelta };
+    } else {
       timeline.push({ kind: "thinking", id: `thinking-${Date.now()}`, text: thinkingDelta });
     }
     return { ...base, timeline, usage: nextUsage };
@@ -147,11 +136,8 @@ export function applyStreamEvent(
     let found = false;
     for (let index = timeline.length - 1; index >= 0; index -= 1) {
       const item = timeline[index];
-      if (item && item.kind === "user") {
-        break;
-      }
+      if (item && item.kind === "user") break;
       if (item && item.kind === "assistant") {
-        // Replace current assistant text with full authoritative text instead of duplicating
         timeline[index] = { ...item, text: fullText };
         found = true;
         break;
@@ -257,7 +243,6 @@ export function applyStreamEvent(
       existingIndex = timeline.findIndex((item) => item.kind === "tool" && item.id === rawToolCallId);
     }
     if (existingIndex < 0) {
-      // Look for the last running tool in current turn to update rather than creating a duplicate
       for (let i = timeline.length - 1; i >= 0; i--) {
         const item = timeline[i];
         if (item.kind === "user") break;
@@ -301,10 +286,7 @@ export function applyStreamEvent(
       const timeline = base.timeline.map((item) => {
         if (item.kind === "tool" && (item.id === rawToolCallId || (!rawToolCallId && item.status === "running"))) {
           updated = true;
-          return {
-            ...item,
-            result,
-          };
+          return { ...item, result };
         }
         return item;
       });
@@ -313,10 +295,7 @@ export function applyStreamEvent(
         for (let i = timeline.length - 1; i >= 0; i--) {
           const item = timeline[i];
           if (item.kind === "tool" && item.status === "running") {
-            timeline[i] = {
-              ...item,
-              result,
-            };
+            timeline[i] = { ...item, result };
             break;
           }
         }
@@ -348,7 +327,6 @@ export function applyStreamEvent(
     });
 
     if (!updated && base.timeline.length > 0) {
-      // Fallback: update the last running tool if ID did not match
       for (let i = timeline.length - 1; i >= 0; i--) {
         const item = timeline[i];
         if (item.kind === "tool" && item.status === "running") {

@@ -72,6 +72,29 @@ describe("applyStreamEvent", () => {
     expect((history.timeline[1] as { text: string }).text).toBe("Picking 5 files from /tmp.");
   });
 
+  test("does not append a new turn's thinking to the prior turn", () => {
+    let history = createHistory();
+    history.timeline = [
+      { kind: "user", id: "u1", text: "First request" },
+      { kind: "thinking", id: "t1", text: "First thought" },
+      { kind: "assistant", id: "a1", text: "First answer" },
+      { kind: "user", id: "u2", text: "Second request" },
+    ];
+
+    history = applyStreamEvent(history, {
+      type: "message_update",
+      payload: { assistantMessageEvent: { type: "thinking_delta", delta: "Second thought" } },
+    })!;
+
+    expect(history.timeline).toEqual([
+      { kind: "user", id: "u1", text: "First request" },
+      { kind: "thinking", id: "t1", text: "First thought" },
+      { kind: "assistant", id: "a1", text: "First answer" },
+      { kind: "user", id: "u2", text: "Second request" },
+      expect.objectContaining({ kind: "thinking", text: "Second thought" }),
+    ]);
+  });
+
   test("correlates toolcall_start and tool_execution_start without creating duplicate rows", () => {
     let history = createHistory();
     history.timeline = [
