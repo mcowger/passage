@@ -208,7 +208,7 @@ describe("GitService", () => {
     expect(await readFile(join(root, "feature.txt"), "utf8")).toBe("feature\n");
     await expect(service.mergeIntoMain(root)).rejects.toBeInstanceOf(GitError);
   });
-  test("preserves Git's merge conflict for the caller to resolve", async () => {
+  test("refuses a conflicting merge without touching main", async () => {
     const root = await fixture();
     const service = new GitService();
     await writeFile(join(root, "shared.txt"), "base\n");
@@ -221,7 +221,12 @@ describe("GitService", () => {
     await writeFile(join(root, "shared.txt"), "main\n");
     await git(root, "commit", "-am", "main change");
 
-    await expect(service.mergeIntoMain(worktree)).rejects.toBeInstanceOf(GitError);
-    expect((await service.status(root)).conflicted).toBe(true);
+    const error = await service.mergeIntoMain(worktree).then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(GitError);
+    expect((error as GitError).stderr).toContain("shared.txt");
+    const status = await service.status(root);
+    expect(status.conflicted).toBe(false);
+    expect(status.files.find((f) => f.path === "shared.txt")).toBeUndefined();
+    expect(await readFile(join(root, "shared.txt"), "utf8")).toBe("main\n");
   });
 });
