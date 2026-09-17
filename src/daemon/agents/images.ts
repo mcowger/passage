@@ -5,8 +5,8 @@ import type { AgentImage } from "../../shared/protocol/agents.ts";
 import type { UserImageRef } from "../../shared/domain/agents.ts";
 
 export const IMAGE_HASH_PATTERN = /^[a-f0-9]{64}$/;
-/** ~40MB: roughly the last 10 image-bearing messages at the 2MB/image maximum. */
-export const DEFAULT_IMAGE_CACHE_BYTES = 40 * 1024 * 1024;
+/** ~1GB: roughly the last 500 image-bearing messages at the 2MB/image maximum. */
+export const DEFAULT_IMAGE_CACHE_BYTES = 1024 * 1024 * 1024;
 
 const MIME_EXTENSIONS: Record<AgentImage["mimeType"], string> = {
   "image/png": "png",
