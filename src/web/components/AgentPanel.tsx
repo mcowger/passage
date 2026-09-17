@@ -28,6 +28,7 @@ import {
 } from "./ui/alert-dialog.tsx";
 import { QuestionCard, type QuestionRequest, type QuestionOption } from "./QuestionCard.tsx";
 import { getToolDiff } from "../lib/tool-diff.ts";
+import { formatCompactTokens } from "../lib/utils.ts";
 import { estimateUpdatedTokens, getStreamingTokenText, type TokenEstimateCacheEntry } from "../lib/streaming-tokens.ts";
 import {
   Clock,
@@ -947,7 +948,7 @@ function AgentComposerInner({
                   type="button"
                   className="composer-ctx-pill"
                   onClick={() => setCtxDetailsOpen((prev) => !prev)}
-                  title={`${contextTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens · ${contextPct}% context · Click for details`}
+                  title={`${formatCompactTokens(contextTokens)} / ${formatCompactTokens(maxTokens)} tokens · ${contextPct}% context · Click for details`}
                   aria-label={`Context used: ${contextPct}%. Click for usage breakdown.`}
                   aria-expanded={ctxDetailsOpen}
                   aria-haspopup="dialog"
@@ -975,20 +976,20 @@ function AgentComposerInner({
                       <div className="ctx-detail-row">
                         <span>Context used</span>
                         <b>
-                          {contextPct}% ({contextTokens.toLocaleString()} / {maxTokens.toLocaleString()})
+                          {contextPct}% ({formatCompactTokens(contextTokens)} / {formatCompactTokens(maxTokens)})
                         </b>
                       </div>
                       <div className="ctx-detail-row">
                         <span>Input tokens</span>
-                        <span>{(usage?.input ?? 0).toLocaleString()}</span>
+                        <span>{formatCompactTokens(usage?.input ?? 0)}</span>
                       </div>
                       <div className="ctx-detail-row">
                         <span>Output tokens</span>
-                        <span>{(usage?.output ?? 0).toLocaleString()}</span>
+                        <span>{formatCompactTokens(usage?.output ?? 0)}</span>
                       </div>
                       <div className="ctx-detail-row">
                         <span>Cache read</span>
-                        <span>{(usage?.cacheRead ?? 0).toLocaleString()}</span>
+                        <span>{formatCompactTokens(usage?.cacheRead ?? 0)}</span>
                       </div>
                       {usage?.cost !== undefined && usage.cost > 0 && (
                         <div className="ctx-detail-row total">
