@@ -1496,32 +1496,35 @@ function AgentComposerInner({
 
   return (
     <footer className="composer-container">
-      <div
-        className="composer-status-line"
-        role={streamActive ? "status" : undefined}
-        aria-live={streamActive ? "polite" : undefined}
-        aria-hidden={!streamActive}
-      >
-        {streamActive && (
-          <div className="composer-status-pill">
-            <span className="pulse-dot" />
-            <span className="composer-status-duration">{formatDuration(elapsedSeconds)}</span>
-            <LiveStreamPhase phase={streamPhase} receiving={receiving} />
-            <LiveStreamTraffic frames={streamFrames} bytes={streamBytes} />
-          </div>
-        )}
-      </div>
-      {changeSummary && (
-        <div
-          className="agent-change-summary"
-          aria-label={`${changeSummary.fileCount} changed files, ${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}
-        >
-          <span className="agent-change-files">
-            <Pencil size={12} aria-hidden="true" />
-            {changeSummary.fileCount} changed file{changeSummary.fileCount === 1 ? "" : "s"}
-          </span>
-          <span className="add-count">+{changeSummary.additions}</span>
-          <span className="del-count">-{changeSummary.deletions}</span>
+      {(changeSummary || streamActive) && (
+        <div className="composer-meta-line">
+          {changeSummary ? (
+            <div
+              className="agent-change-summary"
+              aria-label={`${changeSummary.fileCount} changed files, ${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}
+            >
+              <span className="agent-change-files">
+                <Pencil size={12} aria-hidden="true" />
+                {changeSummary.fileCount} changed file{changeSummary.fileCount === 1 ? "" : "s"}
+              </span>
+              <span className="add-count">+{changeSummary.additions}</span>
+              <span className="del-count">-{changeSummary.deletions}</span>
+            </div>
+          ) : (
+            <div />
+          )}
+          {streamActive && (
+            <div
+              className="composer-status-pill"
+              role="status"
+              aria-live="polite"
+            >
+              <span className="pulse-dot" />
+              <span className="composer-status-duration">{formatDuration(elapsedSeconds)}</span>
+              <LiveStreamPhase phase={streamPhase} receiving={receiving} />
+              <LiveStreamTraffic frames={streamFrames} bytes={streamBytes} />
+            </div>
+          )}
         </div>
       )}
       <QueuedFollowUpList queue={queue} disabled={busy || stopping} onRetract={retractQueued} onClear={clearQueued} />
