@@ -41,6 +41,7 @@ test("client requests a merge into main", async () => {
       detached: false,
       ahead: 0,
       behind: 0,
+      aheadOfMain: 1,
       dirty: false,
       conflicted: false,
       truncated: false,

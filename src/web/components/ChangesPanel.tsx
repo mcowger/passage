@@ -109,6 +109,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
 
   const anyBusy = bulkOp !== null || pendingPaths.size > 0;
   const isMainWorktree = status?.checkoutRoot === status?.mainCheckoutRoot || status?.branchRef === "main";
+  const hasCommitsToMerge = status !== null && !isMainWorktree && status.aheadOfMain > 0;
 
   const trackFileOp = (path: string, run: () => Promise<GitStatus>, done?: (s: GitStatus) => void) => {
     setPendingPaths((prev) => new Set(prev).add(path));
@@ -174,7 +175,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
   };
 
   const handleMerge = () => {
-    if (bulkOp !== null || isMainWorktree) return;
+    if (bulkOp !== null || !hasCommitsToMerge) return;
     setBulkOp("merge");
     void api.gitMergeIntoMain(workspaceId).then(
       (s) => {
@@ -230,8 +231,8 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
             variant="secondary"
             size="xs"
             onClick={handleMerge}
-            disabled={bulkOp !== null || isMainWorktree}
-            title={isMainWorktree ? "The main worktree or branch cannot be merged into itself" : "Merge this branch into main"}
+            disabled={bulkOp !== null || !hasCommitsToMerge}
+            title={isMainWorktree ? "The main worktree or branch cannot be merged into itself" : !hasCommitsToMerge ? "No commits to merge into main" : "Merge this branch into main"}
           >
             {bulkOp === "merge" ? <Spinner className="size-3" /> : null}
             Merge

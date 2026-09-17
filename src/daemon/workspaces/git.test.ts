@@ -208,6 +208,24 @@ describe("GitService", () => {
     expect(await readFile(join(root, "feature.txt"), "utf8")).toBe("feature\n");
     await expect(service.mergeIntoMain(root)).rejects.toBeInstanceOf(GitError);
   });
+  test("reports commits ahead of main for a linked worktree", async () => {
+    const root = await fixture();
+    const service = new GitService();
+    await writeFile(join(root, "base.txt"), "base\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "initial");
+    const worktree = join(root, "feature-worktree");
+    await git(root, "worktree", "add", "-b", "feature", worktree);
+    expect((await service.status(worktree)).aheadOfMain).toBe(0);
+    expect((await service.status(root)).aheadOfMain).toBe(0);
+    await writeFile(join(worktree, "feature.txt"), "feature\n");
+    await git(worktree, "add", ".");
+    await git(worktree, "commit", "-m", "feature");
+    expect((await service.status(worktree)).aheadOfMain).toBe(1);
+    await writeFile(join(worktree, "feature.txt"), "feature two\n");
+    await git(worktree, "commit", "-am", "feature two");
+    expect((await service.status(worktree)).aheadOfMain).toBe(2);
+  });
   test("refuses a conflicting merge without touching main", async () => {
     const root = await fixture();
     const service = new GitService();
