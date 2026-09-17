@@ -11,8 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog.tsx";
-import { Checkbox } from "./ui/checkbox.tsx";
-import { Label } from "./ui/label.tsx";
 import { Alert, AlertDescription } from "./ui/alert.tsx";
 
 export interface WorkspaceDetailsModalProps {
@@ -38,7 +36,7 @@ export function WorkspaceDetailsModal({
   const [error, setError] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removeError, setRemoveError] = useState("");
-  const [forceRemove, setForceRemove] = useState(false);
+  const [forceAvailable, setForceAvailable] = useState(false);
 
   const handleRename = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,16 +86,17 @@ export function WorkspaceDetailsModal({
     }
   };
 
-  const handleRemoveWorktree = async () => {
+  const handleRemoveWorktree = async (force: boolean) => {
     try {
       setBusy(true);
       setRemoveError("");
-      await api.removeWorktree(workspace.id, forceRemove);
+      await api.removeWorktree(workspace.id, force);
       setConfirmRemove(false);
       await onRefresh();
       onClose();
     } catch (err) {
       setRemoveError(friendlyApiError(err, "Failed to remove worktree"));
+      setForceAvailable(true);
     } finally {
       setBusy(false);
     }
@@ -194,7 +193,7 @@ export function WorkspaceDetailsModal({
               <Button
                 size="xs"
                 variant="destructive"
-                onClick={() => { setRemoveError(""); setConfirmRemove(true); }}
+                onClick={() => { setRemoveError(""); setForceAvailable(false); setConfirmRemove(true); }}
                 disabled={busy}
               >
                 Delete Worktree
@@ -239,7 +238,7 @@ export function WorkspaceDetailsModal({
 
       {/* Confirmation Dialog for Worktree Deletion */}
       {confirmRemove && (
-        <Dialog open onOpenChange={(open) => { if (!open) setConfirmRemove(false); }}>
+        <Dialog open onOpenChange={(open) => { if (!open) { setConfirmRemove(false); setForceAvailable(false); } }}>
           <DialogContent className="max-w-[440px]">
             <DialogHeader>
               <DialogTitle className="text-base font-semibold">Delete Git Worktree</DialogTitle>
@@ -252,20 +251,14 @@ export function WorkspaceDetailsModal({
                 <AlertDescription className="text-xs">{removeError}</AlertDescription>
               </Alert>
             )}
-            <div className="flex items-center gap-2 my-2">
-              <Checkbox
-                id="force-remove-worktree"
-                checked={forceRemove}
-                onCheckedChange={(checked) => setForceRemove(checked === true)}
-                aria-label="Force delete worktree"
-              />
-              <Label htmlFor="force-remove-worktree" className="text-xs text-destructive font-medium cursor-pointer">
-                Force delete (discard any uncommitted or dirty changes)
-              </Label>
-            </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button size="xs" variant="secondary" onClick={() => setConfirmRemove(false)}>Cancel</Button>
-              <Button size="xs" variant="destructive" onClick={handleRemoveWorktree} disabled={busy}>
+              <Button size="xs" variant="secondary" onClick={() => { setConfirmRemove(false); setForceAvailable(false); }}>Cancel</Button>
+              {forceAvailable && (
+                <Button size="xs" variant="destructive" onClick={() => handleRemoveWorktree(true)} disabled={busy}>
+                  {busy ? "Deleting..." : "Force"}
+                </Button>
+              )}
+              <Button size="xs" variant="destructive" onClick={() => handleRemoveWorktree(false)} disabled={busy}>
                 {busy ? "Deleting..." : "Delete Worktree"}
               </Button>
             </div>
