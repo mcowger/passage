@@ -1,9 +1,9 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent, ReactNode } from "react";
-import type { AgentCapabilities, AgentHistory, AgentSummary, SlashCommand, TimelineItem, ToolActivity, UserImageRef } from "../../shared/domain/agents.ts";
+import type { AgentCapabilities, AgentHistory, AgentSummary, SlashCommand, TimelineItem, ToolActivity, UserFileRef, UserImageRef } from "../../shared/domain/agents.ts";
 import type { WorkspaceSettings, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
 import { DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
-import { MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentImage } from "../../shared/protocol/agents.ts";
+import { MAX_AGENT_FILES, MAX_AGENT_FILE_DATA_BYTES, MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentFile, type AgentImage } from "../../shared/protocol/agents.ts";
 import { friendlyApiError, type WorkspaceApi } from "../api.ts";
 import { toast } from "sonner";
 import { subscribeWorkspace } from "../workspaceSocket.ts";
@@ -37,7 +37,7 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog.tsx";
 import { QuestionCard, type QuestionRequest, type QuestionOption } from "./QuestionCard.tsx";
-import { UserImageStrip } from "./UserImages.tsx";
+import { UserFileStrip, UserImageStrip } from "./UserImages.tsx";
 import { getToolDiff } from "../lib/tool-diff.ts";
 import { formatCompactTokens } from "../lib/utils.ts";
 import { RECEIVING_ACTIVITY_WINDOW_MS, STREAM_PHASE_LABELS, emptyStreamActivity, formatByteCount, type StreamActivity, type StreamPhase } from "../lib/stream-activity.ts";
@@ -75,7 +75,7 @@ export type AgentPanelProps = {
   onRefresh: () => Promise<void>;
   onModelChanged?: (agent: AgentSummary) => void;
   onArchive: () => Promise<void>;
-  onOptimisticMessage?: (message: string, images?: UserImageRef[]) => void;
+  onOptimisticMessage?: (message: string, images?: UserImageRef[], files?: UserFileRef[]) => void;
   /** Offline transcript override for rendering verification (never live state). */
   previewHistory?: AgentHistory;
   settings?: WorkspaceSettings;
@@ -271,6 +271,7 @@ export type QueuedFollowUp = {
   id: string;
   text: string;
   images: Array<AgentImage & { name: string }>;
+  files: AgentFile[];
   createdAt: number;
 };
 
@@ -279,8 +280,8 @@ function newQueuedFollowUpId(): string {
   return `queued-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function createQueuedFollowUp(text: string, images: Array<AgentImage & { name: string }>): QueuedFollowUp {
-  return { id: newQueuedFollowUpId(), text, images: [...images], createdAt: Date.now() };
+export function createQueuedFollowUp(text: string, images: Array<AgentImage & { name: string }>, files: AgentFile[] = []): QueuedFollowUp {
+  return { id: newQueuedFollowUpId(), text, images: [...images], files: [...files], createdAt: Date.now() };
 }
 
 export function removeQueuedFollowUp(queue: QueuedFollowUp[], id: string): QueuedFollowUp[] {
@@ -328,6 +329,14 @@ export function QueuedFollowUpList({
                 title={item.images.map((image) => image.name).join(", ")}
               >
                 {item.images.length} image{item.images.length === 1 ? "" : "s"}
+              </span>
+            )}
+            {item.files.length > 0 && (
+              <span
+                className="composer-queue-images"
+                title={item.files.map((file) => file.name).join(", ")}
+              >
+                {item.files.length} file{item.files.length === 1 ? "" : "s"}
               </span>
             )}
             <button
@@ -830,11 +839,11 @@ export function AgentPanel({
         setBusy={setBusy}
         onRefresh={onRefresh}
         onModelChanged={onModelChanged}
-        onOptimisticMessage={(message, images) => {
+        onOptimisticMessage={(message, images, files) => {
           // A user sending a new message always wants to see it, even if they
           // had scrolled up to read earlier output.
           pinnedRef.current = true;
-          onOptimisticMessage?.(message, images);
+          onOptimisticMessage?.(message, images, files);
         }}
         currentModel={currentModel}
         currentModelDisplayName={currentModelDisplayName}
@@ -854,7 +863,7 @@ export function AgentPanel({
       />
       {dropActive && (
         <div className="agent-drop-overlay" aria-hidden="true">
-          <span className="agent-drop-overlay-label">Drop images to attach</span>
+          <span className="agent-drop-overlay-label">Drop files to attach</span>
         </div>
       )}
     </section>
@@ -948,7 +957,7 @@ type AgentComposerProps = {
   setBusy: (b: boolean) => void;
   onRefresh: () => Promise<void>;
   onModelChanged?: (agent: AgentSummary) => void;
-  onOptimisticMessage?: (message: string, images?: UserImageRef[]) => void;
+  onOptimisticMessage?: (message: string, images?: UserImageRef[], files?: UserFileRef[]) => void;
   currentModel?: AgentCapabilities["models"][number] | { name: string; id: string; provider: string; contextWindow?: number };
   currentModelDisplayName: string;
   thinking: string;
@@ -1061,10 +1070,12 @@ function AgentComposerInner({
   const [draft, setDraft] = useState(() => localStorage.getItem(draftKey) ?? "");
   const [composerError, setComposerError] = useState("");
   const [images, setImages] = useState<Array<AgentImage & { name: string }>>([]);
+  const [uploadFiles, setUploadFiles] = useState<AgentFile[]>([]);
   const [ctxDetailsOpen, setCtxDetailsOpen] = useState(false);
   const ctxDetailsRef = useRef<HTMLDivElement>(null);
   const composerInputRef = useRef<ComposerEditorHandle>(null);
   const reservedImageCount = useRef(0);
+  const reservedFileCount = useRef(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [queue, setQueue] = useState<QueuedFollowUp[]>([]);
   const dispatchingRef = useRef(false);
@@ -1146,8 +1157,10 @@ function AgentComposerInner({
   useEffect(() => {
     setDraft(localStorage.getItem(draftKey) ?? "");
     setImages([]);
+    setUploadFiles([]);
     setCtxDetailsOpen(false);
     reservedImageCount.current = 0;
+    reservedFileCount.current = 0;
     // The attached queue is ephemeral and browser-local: switching agents drops it.
     setQueue([]);
     dispatchingRef.current = false;
@@ -1219,9 +1232,15 @@ function AgentComposerInner({
 
   const send = (kind: "prompt" | "steer" | "followUp") => {
     const value = draft.trim();
-    if (!value && images.length === 0) return;
-    const finalMessage = value || (images.length > 0 ? "Attached image" : "");
+    if (!value && images.length === 0 && uploadFiles.length === 0) return;
+    const finalMessage = value || (images.length > 0 ? "Attached image" : uploadFiles.length > 0 ? `Attached file: ${uploadFiles.map((file) => file.name).join(", ")}` : "");
     const payloadImages: AgentImage[] = images.map(({ type, data, mimeType, name }) => ({
+      type,
+      data,
+      mimeType,
+      name,
+    }));
+    const payloadFiles: AgentFile[] = uploadFiles.map(({ type, data, mimeType, name }) => ({
       type,
       data,
       mimeType,
@@ -1229,19 +1248,39 @@ function AgentComposerInner({
     }));
     // Instant pre-echo: the daemon hasn't hashed/cached these yet, so the
     // optimistic row carries data URLs and no hashes; the real row_upsert
-    // (with cache refs) replaces this row when it arrives.
+    // (with cache refs) replaces this row when it arrives. File paths are
+    // unknown until the daemon writes them, so the pre-echo uses the plain
+    // filename as a placeholder path.
     const optimisticImages: UserImageRef[] = images.map(({ mimeType, name, data }) => ({
       hash: "",
       mimeType,
       name,
       previewUrl: `data:${mimeType};base64,${data}`,
     }));
-    onOptimisticMessage?.(finalMessage, optimisticImages.length > 0 ? optimisticImages : undefined);
+    const optimisticFiles: UserFileRef[] = uploadFiles.map(({ name, mimeType, data }) => ({
+      hash: "",
+      name,
+      path: name,
+      size: Math.floor((data.length * 3) / 4),
+      mimeType,
+    }));
+    onOptimisticMessage?.(
+      finalMessage,
+      optimisticImages.length > 0 ? optimisticImages : undefined,
+      optimisticFiles.length > 0 ? optimisticFiles : undefined,
+    );
     void run(
       async () => {
-        await api[kind](agentId, finalMessage, payloadImages.length > 0 ? payloadImages : undefined);
+        await api[kind](
+          agentId,
+          finalMessage,
+          payloadImages.length > 0 ? payloadImages : undefined,
+          payloadFiles.length > 0 ? payloadFiles : undefined,
+        );
         setImages([]);
+        setUploadFiles([]);
         reservedImageCount.current = 0;
+        reservedFileCount.current = 0;
       },
       true,
       false,
@@ -1255,13 +1294,16 @@ function AgentComposerInner({
    */
   const queueFollowUp = () => {
     const value = draft.trim();
-    if ((!value && images.length === 0) || stopping) return;
-    setQueue((current) => [...current, createQueuedFollowUp(value || "Attached image", images)]);
+    if ((!value && images.length === 0 && uploadFiles.length === 0) || stopping) return;
+    const label = value || (images.length > 0 ? "Attached image" : `Attached file: ${uploadFiles.map((file) => file.name).join(", ")}`);
+    setQueue((current) => [...current, createQueuedFollowUp(label, images, uploadFiles)]);
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     setDraft("");
     localStorage.removeItem(draftKey);
     setImages([]);
+    setUploadFiles([]);
     reservedImageCount.current = 0;
+    reservedFileCount.current = 0;
     setComposerError("");
   };
 
@@ -1300,9 +1342,31 @@ function AgentComposerInner({
           name,
           previewUrl: `data:${mimeType};base64,${data}`,
         }));
-        onOptimisticMessage?.(item.text, optimisticImages.length > 0 ? optimisticImages : undefined);
+        const payloadFiles: AgentFile[] = item.files.map(({ type, data, mimeType, name }) => ({
+          type,
+          data,
+          mimeType,
+          name,
+        }));
+        const optimisticFiles: UserFileRef[] = item.files.map(({ name, mimeType, data }) => ({
+          hash: "",
+          name,
+          path: name,
+          size: Math.floor((data.length * 3) / 4),
+          mimeType,
+        }));
+        onOptimisticMessage?.(
+          item.text,
+          optimisticImages.length > 0 ? optimisticImages : undefined,
+          optimisticFiles.length > 0 ? optimisticFiles : undefined,
+        );
         try {
-          await api.followUp(agentId, item.text, payloadImages.length > 0 ? payloadImages : undefined);
+          await api.followUp(
+            agentId,
+            item.text,
+            payloadImages.length > 0 ? payloadImages : undefined,
+            payloadFiles.length > 0 ? payloadFiles : undefined,
+          );
         } catch (cause) {
           const failedIndex = pending.indexOf(item);
           setQueue((current) => [...pending.slice(failedIndex), ...current]);
@@ -1315,32 +1379,47 @@ function AgentComposerInner({
     })();
   }, [idle, stopping, busy, queue, agentId, api, onOptimisticMessage, setBusy]);
 
-  const addImages = async (files: FileList | File[] | null) => {
+  const readAsBase64 = (file: File): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result ?? "");
+        const comma = result.indexOf(",");
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+      reader.readAsDataURL(file);
+    });
+
+  const isSupportedImage = (mimeType: string): boolean =>
+    /^image\/(png|jpeg|gif|webp)$/.test(mimeType);
+
+  /** One attach path for everything (button + drag-drop): supported images
+   *  ride as model API blocks, all other files land in the shared
+   *  attachment cache and are referenced by path in the same message. */
+  const addAttachments = async (files: FileList | File[] | null) => {
     if (!files) return;
-    let reserved = 0;
+    const selected = Array.from(files);
+    const imageCandidates = selected.filter((file) => {
+      const normalized = file.type === "image/jpg" ? "image/jpeg" : file.type;
+      return isSupportedImage(normalized) && file.size <= MAX_AGENT_IMAGE_DATA_BYTES;
+    });
+    const fileCandidates = selected.filter((file) => !imageCandidates.includes(file));
+    let reservedImages = 0;
+    let reservedFiles = 0;
     try {
-      const selected = Array.from(files);
-      if (selected.length + reservedImageCount.current > MAX_AGENT_IMAGES)
+      if (imageCandidates.length + reservedImageCount.current > MAX_AGENT_IMAGES)
         throw new Error(`Attach at most ${MAX_AGENT_IMAGES} images`);
-      reservedImageCount.current += selected.length;
-      reserved = selected.length;
-      const attachments = await Promise.all(
-        selected.map(async (file) => {
-          let mimeType = file.type;
-          if (mimeType === "image/jpg") mimeType = "image/jpeg";
-          if (!mimeType.match(/^image\/(png|jpeg|gif|webp)$/))
-            throw new Error(`${file.name} is not a supported image`);
-          if (file.size > MAX_AGENT_IMAGE_DATA_BYTES) throw new Error(`${file.name} is too large`);
-          const base64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const result = String(reader.result ?? "");
-              const comma = result.indexOf(",");
-              resolve(comma >= 0 ? result.slice(comma + 1) : result);
-            };
-            reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-            reader.readAsDataURL(file);
-          });
+      if (fileCandidates.length + reservedFileCount.current + uploadFiles.length > MAX_AGENT_FILES)
+        throw new Error(`Attach at most ${MAX_AGENT_FILES} files`);
+      reservedImageCount.current += imageCandidates.length;
+      reservedFileCount.current += fileCandidates.length;
+      reservedImages = imageCandidates.length;
+      reservedFiles = fileCandidates.length;
+      const imageAttachments = await Promise.all(
+        imageCandidates.map(async (file) => {
+          const mimeType = file.type === "image/jpg" ? "image/jpeg" : file.type;
+          const base64 = await readAsBase64(file);
           return {
             type: "image" as const,
             data: base64,
@@ -1349,24 +1428,46 @@ function AgentComposerInner({
           };
         })
       );
+      const fileAttachments: AgentFile[] = await Promise.all(
+        fileCandidates.map(async (file) => {
+          if (file.size > MAX_AGENT_FILE_DATA_BYTES) throw new Error(`${file.name} is too large`);
+          if (!file.name.trim()) throw new Error("File is missing a name");
+          const base64 = await readAsBase64(file);
+          return {
+            type: "file" as const,
+            data: base64,
+            mimeType: file.type || "application/octet-stream",
+            name: file.name,
+          };
+        })
+      );
       setImages((current) => {
         const available = MAX_AGENT_IMAGES - current.length;
-        if (attachments.length > available) {
-          reservedImageCount.current -= attachments.length;
+        if (imageAttachments.length > available) {
+          reservedImageCount.current -= imageAttachments.length;
           return current;
         }
-        return [...current, ...attachments];
+        return [...current, ...imageAttachments];
+      });
+      setUploadFiles((current) => {
+        const available = MAX_AGENT_FILES - current.length;
+        if (fileAttachments.length > available) {
+          reservedFileCount.current -= fileAttachments.length;
+          return current;
+        }
+        return [...current, ...fileAttachments];
       });
       setComposerError("");
     } catch (cause) {
-      reservedImageCount.current -= reserved;
-      setComposerError(cause instanceof Error ? cause.message : "Unable to attach image");
+      reservedImageCount.current -= reservedImages;
+      reservedFileCount.current -= reservedFiles;
+      setComposerError(cause instanceof Error ? cause.message : "Unable to attach file");
     }
   };
 
   useEffect(() => {
     if (!attachFilesRef) return;
-    attachFilesRef.current = addImages;
+    attachFilesRef.current = addAttachments;
     return () => {
       attachFilesRef.current = null;
     };
@@ -1512,17 +1613,37 @@ function AgentComposerInner({
             ))}
           </div>
         )}
+        {uploadFiles.length > 0 && (
+          <div className="attachment-list" aria-label="Attached files">
+            {uploadFiles.map((file) => (
+              <div key={`${file.name}:${file.data.length}`} className="attachment-chip">
+                <span className="attachment-file-icon" aria-hidden="true">📎</span>
+                <span className="attachment-name">{file.name}</span>
+                <button
+                  type="button"
+                  className="attachment-remove"
+                  onClick={() => {
+                    setUploadFiles((current) => current.filter((item) => item !== file));
+                    reservedFileCount.current -= 1;
+                  }}
+                  aria-label={`Remove ${file.name}`}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="composer-toolbar">
           <div className="composer-toolbar-left">
-            <label className="composer-attach-btn" title="Attach image" aria-label="Attach image">
+            <label className="composer-attach-btn" title="Attach file or image" aria-label="Attach file or image">
               <Plus size={14} aria-hidden="true" />
               <input
                 type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
                 multiple
                 disabled={stopping}
                 onChange={(event) => {
-                  void addImages(event.target.files);
+                  void addAttachments(event.target.files);
                   event.currentTarget.value = "";
                 }}
               />
@@ -1656,7 +1777,7 @@ function AgentComposerInner({
                 size="xs"
                 className="send-btn"
                 onClick={() => send("prompt")}
-                disabled={busy || (!draft.trim() && images.length === 0)}
+                disabled={busy || (!draft.trim() && images.length === 0 && uploadFiles.length === 0)}
               >
                 {isMobileComposer ? "Send" : "Send ↵"}
               </Button>
@@ -1783,6 +1904,9 @@ export const TimelineRow = memo(function TimelineRow({
           <p>{renderFileRefs(item.text)}</p>
           {item.images && item.images.length > 0 && (
             <UserImageStrip agentId={agentId} api={api} images={item.images} />
+          )}
+          {item.files && item.files.length > 0 && (
+            <UserFileStrip agentId={agentId} api={api} files={item.files} />
           )}
         </div>
       </div>

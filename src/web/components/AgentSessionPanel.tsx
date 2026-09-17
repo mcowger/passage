@@ -282,8 +282,8 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       onRefresh={async () => { await load(); }}
       onModelChanged={updateAgent}
       onArchive={() => Promise.resolve()}
-      onOptimisticMessage={(message, images) => {
-        setHistory((current) => addOptimisticUserMessage(current, message, images));
+      onOptimisticMessage={(message, images, files) => {
+        setHistory((current) => addOptimisticUserMessage(current, message, images, files));
       }}
       previewHistory={previewHistory}
       hasMoreHistory={nextBefore !== undefined}

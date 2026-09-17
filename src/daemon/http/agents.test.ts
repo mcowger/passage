@@ -189,6 +189,40 @@ describe("agent HTTP API", () => {
     expect((await app.fetch(request(`/api/agents/${agentId}/images/${"0".repeat(64)}`))).status).toBe(404);
   });
 
+  test("prompt with files journals refs, serves the bytes, and rejects bad uploads", async () => {
+    const { app } = await fixture();
+    const created = await json(await app.fetch(request("/api/workspaces/workspace-1/agents", { method: "POST", body: "{}" })));
+    const agentId = String(created.id);
+    const data = Buffer.from("col1,col2\n1,2\n").toString("base64");
+    const sent = await app.fetch(request(`/api/agents/${agentId}/prompt`, {
+      method: "POST",
+      body: JSON.stringify({ message: "Analyze", files: [{ type: "file", name: "data.csv", data, mimeType: "text/csv" }] }),
+    }));
+    expect(sent.status).toBe(202);
+
+    const history = await json(await app.fetch(request(`/api/agents/${agentId}/history`)));
+    const userRow = (history.history as { timeline: Array<{ kind: string; files?: Array<{ hash: string; name: string; path: string; size: number; mimeType: string }> }> }).timeline.find((row) => row.kind === "user");
+    expect(userRow?.files).toHaveLength(1);
+    expect(userRow?.files?.[0]).toMatchObject({ name: "data.csv", mimeType: "text/csv" });
+    const hash = String(userRow?.files?.[0]?.hash);
+    expect(hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(String(userRow?.files?.[0]?.path)).toContain(hash);
+
+    const served = await app.fetch(request(`/api/agents/${agentId}/files/${hash}`));
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("text/csv");
+    expect(served.headers.get("content-disposition")).toContain('filename="data.csv"');
+    expect(Buffer.from(await served.arrayBuffer()).toString("base64")).toBe(data);
+
+    expect((await app.fetch(request(`/api/agents/${agentId}/files/not-a-hash`))).status).toBe(400);
+    expect((await app.fetch(request(`/api/agents/${agentId}/files/${"0".repeat(64)}`))).status).toBe(404);
+    const invalid = await app.fetch(request(`/api/agents/${agentId}/prompt`, {
+      method: "POST",
+      body: JSON.stringify({ message: "Bad", files: [{ type: "file", name: "x.txt", data: "not-base64!", mimeType: "text/plain" }] }),
+    }));
+    expect(invalid.status).toBe(400);
+  });
+
   test("handles extension UI responses", async () => {
     const { app } = await fixture();
     const created = await json(await app.fetch(request("/api/workspaces/workspace-1/agents", { method: "POST", body: "{}" })));

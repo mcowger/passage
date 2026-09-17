@@ -14,7 +14,7 @@ import { terminalSummarySchema, type CreateTerminalInput, type TerminalSummary }
 import { workspaceLayoutSchema, type WorkspaceLayout } from "../shared/domain/layout.ts";
 import { workspaceSettingsSchema, type WorkspaceSettings } from "../shared/domain/settings.ts";
 import { themePackSchema, fontPackSchema, toolRendererPackSchema, type ThemePack, type FontPack, type ToolRendererPack } from "../shared/domain/customization.ts";
-import type { AgentImage } from "../shared/protocol/agents.ts";
+import type { AgentFile, AgentImage } from "../shared/protocol/agents.ts";
 import { z } from "zod";
 import { filesSearchResponseSchema, directorySuggestResponseSchema } from "../shared/protocol/workspace.ts";
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
@@ -239,10 +239,11 @@ export function createWorkspaceApi(
       return agentHistoryResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/history?${query}`));
     },
     async startAgent(id: string): Promise<AgentSummary> { return agentSummarySchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/start`, { method: "POST" })); },
-    async prompt(id: string, message: string, images?: AgentImage[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/prompt`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}) }) })); },
-    async steer(id: string, message: string, images?: AgentImage[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/steer`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}) }) })); },
-    async followUp(id: string, message: string, images?: AgentImage[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/follow-up`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}) }) })); },
+    async prompt(id: string, message: string, images?: AgentImage[], files?: AgentFile[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/prompt`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}), ...(files?.length ? { files } : {}) }) })); },
+    async steer(id: string, message: string, images?: AgentImage[], files?: AgentFile[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/steer`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}), ...(files?.length ? { files } : {}) }) })); },
+    async followUp(id: string, message: string, images?: AgentImage[], files?: AgentFile[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/follow-up`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}), ...(files?.length ? { files } : {}) }) })); },
     imageUrl(id: string, hash: string): string { return `/api/agents/${encodeURIComponent(id)}/images/${encodeURIComponent(hash)}`; },
+    fileUrl(id: string, hash: string): string { return `/api/agents/${encodeURIComponent(id)}/files/${encodeURIComponent(hash)}`; },
     async abort(id: string) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/abort`, { method: "POST" })); },
     async compact(id: string, customInstructions?: string) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/compact`, { method: "POST", body: JSON.stringify(customInstructions ? { customInstructions } : {}) })); },
     async searchFiles(workspaceId: string, q: string, limit = 20) {

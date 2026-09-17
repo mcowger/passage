@@ -1,9 +1,9 @@
 import { mkdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { agentCapabilitiesSchema, type AgentHistory, type AgentStatus, type TimelineItem, type UserImageRef } from "../../shared/domain/agents.ts";
-import { ImageCache } from "./images.ts";
+import { agentCapabilitiesSchema, type AgentHistory, type AgentStatus, type TimelineItem, type UserFileRef, type UserImageRef } from "../../shared/domain/agents.ts";
+import { AttachmentCache, safeAttachmentContentType, withFileRefs } from "./attachments.ts";
 import { getSlashCommands, piCommandsToSlashCommands } from "./slash-commands.ts";
-import { agentImageSchema, type AgentImage } from "../../shared/protocol/agents.ts";
+import { agentFileSchema, agentImageSchema, type AgentFile, type AgentImage } from "../../shared/protocol/agents.ts";
 import { pageHistory, readPiHistory, type HistoryPage } from "./history/index.ts";
 import { TranscriptState, truncateRowForWire } from "./transcript/index.ts";
 import {
@@ -129,7 +129,7 @@ export class AgentService {
   private readonly listLimit: number;
   private readonly pi: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
   private readonly sessionsRoot: string;
-  private readonly imageCache: ImageCache;
+  private readonly attachmentCache: AttachmentCache;
   private readonly abortTimeoutMs: number;
   private readonly onWorkspaceGitChanged?: (workspaceId: string) => void;
 
@@ -140,8 +140,8 @@ export class AgentService {
       manager?: PiRpcManager;
       listLimit?: number;
       abortTimeoutMs?: number;
-      imageCacheRoot?: string;
-      imageCacheBytes?: number;
+      attachmentCacheRoot?: string;
+      attachmentCacheBytes?: number;
       pi?: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
       /** Called (never-throw) when an agent run likely mutated its workspace's
        *  Git state, so the daemon can invalidate subscribed Git views. */
@@ -159,9 +159,9 @@ export class AgentService {
     this.listLimit = options.listLimit ?? MAX_LIST;
     this.pi = options.pi ?? {};
     this.sessionsRoot = resolve(options.sessionsRoot);
-    this.imageCache = new ImageCache(
-      options.imageCacheRoot ?? join(resolve(options.sessionsRoot), "..", "image-cache"),
-      options.imageCacheBytes,
+    this.attachmentCache = new AttachmentCache(
+      options.attachmentCacheRoot ?? join(resolve(options.sessionsRoot), "..", "attachment-cache"),
+      options.attachmentCacheBytes,
     );
     this.abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_ABORT_TIMEOUT_MS;
     this.onWorkspaceGitChanged = options.onWorkspaceGitChanged;
@@ -288,7 +288,7 @@ export class AgentService {
     }
   }
 
-  async prompt(agentId: string, text: string, images?: AgentImage[]): Promise<void> {
+  async prompt(agentId: string, text: string, images?: AgentImage[], files?: AgentFile[]): Promise<void> {
     this.validateMessage(text);
     const agent = this.requireAgent(agentId);
     this.rejectWhileStopping(agent);
@@ -296,13 +296,18 @@ export class AgentService {
       throw new AgentError("invalid-input", "agent is active; use steer or follow-up, or wait for cancellation");
     }
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
-    const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.imageCache.store(image))) : undefined;
+    const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.attachmentCache.storeImage(image))) : undefined;
+    const fileRefs = await this.storeUploads(agentId, files);
     const process = await this.ensureProcess(agentId);
     this.beginRun(agentId);
-    await this.appendUserRow(agentId, text, imageRefs);
+    // The transcript journals the original text plus file metadata; the
+    // Pi-bound message carries the same text with file path references
+    // folded in (same turn — a separate message confuses models). Files
+    // never travel as model API blocks, only images do.
+    await this.appendUserRow(agentId, text, imageRefs, fileRefs);
     this.updateStatus(agentId, "running", "status", process.generation);
     try {
-      await process.request({ type: "prompt", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
+      await process.request({ type: "prompt", message: withFileRefs(text, fileRefs), ...(validatedImages?.length ? { images: validatedImages } : {}) });
     } catch (cause) {
       logger("agent").error("Agent prompt failed", { event: "agent.prompt_failed", agentId, generation: process.generation, ...errorFields(cause) });
       this.updateStatus(agentId, "error", "attention", process.generation, String(cause));
@@ -310,24 +315,26 @@ export class AgentService {
     }
   }
 
-  async steer(agentId: string, text: string, images?: AgentImage[]): Promise<void> {
+  async steer(agentId: string, text: string, images?: AgentImage[], files?: AgentFile[]): Promise<void> {
     this.validateMessage(text);
     this.rejectWhileStopping(this.requireAgent(agentId));
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
-    const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.imageCache.store(image))) : undefined;
+    const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.attachmentCache.storeImage(image))) : undefined;
+    const fileRefs = await this.storeUploads(agentId, files);
     const process = await this.ensureProcess(agentId);
-    await this.appendUserRow(agentId, text, imageRefs);
-    await process.request({ type: "steer", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
+    await this.appendUserRow(agentId, text, imageRefs, fileRefs);
+    await process.request({ type: "steer", message: withFileRefs(text, fileRefs), ...(validatedImages?.length ? { images: validatedImages } : {}) });
   }
 
-  async followUp(agentId: string, text: string, images?: AgentImage[]): Promise<void> {
+  async followUp(agentId: string, text: string, images?: AgentImage[], files?: AgentFile[]): Promise<void> {
     this.validateMessage(text);
     this.rejectWhileStopping(this.requireAgent(agentId));
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
-    const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.imageCache.store(image))) : undefined;
+    const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.attachmentCache.storeImage(image))) : undefined;
+    const fileRefs = await this.storeUploads(agentId, files);
     const process = await this.ensureProcess(agentId);
-    await this.appendUserRow(agentId, text, imageRefs);
-    await process.request({ type: "follow_up", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
+    await this.appendUserRow(agentId, text, imageRefs, fileRefs);
+    await process.request({ type: "follow_up", message: withFileRefs(text, fileRefs), ...(validatedImages?.length ? { images: validatedImages } : {}) });
   }
 
   async abort(agentId: string): Promise<void> {
@@ -877,17 +884,34 @@ export class AgentService {
     this.emit({ agentId, type: "row_upsert", status, payload: { row: truncateRowForWire(row) } });
   }
 
-  private async appendUserRow(agentId: string, text: string, images?: UserImageRef[]): Promise<void> {
+  private async appendUserRow(agentId: string, text: string, images?: UserImageRef[], files?: UserFileRef[]): Promise<void> {
     const state = await this.getTranscript(agentId);
-    this.emitRowUpsert(agentId, state.addUserMessage(text, images));
+    this.emitRowUpsert(agentId, state.addUserMessage(text, images, files));
   }
 
-  /** Raw bytes for one cached upload, for the image download route. Touches the entry for LRU. */
+  /** Validates and writes file uploads into the shared attachment cache. */
+  private async storeUploads(agentId: string, files?: AgentFile[]): Promise<UserFileRef[] | undefined> {
+    this.requireAgent(agentId);
+    if (!files?.length) return undefined;
+    const validated = files.map((file) => agentFileSchema.parse(file));
+    const refs = await Promise.all(validated.map((file) => this.attachmentCache.storeFile(file)));
+    return refs.length ? refs : undefined;
+  }
+
+  /** Raw bytes for one cached image, for the image download route. Touches the entry for LRU. */
   async imageBytes(agentId: string, hash: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
     this.requireAgent(agentId);
-    const cached = await this.imageCache.read(hash);
-    if (!cached) throw new AgentError("not-found", "image not found");
-    return cached;
+    const cached = await this.attachmentCache.read(hash);
+    if (!cached || cached.kind !== "image") throw new AgentError("not-found", "image not found");
+    return { bytes: cached.bytes, mimeType: cached.mimeType };
+  }
+
+  /** Raw bytes for one cached file attachment, for the file download route. Touches the entry for LRU. */
+  async fileBytes(agentId: string, hash: string): Promise<{ bytes: Uint8Array; mimeType: string; filename: string }> {
+    this.requireAgent(agentId);
+    const cached = await this.attachmentCache.read(hash);
+    if (!cached || cached.kind !== "file") throw new AgentError("not-found", "file not found");
+    return { bytes: cached.bytes, mimeType: safeAttachmentContentType(cached.mimeType), filename: cached.name };
   }
 
   /** Bumped whenever a `TranscriptState` instance is replaced outright (cold

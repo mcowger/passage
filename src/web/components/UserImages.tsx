@@ -1,6 +1,34 @@
 import { useEffect, useState } from "react";
-import type { UserImageRef } from "../../shared/domain/agents.ts";
+import type { UserFileRef, UserImageRef } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
+
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** File chips for one user message's uploaded files; links to the download route. */
+export function UserFileStrip({ agentId, api, files }: { agentId: string; api: WorkspaceApi; files: UserFileRef[] }) {
+  if (files.length === 0) return null;
+  return (
+    <div className="user-file-strip" aria-label={`${files.length} attached file${files.length > 1 ? "s" : ""}`}>
+      {files.map((file) => (
+        <a
+          key={`${file.hash || file.name}:${file.size}`}
+          className="user-file-chip"
+          href={file.hash ? api.fileUrl(agentId, file.hash) : undefined}
+          download={file.name}
+          title={`${file.path} (${formatFileSize(file.size)}, ${file.mimeType})`}
+        >
+          <span className="user-file-icon" aria-hidden="true">📎</span>
+          <code className="user-file-name">{file.name}</code>
+          <span className="user-file-size">{formatFileSize(file.size)}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
 
 export function userImageSrc(api: WorkspaceApi, agentId: string, image: UserImageRef): string {
   return image.previewUrl ?? api.imageUrl(agentId, image.hash);

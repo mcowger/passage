@@ -100,8 +100,27 @@ const userImageRefSchema = z.object({
   previewUrl: z.string().min(1).max(8 * 1024 * 1024).optional(),
 }).strict();
 
+export type UserFileRef = {
+  /** SHA-256 hex of the file bytes; addresses the daemon attachment cache. */
+  hash: string;
+  /** Original filename for display and download. */
+  name: string;
+  /** Absolute filesystem path so the agent's tools can read the file. */
+  path: string;
+  size: number;
+  mimeType: string;
+};
+
+const userFileRefSchema = z.object({
+  hash: z.string().regex(/^[a-f0-9]{64}$/),
+  name: z.string().min(1).max(256),
+  path: z.string().min(1).max(4096),
+  size: z.number().int().nonnegative(),
+  mimeType: z.string().min(1).max(256),
+}).strict();
+
 export type TimelineItem =
-  | { kind: "user"; id: string; text: string; images?: UserImageRef[]; lazy?: boolean; error?: string }
+  | { kind: "user"; id: string; text: string; images?: UserImageRef[]; files?: UserFileRef[]; lazy?: boolean; error?: string }
   | { kind: "assistant" | "thinking"; id: string; text: string; lazy?: boolean; error?: string }
   | ToolActivity
   | { kind: "summary"; id: string; summaryType: "compaction" | "branch"; text: string }
@@ -160,7 +179,7 @@ const toolActivitySchema = z.object({
 }).strict();
 
 const timelineItemSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("user"), id: z.string(), text: z.string(), images: z.array(userImageRefSchema).max(2).optional(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("user"), id: z.string(), text: z.string(), images: z.array(userImageRefSchema).max(2).optional(), files: z.array(userFileRefSchema).max(5).optional(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
   z.object({ kind: z.enum(["assistant", "thinking"]), id: z.string(), text: z.string(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
   toolActivitySchema,
   z.object({ kind: z.literal("summary"), id: z.string(), summaryType: z.enum(["compaction", "branch"]), text: z.string() }).strict(),

@@ -5,7 +5,7 @@ import { createQueuedFollowUp, formatDuration, formatThinkingPreview, isComposer
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 
-const stubApi = { imageUrl: (id: string, hash: string) => `/api/agents/${id}/images/${hash}` } as unknown as WorkspaceApi;
+const stubApi = { imageUrl: (id: string, hash: string) => `/api/agents/${id}/images/${hash}`, fileUrl: (id: string, hash: string) => `/api/agents/${id}/files/${hash}` } as unknown as WorkspaceApi;
 
 const modelOptions: AgentCapabilities["models"] = [
   {
@@ -218,6 +218,24 @@ describe("TimelineRow", () => {
     expect(html).toContain("user-image-strip");
     expect(html).toContain(`/api/agents/agt-test/images/${"a".repeat(64)}`);
     expect(html).toContain("shot.png");
+  });
+
+  test("renders uploaded file chips in the user message card", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
+        item: {
+          kind: "user",
+          id: "u-files",
+          text: "Analyze",
+          files: [{ hash: `${"b".repeat(64)}`, name: "data.csv", path: `/cache/${"b".repeat(64)}`, size: 12, mimeType: "text/csv" }],
+        },
+      }),
+    );
+    expect(html).toContain("user-file-strip");
+    expect(html).toContain(`/api/agents/agt-test/files/${"b".repeat(64)}`);
+    expect(html).toContain("data.csv");
   });
 
   test("renders optimistic previews from data URLs", () => {

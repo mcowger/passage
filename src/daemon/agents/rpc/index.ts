@@ -2,6 +2,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { LfJsonlParser } from "../../../shared/jsonl/parser.ts";
 import {
+  MAX_AGENT_FILES,
+  MAX_AGENT_FILE_DATA_CHARACTERS,
   MAX_AGENT_IMAGE_DATA_CHARACTERS,
   MAX_AGENT_IMAGES,
   MAX_AGENT_MESSAGE_BYTES,
@@ -50,7 +52,7 @@ export type PiRpcOptions = {
 };
 
 const encoder = new TextEncoder();
-const MAX_PI_COMMAND_BYTES = MAX_AGENT_IMAGES * MAX_AGENT_IMAGE_DATA_CHARACTERS + MAX_AGENT_MESSAGE_BYTES + 4096;
+const MAX_PI_COMMAND_BYTES = MAX_AGENT_IMAGES * MAX_AGENT_IMAGE_DATA_CHARACTERS + MAX_AGENT_FILES * MAX_AGENT_FILE_DATA_CHARACTERS + MAX_AGENT_MESSAGE_BYTES + 65536;
 const asError = (value: unknown) => value instanceof Error ? value : new Error(String(value));
 
 function piAgentDirectory(): string {

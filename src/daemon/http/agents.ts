@@ -4,10 +4,11 @@ import { agentCapabilitiesSchema, agentStatusSchema, type AgentSummary } from ".
 import { opaqueDomainIdSchema } from "../../shared/domain/workspaces.ts";
 import { AgentError, type AgentService, type AgentSnapshot } from "../agents/service.ts";
 import { HttpInputError, readJsonBody } from "./body.ts";
-import { MAX_AGENT_IMAGE_DATA_CHARACTERS, MAX_AGENT_IMAGES, MAX_AGENT_MESSAGE_BYTES, agentImageSchema } from "../../shared/protocol/agents.ts";
-import { IMAGE_HASH_PATTERN } from "../agents/images.ts";
+import { MAX_AGENT_FILE_DATA_CHARACTERS, MAX_AGENT_FILES, MAX_AGENT_IMAGE_DATA_CHARACTERS, MAX_AGENT_IMAGES, MAX_AGENT_MESSAGE_BYTES, agentFileSchema, agentImageSchema } from "../../shared/protocol/agents.ts";
+import { ATTACHMENT_HASH_PATTERN } from "../agents/attachments.ts";
 
-const MAX_AGENT_JSON_BYTES = MAX_AGENT_IMAGES * MAX_AGENT_IMAGE_DATA_CHARACTERS + MAX_AGENT_MESSAGE_BYTES + 4096;
+const MAX_AGENT_JSON_BYTES = MAX_AGENT_IMAGES * MAX_AGENT_IMAGE_DATA_CHARACTERS + MAX_AGENT_FILES * MAX_AGENT_FILE_DATA_CHARACTERS + MAX_AGENT_MESSAGE_BYTES + 4096;
+const MAX_AGENT_CREATE_BYTES = 4096;
 const MAX_AGENT_SETTING_BODY_BYTES = 1024;
 const MAX_AGENT_TITLE_LENGTH = 256;
 const MAX_AGENT_SETTING_LENGTH = 256;
@@ -16,6 +17,7 @@ const createInput = z.object({ title: z.string().trim().min(1).max(MAX_AGENT_TIT
 const messageInput = z.object({
   message: z.string().min(1).max(MAX_AGENT_MESSAGE_BYTES),
   images: z.array(agentImageSchema).max(MAX_AGENT_IMAGES).optional(),
+  files: z.array(agentFileSchema).max(MAX_AGENT_FILES).optional(),
 }).strict();
 const modelInput = z.object({ provider: z.string().trim().min(1).max(MAX_AGENT_SETTING_LENGTH), modelId: z.string().trim().min(1).max(MAX_AGENT_SETTING_LENGTH) }).strict();
 const thinkingInput = z.object({ level: z.string().trim().min(1).max(MAX_AGENT_SETTING_LENGTH) }).strict();
@@ -91,7 +93,7 @@ export function createAgentRoutes(service: AgentService): Hono {
   });
   app.post("/api/workspaces/:workspaceId/agents", async (context) => {
     try {
-      const input = createInput.parse(await readJsonBody(context.req.raw, MAX_AGENT_JSON_BYTES));
+      const input = createInput.parse(await readJsonBody(context.req.raw, MAX_AGENT_CREATE_BYTES));
       return success(publicSnapshot(await service.create(id(context.req.param("workspaceId")), input.title)), 201);
     } catch (error) { return errorResponse(error); }
   });
@@ -112,11 +114,27 @@ export function createAgentRoutes(service: AgentService): Hono {
     try {
       const agentId = id(context.req.param("agentId"));
       const hash = context.req.param("hash") ?? "";
-      if (!IMAGE_HASH_PATTERN.test(hash)) throw new AgentError("invalid-input", "invalid image hash");
+      if (!ATTACHMENT_HASH_PATTERN.test(hash)) throw new AgentError("invalid-input", "invalid image hash");
       const { bytes, mimeType } = await service.imageBytes(agentId, hash);
       return new Response(bytes as BodyInit, {
         status: 200,
         headers: { "Content-Type": mimeType, "Cache-Control": "public, max-age=31536000, immutable" },
+      });
+    } catch (error) { return errorResponse(error); }
+  });
+  app.get("/api/agents/:agentId/files/:hash", async (context) => {
+    try {
+      const agentId = id(context.req.param("agentId"));
+      const hash = context.req.param("hash") ?? "";
+      if (!ATTACHMENT_HASH_PATTERN.test(hash)) throw new AgentError("invalid-input", "invalid file hash");
+      const { bytes, mimeType, filename } = await service.fileBytes(agentId, hash);
+      return new Response(bytes as BodyInit, {
+        status: 200,
+        headers: {
+          "Content-Type": mimeType,
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Cache-Control": "public, max-age=31536000, immutable",
+        },
       });
     } catch (error) { return errorResponse(error); }
   });
@@ -133,7 +151,7 @@ export function createAgentRoutes(service: AgentService): Hono {
     try {
       const input = messageInput.parse(await readJsonBody(context.req.raw, MAX_AGENT_JSON_BYTES));
       const agentId = id(context.req.param("agentId") ?? "");
-      await service[operation](agentId, input.message, input.images);
+      await service[operation](agentId, input.message, input.images, input.files);
       return success(acceptedResponseSchema.parse({ accepted: true }), 202);
     } catch (error) { return errorResponse(error); }
   };

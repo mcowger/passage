@@ -5,6 +5,9 @@ export const MAX_AGENT_SETTING_LENGTH = 256;
 export const MAX_AGENT_IMAGES = 2;
 export const MAX_AGENT_IMAGE_DATA_BYTES = 2 * 1024 * 1024;
 export const MAX_AGENT_IMAGE_DATA_CHARACTERS = Math.ceil(MAX_AGENT_IMAGE_DATA_BYTES * 4 / 3);
+export const MAX_AGENT_FILES = 5;
+export const MAX_AGENT_FILE_DATA_BYTES = 10 * 1024 * 1024;
+export const MAX_AGENT_FILE_DATA_CHARACTERS = Math.ceil(MAX_AGENT_FILE_DATA_BYTES * 4 / 3);
 const agentIdSchema = z.string().min(1).max(256);
 
 export const agentImageSchema = z.object({
@@ -21,6 +24,20 @@ export const agentImageSchema = z.object({
 }).strict();
 export type AgentImage = z.infer<typeof agentImageSchema>;
 
+export const agentFileSchema = z.object({
+  type: z.literal("file"),
+  name: z.string().min(1).max(256),
+  data: z.string().min(1).max(MAX_AGENT_FILE_DATA_CHARACTERS).regex(/^[A-Za-z0-9+/]+={0,2}$/).refine((data) => {
+    try {
+      return atob(data).length <= MAX_AGENT_FILE_DATA_BYTES;
+    } catch {
+      return false;
+    }
+  }, "File data exceeds byte limit"),
+  mimeType: z.string().min(1).max(256),
+}).strict();
+export type AgentFile = z.infer<typeof agentFileSchema>;
+
 export const agentSubscriptionPayloadSchema = z.object({
   agentId: agentIdSchema,
   afterSequence: z.number().int().nonnegative().safe().default(0),
@@ -32,6 +49,7 @@ export const agentMessagePayloadSchema = z.object({
   agentId: agentIdSchema,
   message: z.string().min(1).max(MAX_AGENT_MESSAGE_BYTES),
   images: z.array(agentImageSchema).max(MAX_AGENT_IMAGES).optional(),
+  files: z.array(agentFileSchema).max(MAX_AGENT_FILES).optional(),
 }).strict();
 
 export const agentModelPayloadSchema = z.object({
