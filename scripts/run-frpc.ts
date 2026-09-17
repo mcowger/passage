@@ -13,8 +13,10 @@
 // - FRPC_SUBDOMAIN_HOST (optional public hostname suffix)
 //
 // The tunneled target port resolves from PASEO_SERVICE_DEV_PORT (the dev
-// peer service's port, injected by Paseo), then PORT, then the stable
-// worktree port selected by scripts/dev-port.ts for manual runs.
+// peer service's port, injected by Paseo), then the stable worktree port
+// selected by scripts/dev-port.ts for manual runs. The generic PORT variable
+// is deliberately ignored so an inherited value from another worktree cannot
+// point the tunnel at the wrong dev server.
 
 import { basename } from "node:path";
 import { spawn } from "node:child_process";
@@ -38,14 +40,13 @@ export function resolveLocalPort(
 	env: Record<string, string | undefined>,
 	cwd = process.cwd(),
 ): { port: number } | { error: string } {
-	for (const key of ["PASEO_SERVICE_DEV_PORT", "PORT"] as const) {
-		const raw = env[key]?.trim();
-		if (raw === undefined || raw === "") continue;
+	const raw = env.PASEO_SERVICE_DEV_PORT?.trim();
+	if (raw !== undefined && raw !== "") {
 		const parsed = Number(raw);
 		if (Number.isInteger(parsed) && parsed > 0 && parsed < 65536) {
 			return { port: parsed };
 		}
-		return { error: `invalid ${key}=${JSON.stringify(raw)}` };
+		return { error: `invalid PASEO_SERVICE_DEV_PORT=${JSON.stringify(raw)}` };
 	}
 	return { port: stableBasePort(worktreeRoot(resolveWorktreeDir(env, cwd))) };
 }

@@ -30,15 +30,18 @@ describe("dev-port", () => {
     );
   });
 
-  test("explicit PORT wins over PASEO_PORT, PASEO_PORT wins over hash", () => {
-    expect(resolveStart({ PORT: "3333", PASEO_PORT: "3456" })).toBe(3333);
-    expect(resolveStart({ PASEO_PORT: "3456" })).toBe(3456);
-    expect(resolveStart({ PORT: "9999" })).toBe(9999);
+  test("ambient PORT is ignored so worktrees stay isolated", () => {
+    // A PORT inherited from another worktree must not override the hash.
+    const hashPort = resolveStart({});
+    expect(resolveStart({ PORT: "3333" })).toBe(hashPort);
+    expect(resolveStart({ PORT: "9999" })).toBe(hashPort);
   });
 
-  test("invalid PORT falls through to PASEO_PORT, then hash", () => {
-    expect(resolveStart({ PORT: "nope", PASEO_PORT: "3456" })).toBe(3456);
-    const fallback = resolveStart({});
+  test("PASEO_PORT wins over the hash; invalid PASEO_PORT falls through", () => {
+    expect(resolveStart({ PASEO_PORT: "3456" })).toBe(3456);
+    expect(resolveStart({ PORT: "3333", PASEO_PORT: "3456" })).toBe(3456);
+    const fallback = resolveStart({ PASEO_PORT: "nope" });
+    expect(fallback).toBe(resolveStart({}));
     expect(fallback).toBeGreaterThanOrEqual(3000);
     expect(fallback).toBeLessThanOrEqual(3999);
   });
@@ -106,7 +109,7 @@ describe("dev-port", () => {
       const proc = Bun.spawn(["bun", "scripts/dev-port.ts"], {
         env: {
           ...process.env,
-          PORT: String(port),
+          PASEO_PORT: String(port),
           PASSAGE_PID_FILE: `/tmp/dev-port-test-nonexistent-${Date.now()}.pid`,
         },
         stdout: "pipe",

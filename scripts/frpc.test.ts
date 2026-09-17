@@ -85,11 +85,14 @@ describe("frpc helpers", () => {
 });
 
 describe("run-frpc port resolution", () => {
-	it("prefers the Paseo dev peer port over PORT", () => {
+	it("prefers the Paseo dev peer port and ignores ambient PORT", () => {
 		expect(
 			resolveLocalPort({ PASEO_SERVICE_DEV_PORT: "3456", PORT: "3333" }),
 		).toEqual({ port: 3456 });
-		expect(resolveLocalPort({ PORT: "3333" })).toEqual({ port: 3333 });
+		const cwd = process.cwd();
+		expect(resolveLocalPort({ PORT: "3333" }, cwd)).toEqual({
+			port: stableBasePort(worktreeRoot(cwd)),
+		});
 	});
 
 	it("rejects invalid ports", () => {
