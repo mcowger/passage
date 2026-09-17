@@ -23,6 +23,7 @@ import { DiffPanel } from "./components/DiffPanel.tsx";
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
 import { TerminalTabPane } from "./components/TerminalTabPane.tsx";
 import { PreviewPanel } from "./components/PreviewPanel.tsx";
+import { WorkspaceOverview } from "./components/WorkspaceOverview.tsx";
 import { NewWorktreeModal } from "./components/NewWorktreeModal.tsx";
 import { DirectoryPicker } from "./components/DirectoryPicker.tsx";
 import { SplitCanvas } from "./components/SplitCanvas.tsx";
@@ -179,6 +180,8 @@ function App() {
   const [openEditorPath, setOpenEditorPath] = useState<string>();
   const [openDiffPath, setOpenDiffPath] = useState<string>();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [agentsLoaded, setAgentsLoaded] = useState(false);
+  const [autoAgentPending, setAutoAgentPending] = useState(false);
   const [terminals, setTerminals] = useState<TerminalSummary[]>([]);
   const [terminalsLoaded, setTerminalsLoaded] = useState(false);
   const [previews, setPreviews] = useState<WebPreview[]>([]);
@@ -204,6 +207,7 @@ function App() {
   const [dirtySaveBusy, setDirtySaveBusy] = useState(false);
   const editorSaveHandlers = useRef(new Map<string, () => Promise<boolean>>());
   const pendingSetupRuns = useRef(new Map<string, string>());
+  const autoAgentAttempted = useRef(new Set<string>());
   const announcedSetupRuns = useRef(new Set<string>());
 
   const agentsLoadGeneration = useRef(0);
@@ -286,9 +290,11 @@ function App() {
         if (current && next.some((agent) => agent.id === current)) return current;
         return selectFirst ? next[0]?.id : undefined;
       });
+      setAgentsLoaded(true);
     } catch (cause) {
       if (generation !== agentsLoadGeneration.current) return;
       setAgentError(cause instanceof Error ? cause.message : "Unable to load agents");
+      setAgentsLoaded(true);
     }
   }, [api]);
 
@@ -356,6 +362,8 @@ function App() {
     agentsLoadGeneration.current += 1;
     terminalsLoadGeneration.current += 1;
     setAgents([]);
+    setAgentsLoaded(false);
+    setAutoAgentPending(false);
     setTerminals([]);
     setTerminalsLoaded(false);
     setPreviews([]);
@@ -690,6 +698,40 @@ function App() {
     } catch {}
   };
 
+  // Opening a workspace with no agents starts one right away so a new
+  // workspace lands on a live agent session instead of an empty canvas.
+  // Attempted once per workspace so closing the last agent does not loop.
+  useEffect(() => {
+    if (!selectedWorkspaceId || !workspace || workspace.archivedAt) return;
+    if (!agentsLoaded || !layout) return;
+    if (agents.length > 0 || autoAgentPending) return;
+    if (autoAgentAttempted.current.has(selectedWorkspaceId)) return;
+    autoAgentAttempted.current.add(selectedWorkspaceId);
+    setAutoAgentPending(true);
+    setAgentError("");
+    void api.createAgent(selectedWorkspaceId)
+      .then((created) => {
+        setAgents((current) => (current.some((a) => a.id === created.id) ? current : [...current, created]));
+        setSelectedAgentId(created.id);
+        setActiveTab("agent");
+        setLayout((current) => {
+          if (!current) return current;
+          const group = getFirstTabGroup(current.root);
+          if (!group) return current;
+          const tab: PaneTab = { id: `agent-${created.id}`, kind: "agent", title: created.title, targetId: created.id };
+          const nextLayout = { ...current, root: addTabToGroup(current.root, group.id, tab) };
+          void api.saveLayout(selectedWorkspaceId, nextLayout).catch(() => {});
+          return nextLayout;
+        });
+      })
+      .catch((cause) => {
+        setAgentError(cause instanceof Error ? cause.message : "Unable to create agent");
+      })
+      .finally(() => {
+        setAutoAgentPending(false);
+      });
+  }, [selectedWorkspaceId, workspace, agentsLoaded, layout, agents.length, autoAgentPending, api]);
+
   const handleSelectPreview = (id: string) => {
     setSelectedPreviewId(id);
     setActiveTab("preview");
@@ -850,12 +892,28 @@ function App() {
             previewHistory={previewEnabled ? previewHistory ?? undefined : undefined}
           />
         ) : tab.kind === "overview" ? (
-          <div className="empty flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto">
-            <span className="empty-icon text-3xl mb-2 text-primary" aria-hidden="true">◈</span>
-            <h1 className="text-lg font-semibold text-foreground mb-1">Workspace Overview</h1>
-            <p className="text-xs text-muted-foreground mb-4">Start a new agent session to begin a conversation.</p>
-            {!workspace.archivedAt && <Button size="xs" onClick={() => void createAgent()}>+ Start Agent Session</Button>}
-          </div>
+          <WorkspaceOverview
+            workspace={workspace}
+            project={project}
+            agents={agents}
+            terminals={terminals}
+            previews={previews}
+            isGitWorkspace={isGitWorkspace}
+            agentError={agentError}
+            autoStartingAgent={autoAgentPending}
+            onNewAgent={() => void createAgent()}
+            onOpenAgent={handleSelectAgent}
+            onNewTerminal={() => void createTerminal()}
+            onOpenFiles={() => {
+              setActiveTab("explorer");
+              openPaneTab({ id: `explorer-${workspace.id}`, kind: "explorer", title: "Files" });
+            }}
+            onOpenChanges={() => {
+              setActiveTab("changes");
+              openPaneTab({ id: `changes-${workspace.id}`, kind: "changes", title: "Changes" });
+            }}
+            onNewPreview={() => void createPreview()}
+          />
         ) : (
           <div className="empty flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto">
             <span className="empty-icon text-3xl mb-2 text-primary" aria-hidden="true">◈</span>
