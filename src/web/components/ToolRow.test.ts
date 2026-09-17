@@ -65,6 +65,21 @@ describe("getToolSummary", () => {
     expect(summary.subtitle).toBe("src/web/App.tsx");
     expect(summary.isPath).toBe(true);
   });
+
+  test("identifies find tool summary with pattern", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-find",
+      kind: "tool",
+      name: "find",
+      input: { pattern: "src/web/components/*.tsx" },
+      status: "complete",
+      significant: true,
+    };
+    const summary = getToolSummary(item);
+    expect(summary.icon).toBe("search");
+    expect(summary.title).toBe("Find Files");
+    expect(summary.subtitle).toBe("src/web/components/*.tsx");
+  });
 });
 
 describe("ToolRow component", () => {
@@ -164,6 +179,30 @@ describe("ToolRow component", () => {
     expect(html).toContain("index.ts");
     expect(html).toContain("http.ts");
     expect(html).toContain("main.tsx");
+  });
+
+  test("renders find results grouped by directory like list", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-find",
+      kind: "tool",
+      name: "find",
+      input: { pattern: "src/web/components/*.tsx" },
+      result:
+        "src/web/components/AgentPanel.tsx\nsrc/web/components/AgentSessionPanel.tsx\nsrc/web/components/ChangesPanel.tsx",
+      status: "complete",
+      significant: true,
+    };
+
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(ToolRow, { item })
+    );
+
+    expect(html).toContain("tool-glob-results");
+    expect(html).toContain("Found 3 files across 1 directory");
+    expect(html).toContain("src/web/components/");
+    expect(html).toContain("AgentPanel.tsx");
+    expect(html).toContain("AgentSessionPanel.tsx");
+    expect(html).toContain("ChangesPanel.tsx");
   });
 
   test("renders structured grep matches", () => {

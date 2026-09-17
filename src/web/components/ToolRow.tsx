@@ -55,13 +55,14 @@ export function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): T
       return fileToolSummary("write", "Write File", input);
     case "bash":
       return { icon: "command", title: "Shell Command", subtitle: String(input.command ?? "") };
+    case "find":
     case "glob":
     case "ls":
     case "list":
     case "list_dir":
       return {
         icon: "search",
-        title: item.name === "glob" ? "Find Files" : "List Directory",
+        title: item.name === "glob" || item.name === "find" ? "Find Files" : "List Directory",
         subtitle: String(input.pattern ?? input.path ?? ""),
         isPath: !input.pattern && Boolean(input.path),
       };
@@ -319,7 +320,7 @@ function ToolOutputDisplay({
       : extractToolResultText(rawResult) ?? "";
   const isBash = item.name === "bash";
   const isRead = item.name === "read" || item.name === "readFile";
-  const isGlobLike = item.name === "glob" || item.name === "ls" || item.name === "list" || item.name === "list_dir";
+  const isGlobLike = item.name === "find" || item.name === "glob" || item.name === "ls" || item.name === "list" || item.name === "list_dir";
   const normalizedBash = useMemo(() => (isBash ? renderTerminalOutput(result) : result), [isBash, result]);
   const jsonCheck = useMemo(() => tryParseJson(normalizedBash), [normalizedBash]);
   const grepData = useMemo(() => (item.name === "grep" ? parseGrepOutput(result) : null), [item.name, result]);
@@ -451,7 +452,7 @@ function ToolExpandedBodyInner({
   const input = (item.input ?? {}) as Record<string, unknown>;
   const isBash = item.name === "bash";
   const isRead = item.name === "read" || item.name === "readFile";
-  const isSearchLike = item.name === "grep" || item.name === "glob" || item.name === "ls" || item.name === "list";
+  const isSearchLike = item.name === "grep" || item.name === "find" || item.name === "glob" || item.name === "ls" || item.name === "list" || item.name === "list_dir";
   const command = isBash
     ? typeof input.command === "string"
       ? input.command
@@ -561,7 +562,7 @@ function ToolExpandedBodyInner({
 export const ToolExpandedBody = memo(ToolExpandedBodyInner);
 
 function isGlobLikeSearch(name: string): boolean {
-  return name === "glob" || name === "ls" || name === "list" || name === "list_dir";
+  return name === "find" || name === "glob" || name === "ls" || name === "list" || name === "list_dir";
 }
 
 export interface ToolRowProps {
