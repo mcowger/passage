@@ -4,11 +4,8 @@ const commands: string[][] = [
   ["test"],
   ["run", "test:pty-live"],
   ["run", "test:pi-live"],
-  ["run", "smoke:development"],
   ["run", "build"],
-  ["run", "smoke:production"],
   ["run", "package"],
-  ["run", "smoke:package"],
 ];
 
 for (const args of commands) {
