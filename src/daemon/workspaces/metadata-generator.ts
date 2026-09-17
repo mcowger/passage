@@ -29,9 +29,9 @@ export function deterministicSlugSuggestion(purpose: string): WorktreeSuggestion
 }
 
 export class MetadataGenerator {
-  constructor(private readonly timeoutMs = process.env.PASSAGE_PI_LIVE === "1" ? 6000 : 1000) {}
+  constructor(private readonly timeoutMs = 10_000) {}
 
-  async suggest(purpose: string, cwd?: string): Promise<WorktreeSuggestion> {
+  async suggest(purpose: string, cwd?: string, model?: string): Promise<WorktreeSuggestion> {
     const fallback = deterministicSlugSuggestion(purpose);
     if (!purpose.trim()) return fallback;
 
@@ -45,7 +45,7 @@ export class MetadataGenerator {
         "- folder: collision-safe directory name like 'short-name--wk_abcd' (lowercase, alphanumeric with hyphens/underscores, ending with a short suffix)",
       ].join("\n");
 
-      const args = ["pi", "--mode", "rpc"];
+      const args = ["pi", "--mode", "rpc", ...(model?.trim() ? ["--model", model.trim()] : [])];
       const proc = Bun.spawn(args, {
         cwd: cwd && cwd !== "" ? cwd : undefined,
         env: { ...process.env, NO_COLOR: "1" },

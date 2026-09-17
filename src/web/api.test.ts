@@ -75,6 +75,16 @@ test("client rejects malformed successful command responses", async () => {
   await expect(api.prompt("agent-1", "Hello")).rejects.toThrow();
 });
 
+test("client lists pi models for settings", async () => {
+  const api = createWorkspaceApi(async (input) => {
+    expect(String(input)).toBe("/api/models");
+    return Response.json({ models: [{ provider: "test", id: "model", name: "Model", api: "test", input: ["text"], authenticated: true, supportedThinkingLevels: ["low"] }] });
+  });
+  const models = await api.listModels();
+  expect(models).toHaveLength(1);
+  expect(models[0]).toMatchObject({ provider: "test", id: "model" });
+});
+
 test("client requests worktree operations and suggestions", async () => {
   const calls: Request[] = [];
   const api = createWorkspaceApi(async (input, init) => {

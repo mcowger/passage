@@ -11,6 +11,7 @@ export const workspaceSettingsSchema = z.object({
   editorWordWrap: z.boolean().default(true),
   editorTabSize: z.number().int().min(1).max(8).default(2),
   terminalFontSize: z.number().int().min(9).max(32).default(13),
+  suggestModel: z.string().trim().max(256).default(""),
 });
 export type WorkspaceSettings = z.infer<typeof workspaceSettingsSchema>;
 
@@ -23,4 +24,5 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   editorWordWrap: true,
   editorTabSize: 2,
   terminalFontSize: 13,
+  suggestModel: "",
 };
