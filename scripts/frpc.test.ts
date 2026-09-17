@@ -7,6 +7,7 @@ import {
 	repositoryNameFromRemote,
 	sanitizeDnsLabel,
 } from "./frpc";
+import { stableBasePort, worktreeRoot } from "./dev-port";
 import { resolveLocalPort, resolveWorktreeDir } from "./run-frpc";
 
 describe("frpc helpers", () => {
@@ -89,13 +90,16 @@ describe("run-frpc port resolution", () => {
 		expect(resolveLocalPort({ PORT: "3333" })).toEqual({ port: 3333 });
 	});
 
-	it("rejects invalid ports and reports a missing target", () => {
+	it("rejects invalid ports", () => {
 		expect(resolveLocalPort({ PASEO_SERVICE_DEV_PORT: "nope" })).toEqual({
 			error: 'invalid PASEO_SERVICE_DEV_PORT="nope"',
 		});
-		expect(resolveLocalPort({})).toEqual({
-			error:
-				"no local port: start the dev service first (PASEO_SERVICE_DEV_PORT) or set PORT",
+	});
+
+	it("falls back to the stable port from dev-port", () => {
+		const cwd = process.cwd();
+		expect(resolveLocalPort({}, cwd)).toEqual({
+			port: stableBasePort(worktreeRoot(cwd)),
 		});
 	});
 

@@ -10,6 +10,7 @@
     "dev": "PORT=\"$(bun scripts/dev-port.ts)\" bun --watch run src/daemon/index.ts",
     "dev:stop": "bun scripts/dev-stop.ts",
     "stop": "bun scripts/dev-stop.ts",
+    "frpc": "bun run scripts/run-frpc.ts",
     "build": "bun run scripts/build.ts",
     "start": "bun --cwd dist run ./index.js",
     "package": "bun run scripts/build.ts --compile",

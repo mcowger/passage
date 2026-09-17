@@ -1,4 +1,4 @@
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { realpath, rm } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { workspaceSchema, type Workspace } from "../../shared/domain/workspaces.ts";
 import { GitService } from "./git.ts";
@@ -6,7 +6,6 @@ import type { MetadataRepositories } from "../metadata/repositories.ts";
 import { MetadataGenerator, type WorktreeSuggestion } from "./metadata-generator.ts";
 
 export class WorktreeError extends Error { constructor(public readonly code: string, message: string) { super(message); } }
-export type WorktreeMarker = { formatVersion: 1; workspaceId: string; markerId: string; expectedCheckout: string; ref: string };
 export type DiscoveredWorktree = {
   path: string;
   branchRef: string | null;
@@ -50,26 +49,117 @@ export class WorktreeService {
       args = ["worktree", "add", destination, ref];
     }
     const result = await this.command(project.canonicalRootPath, args); if (result.code !== 0) throw this.mapGitFailure(result.stderr, ref, Boolean(options?.createBranch));
-    const workspaceId = `wsp_${id()}`, markerId = id(), markerPath = join(destination, markerName);
-    const marker: WorktreeMarker = { formatVersion: 1, workspaceId, markerId, expectedCheckout: destination, ref };
-    try { await writeFile(markerPath, JSON.stringify(marker), { flag: "wx" }); const discovered = await this.git.discover(destination); const workspace = workspaceSchema.parse({ id: workspaceId, projectId, kind: "worktree", cwd: destination, checkoutRoot: discovered.checkoutRoot, mainRepositoryRoot: discovered.mainCheckoutRoot, branchRef: discovered.branchRef, displayLabel: label, locationId, ownershipState: "owned", markerId, markerPath, repairDetail: null, archivedAt: null }); this.repositories.workspaces.save(workspace); return workspace; } catch (error) { const repair = workspaceSchema.parse({ id: workspaceId, projectId, kind: "worktree", cwd: destination, checkoutRoot: destination, mainRepositoryRoot: project.canonicalRootPath, branchRef: ref, displayLabel: label, locationId, ownershipState: "repair", markerId, markerPath, repairDetail: String(error), archivedAt: null }); try { this.repositories.workspaces.save(repair); } catch {} throw error; }
+    const workspaceId = `wsp_${id()}`;
+    try {
+      const discovered = await this.git.discover(destination);
+      const workspace = workspaceSchema.parse({
+        id: workspaceId,
+        projectId,
+        kind: "worktree",
+        cwd: destination,
+        checkoutRoot: discovered.checkoutRoot,
+        mainRepositoryRoot: discovered.mainCheckoutRoot,
+        branchRef: discovered.branchRef,
+        displayLabel: label,
+        locationId,
+        ownershipState: "owned",
+        markerId: null,
+        markerPath: null,
+        repairDetail: null,
+        archivedAt: null,
+      });
+      this.repositories.workspaces.save(workspace);
+      return workspace;
+    } catch (error) {
+      const repair = workspaceSchema.parse({
+        id: workspaceId,
+        projectId,
+        kind: "worktree",
+        cwd: destination,
+        checkoutRoot: destination,
+        mainRepositoryRoot: project.canonicalRootPath,
+        branchRef: ref,
+        displayLabel: label,
+        locationId,
+        ownershipState: "repair",
+        markerId: null,
+        markerPath: null,
+        repairDetail: String(error),
+        archivedAt: null,
+      });
+      try { this.repositories.workspaces.save(repair); } catch {}
+      throw error;
+    }
   }
-  async reconcile(workspaceId: string): Promise<Workspace> { const w = this.repositories.workspaces.get(workspaceId); if (!w) throw new WorktreeError("not-found", "Workspace not found"); if (w.kind !== "worktree" || !w.markerPath) return workspaceSchema.parse(w); const marker = JSON.parse(await readFile(w.markerPath, "utf8")) as WorktreeMarker; if (marker.workspaceId !== w.id || marker.markerId !== w.markerId || marker.expectedCheckout !== w.cwd) throw new WorktreeError("marker-mismatch", "Ownership marker mismatch"); const fixed = workspaceSchema.parse({ ...w, ownershipState: "owned", repairDetail: null }); this.repositories.workspaces.save(fixed); return fixed; }
+  async reconcile(workspaceId: string): Promise<Workspace> {
+    const w = this.repositories.workspaces.get(workspaceId);
+    if (!w) throw new WorktreeError("not-found", "Workspace not found");
+    if (w.kind !== "worktree") return workspaceSchema.parse(w);
+    const project = this.repositories.projects.get(w.projectId);
+    if (!project) throw new WorktreeError("invalid-project", "Active project required");
+    const canonicalPath = await realpath(w.cwd).catch(() => {
+      throw new WorktreeError("not-found", "Worktree directory not found");
+    });
+    const discovered = await this.git.discover(canonicalPath).catch(() => {
+      throw new WorktreeError("invalid-git", "Not a valid Git worktree");
+    });
+    const projectRoot = resolve(project.canonicalRootPath);
+    const gitMain = discovered.mainCheckoutRoot ? resolve(discovered.mainCheckoutRoot) : null;
+    const gitRepo = resolve(discovered.repositoryRoot);
+    if (gitMain !== projectRoot && gitRepo !== projectRoot) {
+      throw new WorktreeError("wrong-project", "Worktree belongs to a different repository");
+    }
+    const fixed = workspaceSchema.parse({
+      ...w,
+      cwd: canonicalPath,
+      checkoutRoot: discovered.checkoutRoot,
+      mainRepositoryRoot: discovered.mainCheckoutRoot,
+      branchRef: discovered.branchRef,
+      ownershipState: "owned",
+      repairDetail: null,
+    });
+    this.repositories.workspaces.save(fixed);
+    return fixed;
+  }
   async remove(workspaceId: string, force = false): Promise<void> {
     const w = this.repositories.workspaces.get(workspaceId);
-    if (!w || w.kind !== "worktree") throw new WorktreeError("not-found", "Workspace not found");
-    if (w.ownershipState === "owned") {
-      if (!w.markerPath || !w.markerId) throw new WorktreeError("not-owned", "Passage ownership record required");
-      const marker = JSON.parse(await readFile(w.markerPath, "utf8")) as WorktreeMarker;
-      if (marker.workspaceId !== w.id || marker.markerId !== w.markerId || marker.expectedCheckout !== w.cwd) {
-        throw new WorktreeError("marker-mismatch", "Ownership marker mismatch");
+    if (!w) {
+      if (force) return;
+      throw new WorktreeError("not-found", "Workspace not found");
+    }
+    if (w.kind === "main-checkout" || resolve(w.cwd) === resolve(w.mainRepositoryRoot ?? "")) {
+      throw new WorktreeError("main-checkout", "Main checkout cannot be removed");
+    }
+    if (w.kind !== "worktree") {
+      throw new WorktreeError("not-found", "Workspace not found");
+    }
+    if (w.ownershipState !== "owned" && !force) {
+      throw new WorktreeError("not-owned", "Passage ownership record required");
+    }
+    if (w.markerPath) {
+      await rm(w.markerPath, { force: true }).catch(() => {});
+    }
+    await rm(join(w.cwd, markerName), { force: true }).catch(() => {});
+    const cwdExists = await realpath(w.cwd).then(() => true, () => false);
+    if (!cwdExists) {
+      await this.command(w.mainRepositoryRoot ?? process.cwd(), ["worktree", "prune"]).catch(() => {});
+      this.repositories.workspaces.delete(workspaceId);
+      return;
+    }
+    const status = await this.git.status(w.cwd).catch((err) => {
+      if (force) return { dirty: false, conflicted: false };
+      throw new WorktreeError("git-failed", err instanceof Error ? err.message : "Failed to get git status");
+    });
+    if ((status.dirty || status.conflicted) && !force) throw new WorktreeError("force-required", "Explicit force confirmation required");
+    const result = await this.command(w.mainRepositoryRoot ?? w.cwd, ["worktree", "remove", ...(force ? ["--force"] : []), w.cwd]);
+    if (result.code !== 0) {
+      if (force) {
+        await rm(w.cwd, { recursive: true, force: true }).catch(() => {});
+        await this.command(w.mainRepositoryRoot ?? process.cwd(), ["worktree", "prune"]).catch(() => {});
+      } else {
+        throw this.mapGitFailure(result.stderr, w.cwd, false);
       }
     }
-    const status = await this.git.status(w.cwd);
-    if ((status.dirty || status.conflicted) && !force) throw new WorktreeError("force-required", "Explicit force confirmation required");
-    if (resolve(w.cwd) === resolve(w.mainRepositoryRoot ?? "")) throw new WorktreeError("main-checkout", "Main checkout cannot be removed");
-    const result = await this.command(w.mainRepositoryRoot ?? w.cwd, ["worktree", "remove", ...(force ? ["--force"] : []), w.cwd]);
-    if (result.code !== 0) throw this.mapGitFailure(result.stderr, w.cwd, false);
     this.repositories.workspaces.delete(workspaceId);
   }
 
@@ -139,22 +229,10 @@ export class WorktreeService {
       return workspaceSchema.parse(existing);
     }
 
-    const markerPath = join(canonicalPath, markerName);
-    let markerId: string | null = null;
-    let hasMarker = false;
-    try {
-      const raw = await readFile(markerPath, "utf8");
-      const parsed = JSON.parse(raw) as WorktreeMarker;
-      if (parsed.markerId) {
-        markerId = parsed.markerId;
-        hasMarker = true;
-      }
-    } catch {}
-
     const workspaceId = `wsp_${id()}`;
     const isMain = resolve(canonicalPath) === projectRoot;
     const kind = isMain ? "main-checkout" : "worktree";
-    const ownershipState = hasMarker ? "owned" : isMain ? "main-checkout" : "unowned";
+    const ownershipState = isMain ? "main-checkout" : "unowned";
     const displayLabel = input.label?.trim() || gitDiscovery.branchRef || canonicalPath.split("/").pop() || "worktree";
 
     const workspace = workspaceSchema.parse({
@@ -168,8 +246,8 @@ export class WorktreeService {
       displayLabel,
       locationId: null,
       ownershipState,
-      markerId: hasMarker ? markerId : null,
-      markerPath: hasMarker ? markerPath : null,
+      markerId: null,
+      markerPath: null,
       repairDetail: null,
       archivedAt: null,
     });

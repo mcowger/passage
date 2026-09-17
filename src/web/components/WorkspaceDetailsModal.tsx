@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Project, Workspace } from "../../shared/domain/workspaces.ts";
-import type { WorkspaceApi } from "../api.ts";
+import { friendlyApiError, type WorkspaceApi } from "../api.ts";
 import { CopyValueButton } from "./CopyValueButton.tsx";
 import { Button } from "./ui/button.tsx";
 import { Input } from "./ui/input.tsx";
@@ -69,7 +69,7 @@ export function WorkspaceDetailsModal({
         onClose();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update workspace");
+      setError(friendlyApiError(err, "Failed to update workspace"));
     } finally {
       setBusy(false);
     }
@@ -82,7 +82,7 @@ export function WorkspaceDetailsModal({
       await api.repairWorktree(workspace.id);
       await onRefresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to repair worktree");
+      setError(friendlyApiError(err, "Failed to repair worktree"));
     } finally {
       setBusy(false);
     }
@@ -97,7 +97,7 @@ export function WorkspaceDetailsModal({
       await onRefresh();
       onClose();
     } catch (err) {
-      setRemoveError(err instanceof Error ? err.message : "Failed to remove worktree");
+      setRemoveError(friendlyApiError(err, "Failed to remove worktree"));
     } finally {
       setBusy(false);
     }
@@ -161,11 +161,11 @@ export function WorkspaceDetailsModal({
                 </Button>
               </form>
             ) : (
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-muted-foreground min-w-0 break-words">
                   {isWorktree ? "Worktree" : "Workspace"} label: <b>{workspace.displayLabel}</b>
                 </span>
-                <Button size="xs" variant="outline" onClick={() => setEditing(true)}>
+                <Button size="xs" variant="outline" className="shrink-0" onClick={() => setEditing(true)}>
                   Rename
                 </Button>
               </div>

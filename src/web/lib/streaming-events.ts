@@ -49,11 +49,20 @@ export function applyStreamEvent(
       }
     : base.usage;
 
-  // Streaming usage is per-message, so its total is the live context size.
+  // Streaming usage is per-message, so its total is the live context size. Pi's
+  // `message_update` records may report zero until the provider finalizes usage,
+  // so only a positive count may replace the last known context occupancy.
+  // Overwriting it with zero would flicker/unmount the composer context pill on
+  // every response.
+  const streamedContextTokens = usage
+    ? usage.totalTokens && usage.totalTokens > 0
+      ? usage.totalTokens
+      : (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)
+    : 0;
   base = {
     ...base,
     usage: nextUsage,
-    contextUsage: usage?.totalTokens !== undefined ? { tokens: usage.totalTokens } : base.contextUsage,
+    contextUsage: streamedContextTokens > 0 ? { tokens: streamedContextTokens } : base.contextUsage,
   };
 
   const event = payload.assistantMessageEvent as

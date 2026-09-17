@@ -312,4 +312,50 @@ describe("applyStreamEvent", () => {
       error: "bash: nonexistent_cmd: command not found",
     });
   });
+
+  test("keeps last known context occupancy when streaming usage is zero", () => {
+    let history = createHistory();
+    history.contextUsage = { tokens: 525 };
+
+    // message_update usage may remain zero until the provider finalizes usage.
+    history = applyStreamEvent(history, {
+      type: "event",
+      payload: {
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+        assistantMessageEvent: { type: "text_delta", delta: "Writing" },
+      },
+    })!;
+
+    expect(history.contextUsage).toEqual({ tokens: 525 });
+  });
+
+  test("updates context occupancy from positive streaming usage", () => {
+    let history = createHistory();
+    history.contextUsage = { tokens: 525 };
+
+    history = applyStreamEvent(history, {
+      type: "event",
+      payload: {
+        usage: { input: 600, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 600 },
+        assistantMessageEvent: { type: "text_delta", delta: "Done" },
+      },
+    })!;
+
+    expect(history.contextUsage).toEqual({ tokens: 600 });
+  });
+
+  test("derives context occupancy when streaming usage omits totalTokens", () => {
+    let history = createHistory();
+    history.contextUsage = { tokens: 525 };
+
+    history = applyStreamEvent(history, {
+      type: "event",
+      payload: {
+        usage: { input: 10, output: 5, cacheRead: 100, cacheWrite: 0 },
+        assistantMessageEvent: { type: "text_delta", delta: "Done" },
+      },
+    })!;
+
+    expect(history.contextUsage).toEqual({ tokens: 115 });
+  });
 });
