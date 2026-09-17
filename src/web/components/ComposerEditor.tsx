@@ -12,6 +12,38 @@ import { FileTypeIcon } from "./FileTypeIcon.tsx";
 const FILE_REF_PATTERN = /@`([^`\n]{1,4096})`/g;
 const BLOCK_ELEMENTS = new Set(["DIV", "P", "LI"]);
 
+/** Narrow-viewport breakpoint matching the app shell's mobile layout (`src/web/main.tsx`). */
+export const MOBILE_COMPOSER_WIDTH_PX = 768;
+
+export function isMobileComposerViewport(viewportWidth: number, coarsePointer: boolean): boolean {
+  return viewportWidth < MOBILE_COMPOSER_WIDTH_PX || coarsePointer;
+}
+
+export function currentViewportIsMobileComposer(): boolean {
+  if (typeof window === "undefined") return false;
+  let coarsePointer = false;
+  try {
+    coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  } catch {
+    coarsePointer = false;
+  }
+  return isMobileComposerViewport(window.innerWidth, coarsePointer);
+}
+
+/**
+ * Desktop submits on Enter (Shift+Enter is the newline escape hatch).
+ * Mobile virtual keyboards expose Enter as the newline key, so plain Enter
+ * inserts a newline and only Cmd/Ctrl+Enter (hardware keyboard) submits.
+ */
+export function shouldSubmitOnEnter(
+  event: { shiftKey: boolean; metaKey?: boolean; ctrlKey?: boolean },
+  isMobile: boolean,
+): boolean {
+  if (event.shiftKey) return false;
+  if (isMobile) return event.metaKey === true || event.ctrlKey === true;
+  return true;
+}
+
 export type ComposerEditorHandle = {
   focus: () => void;
   setCaret: (position: number) => void;
@@ -398,6 +430,18 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
       }
     }
     if (event.key === "Enter" && event.shiftKey) {
+      event.preventDefault();
+      replaceSelection("\n");
+      return;
+    }
+    if (
+      event.key === "Enter"
+      && !event.metaKey
+      && !event.ctrlKey
+      && !shouldSubmitOnEnter(event, currentViewportIsMobileComposer())
+    ) {
+      // Mobile plain-Enter inserts a newline instead of submitting.
+      // (Desktop plain-Enter still falls through to onKeyDown to submit.)
       event.preventDefault();
       replaceSelection("\n");
       return;

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { renderComposerDraft } from "./ComposerEditor.tsx";
+import { isMobileComposerViewport, renderComposerDraft, shouldSubmitOnEnter } from "./ComposerEditor.tsx";
 
 describe("renderComposerDraft", () => {
   const html = (text: string) =>
@@ -17,5 +17,37 @@ describe("renderComposerDraft", () => {
 
   test("keeps ordinary draft text ordinary", () => {
     expect(html("hello world")).toBe("<div>hello world</div>");
+  });
+});
+
+describe("isMobileComposerViewport", () => {
+  test("treats narrow viewports as mobile", () => {
+    expect(isMobileComposerViewport(767, false)).toBe(true);
+    expect(isMobileComposerViewport(768, false)).toBe(false);
+  });
+
+  test("treats coarse pointers as mobile even on wide viewports", () => {
+    expect(isMobileComposerViewport(1280, true)).toBe(true);
+    expect(isMobileComposerViewport(1280, false)).toBe(false);
+  });
+});
+
+describe("shouldSubmitOnEnter", () => {
+  test("desktop plain Enter submits", () => {
+    expect(shouldSubmitOnEnter({ shiftKey: false }, false)).toBe(true);
+  });
+
+  test("Shift+Enter never submits", () => {
+    expect(shouldSubmitOnEnter({ shiftKey: true }, false)).toBe(false);
+    expect(shouldSubmitOnEnter({ shiftKey: true }, true)).toBe(false);
+  });
+
+  test("mobile plain Enter does not submit", () => {
+    expect(shouldSubmitOnEnter({ shiftKey: false }, true)).toBe(false);
+  });
+
+  test("mobile Cmd/Ctrl+Enter still submits for hardware keyboards", () => {
+    expect(shouldSubmitOnEnter({ shiftKey: false, metaKey: true }, true)).toBe(true);
+    expect(shouldSubmitOnEnter({ shiftKey: false, ctrlKey: true }, true)).toBe(true);
   });
 });

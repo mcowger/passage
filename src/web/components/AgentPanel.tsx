@@ -14,7 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from "./ui/alert.tsx";
 import { ToolRow } from "./ToolRow.tsx";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { ComposerAutocomplete, COMPOSER_SUGGESTION_LIST_ID } from "./ComposerAutocomplete.tsx";
-import { ComposerEditor, type ComposerEditorHandle } from "./ComposerEditor.tsx";
+import { ComposerEditor, currentViewportIsMobileComposer, type ComposerEditorHandle } from "./ComposerEditor.tsx";
 import {
   applyFileInsert,
   applySlashInsert,
@@ -681,6 +681,7 @@ function AgentComposerInner({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [caret, setCaret] = useState<number | null>(null);
   const [compactConfirmOpen, setCompactConfirmOpen] = useState(false);
+  const [isMobileComposer, setIsMobileComposer] = useState(() => currentViewportIsMobileComposer());
   const autocomplete = useComposerTrigger({ draft, caret, workspaceId, api });
   const slashCommands = useMemo(
     () => capabilities?.slashCommands ?? [],
@@ -764,6 +765,17 @@ function AgentComposerInner({
   useEffect(() => {
     composerInputRef.current?.focus();
   }, [agentId]);
+
+  useEffect(() => {
+    const update = () => setIsMobileComposer(currentViewportIsMobileComposer());
+    window.addEventListener("resize", update);
+    const coarseQuery = window.matchMedia?.("(pointer: coarse)");
+    coarseQuery?.addEventListener?.("change", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      coarseQuery?.removeEventListener?.("change", update);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -971,6 +983,9 @@ function AgentComposerInner({
               }
             }
             if (event.key === "Enter" && !event.shiftKey) {
+              // Mobile plain-Enter inserts a newline (handled in
+              // ComposerEditor); only Cmd/Ctrl+Enter submits there.
+              if (currentViewportIsMobileComposer() && !event.metaKey && !event.ctrlKey) return;
               event.preventDefault();
               if (stopping) return;
               if (running) send("steer");
@@ -981,7 +996,9 @@ function AgentComposerInner({
             stopping
               ? "Stopping agent execution…"
               : running
-              ? "Steer now (Enter) or queue follow-up…"
+              ? isMobileComposer
+                ? "Steer now (⌘+Enter) or queue follow-up…"
+                : "Steer now (Enter) or queue follow-up…"
               : "@ for files; / for commands"
           }
           disabled={stopping}
@@ -1126,7 +1143,7 @@ function AgentComposerInner({
                   className="composer-action-btn"
                   onClick={() => send("steer")}
                   disabled={busy}
-                  title="Steer now (Enter)"
+                  title={isMobileComposer ? "Steer now (⌘+Enter)" : "Steer now (Enter)"}
                   aria-label="Steer now"
                 >
                   <ArrowUp size={14} aria-hidden="true" />
@@ -1161,7 +1178,7 @@ function AgentComposerInner({
                 onClick={() => send("prompt")}
                 disabled={busy || (!draft.trim() && images.length === 0)}
               >
-                Send ↵
+                {isMobileComposer ? "Send" : "Send ↵"}
               </Button>
             )}
           </div>
