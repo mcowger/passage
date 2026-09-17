@@ -6,6 +6,7 @@ import {
   parseGrepOutput,
   parseGlobOutput,
   parseReadToolOutput,
+  extractToolResultText,
 } from "./tool-display.ts";
 
 describe("renderTerminalOutput", () => {
@@ -103,3 +104,71 @@ describe("parseReadToolOutput", () => {
     expect(parsed.truncationNotice).toContain("File has more lines");
   });
 });
+
+describe("extractToolResultText", () => {
+  test("returns undefined for null and undefined", () => {
+    expect(extractToolResultText(undefined)).toBeUndefined();
+    expect(extractToolResultText(null)).toBeUndefined();
+  });
+
+  test("returns string inputs untouched", () => {
+    expect(extractToolResultText("hello world")).toBe("hello world");
+    expect(extractToolResultText("")).toBe("");
+  });
+
+  test("extracts text from Pi RPC toolResult content array format", () => {
+    const piResult = {
+      content: [
+        { type: "text", text: "src/server.ts:1:import { foo } from 'bar';" },
+      ],
+      details: { truncation: null, fullOutputPath: null },
+    };
+    expect(extractToolResultText(piResult)).toBe("src/server.ts:1:import { foo } from 'bar';");
+  });
+
+  test("extracts text from multiple content blocks", () => {
+    const multiBlock = {
+      content: [
+        { type: "text", text: "line 1" },
+        { type: "text", text: "line 2" },
+      ],
+    };
+    expect(extractToolResultText(multiBlock)).toBe("line 1\nline 2");
+  });
+
+  test("extracts text when content is directly a string", () => {
+    expect(extractToolResultText({ content: "direct string" })).toBe("direct string");
+  });
+
+  test("extracts text from direct text property", () => {
+    expect(extractToolResultText({ text: "result text" })).toBe("result text");
+  });
+
+  test("extracts stdout and stderr from process output object", () => {
+    expect(extractToolResultText({ stdout: "out", stderr: "err" })).toBe("out\nerr");
+    expect(extractToolResultText({ stdout: "only out" })).toBe("only out");
+    expect(extractToolResultText({ stderr: "only err" })).toBe("only err");
+  });
+
+  test("extracts error or message properties", () => {
+    expect(extractToolResultText({ error: "Something went wrong" })).toBe("Something went wrong");
+    expect(extractToolResultText({ message: "Task completed" })).toBe("Task completed");
+  });
+
+  test("serializes generic JSON objects instead of producing [object Object]", () => {
+    const genericObj = { success: true, count: 42 };
+    const text = extractToolResultText(genericObj);
+    expect(text).not.toContain("[object Object]");
+    expect(text).toContain('"success": true');
+    expect(text).toContain('"count": 42');
+  });
+
+  test("extracts from raw array of text blocks", () => {
+    const rawArray = [
+      { type: "text", text: "block 1" },
+      { type: "text", text: "block 2" },
+    ];
+    expect(extractToolResultText(rawArray)).toBe("block 1\nblock 2");
+  });
+});
+

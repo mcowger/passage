@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { applyStreamEvent } from "./streaming-events.ts";
-import type { AgentHistory } from "../../shared/domain/agents.ts";
+import type { AgentHistory, ToolActivity } from "../../shared/domain/agents.ts";
 
 function createHistory(): AgentHistory {
   return {
@@ -158,6 +158,158 @@ describe("applyStreamEvent", () => {
       name: "bash",
       status: "complete",
       result: "file1.txt\nfile2.txt",
+    });
+  });
+
+  test("extracts text from Pi RPC object result in tool_execution_end instead of [object Object]", () => {
+    let history = createHistory();
+    history.timeline = [
+      {
+        kind: "tool",
+        id: "call_456",
+        name: "bash",
+        input: { command: "grep -rn 'port' src/" },
+        status: "running",
+        significant: true,
+      },
+    ];
+
+    // Pi RPC emits result as { content: [{ type: "text", text: "..." }], details: {...} }
+    history = applyStreamEvent(history, {
+      type: "tool_execution_end",
+      payload: {
+        toolCallId: "call_456",
+        toolName: "bash",
+        result: {
+          content: [
+            { type: "text", text: "src/server.ts:47: port: number," },
+          ],
+          details: { truncation: null, fullOutputPath: null },
+        },
+        isError: false,
+      },
+    })!;
+
+    expect(history.timeline[0]).toMatchObject({
+      kind: "tool",
+      id: "call_456",
+      name: "bash",
+      status: "complete",
+      result: "src/server.ts:47: port: number,",
+    });
+    expect((history.timeline[0] as ToolActivity).result).not.toContain("[object Object]");
+  });
+
+  test("handles tool_execution_update streaming partial results while tool is running", () => {
+    let history = createHistory();
+    history.timeline = [
+      {
+        kind: "tool",
+        id: "call_789",
+        name: "bash",
+        input: { command: "long-running-cmd" },
+        status: "running",
+        significant: true,
+      },
+    ];
+
+    history = applyStreamEvent(history, {
+      type: "tool_execution_update",
+      payload: {
+        toolCallId: "call_789",
+        toolName: "bash",
+        partialResult: {
+          content: [
+            { type: "text", text: "chunk 1\n" },
+          ],
+        },
+      },
+    })!;
+
+    expect(history.timeline[0]).toMatchObject({
+      kind: "tool",
+      id: "call_789",
+      status: "running",
+      result: "chunk 1\n",
+    });
+
+    // Second chunk accumulates
+    history = applyStreamEvent(history, {
+      type: "tool_execution_update",
+      payload: {
+        toolCallId: "call_789",
+        toolName: "bash",
+        partialResult: {
+          content: [
+            { type: "text", text: "chunk 1\nchunk 2\n" },
+          ],
+        },
+      },
+    })!;
+
+    expect(history.timeline[0]).toMatchObject({
+      kind: "tool",
+      id: "call_789",
+      status: "running",
+      result: "chunk 1\nchunk 2\n",
+    });
+
+    // tool_execution_end finalizes
+    history = applyStreamEvent(history, {
+      type: "tool_execution_end",
+      payload: {
+        toolCallId: "call_789",
+        toolName: "bash",
+        result: {
+          content: [
+            { type: "text", text: "chunk 1\nchunk 2\ndone" },
+          ],
+        },
+        isError: false,
+      },
+    })!;
+
+    expect(history.timeline[0]).toMatchObject({
+      kind: "tool",
+      id: "call_789",
+      status: "complete",
+      result: "chunk 1\nchunk 2\ndone",
+    });
+  });
+
+  test("handles tool_execution_end with isError and extracts error text", () => {
+    let history = createHistory();
+    history.timeline = [
+      {
+        kind: "tool",
+        id: "call_err",
+        name: "bash",
+        input: { command: "nonexistent_cmd" },
+        status: "running",
+        significant: true,
+      },
+    ];
+
+    history = applyStreamEvent(history, {
+      type: "tool_execution_end",
+      payload: {
+        toolCallId: "call_err",
+        toolName: "bash",
+        result: {
+          content: [
+            { type: "text", text: "bash: nonexistent_cmd: command not found" },
+          ],
+        },
+        isError: true,
+      },
+    })!;
+
+    expect(history.timeline[0]).toMatchObject({
+      kind: "tool",
+      id: "call_err",
+      status: "error",
+      result: "bash: nonexistent_cmd: command not found",
+      error: "bash: nonexistent_cmd: command not found",
     });
   });
 });

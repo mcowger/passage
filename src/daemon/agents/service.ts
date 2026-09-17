@@ -462,6 +462,7 @@ export class AgentService {
     if (event.toolName !== undefined) rawPayload.toolName = event.toolName;
     if (event.args !== undefined) rawPayload.args = event.args;
     if (event.result !== undefined) rawPayload.result = event.result;
+    if (event.partialResult !== undefined) rawPayload.partialResult = event.partialResult;
     if (event.isError !== undefined) rawPayload.isError = event.isError;
     if (event.usage !== undefined) rawPayload.usage = event.usage;
     if (event.level !== undefined) rawPayload.level = event.level;

@@ -1,5 +1,6 @@
 import type { AgentHistory, TimelineItem, ToolActivity } from "../../shared/domain/agents.ts";
 import type { JsonValue } from "../../shared/protocol/index.ts";
+import { extractToolResultText } from "./tool-display.ts";
 
 export function applyStreamEvent(
   prev: AgentHistory | undefined,
@@ -272,9 +273,47 @@ export function applyStreamEvent(
     return { ...base, timeline, usage: nextUsage };
   }
 
+  // Tool execution progress (streaming output)
+  if (type === "tool_execution_update") {
+    const rawToolCallId = String(payload.toolCallId ?? payload.id ?? "").trim();
+    const rawResult = payload.partialResult !== undefined ? payload.partialResult : payload.result;
+    const result = extractToolResultText(rawResult);
+
+    if (result !== undefined) {
+      let updated = false;
+      const timeline = base.timeline.map((item) => {
+        if (item.kind === "tool" && (item.id === rawToolCallId || (!rawToolCallId && item.status === "running"))) {
+          updated = true;
+          return {
+            ...item,
+            result,
+          };
+        }
+        return item;
+      });
+
+      if (!updated && base.timeline.length > 0) {
+        for (let i = timeline.length - 1; i >= 0; i--) {
+          const item = timeline[i];
+          if (item.kind === "tool" && item.status === "running") {
+            timeline[i] = {
+              ...item,
+              result,
+            };
+            break;
+          }
+        }
+      }
+
+      return { ...base, timeline, usage: nextUsage };
+    }
+    return { ...base, usage: nextUsage };
+  }
+
   if (type === "tool_execution_end") {
     const toolCallId = String(payload.toolCallId ?? payload.id ?? "").trim();
-    const result = payload.result !== undefined ? String(payload.result) : undefined;
+    const rawResult = payload.result !== undefined ? payload.result : payload.partialResult;
+    const result = extractToolResultText(rawResult);
     const isError = Boolean(payload.isError);
 
     let updated = false;
@@ -285,6 +324,7 @@ export function applyStreamEvent(
           ...item,
           status: (isError ? "error" : "complete") as "error" | "complete",
           ...(result !== undefined ? { result } : {}),
+          ...(isError ? { error: result || "Tool failed" } : {}),
         };
       }
       return item;
@@ -299,6 +339,7 @@ export function applyStreamEvent(
             ...item,
             status: (isError ? "error" : "complete") as "error" | "complete",
             ...(result !== undefined ? { result } : {}),
+            ...(isError ? { error: result || "Tool failed" } : {}),
           };
           break;
         }
