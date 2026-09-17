@@ -213,14 +213,12 @@ describe("Pi history projection", () => {
       line({ type: "message", id: "a3", parentId: "r3", timestamp: "t", message: { role: "assistant", content: [{ type: "text", text: "File created and verified." }] } }),
     ].join("");
     const history = parsePiJsonl(source, revision(source));
-    const activities = history.timeline.flatMap((item) => item.kind === "tool" ? [item] : item.kind === "process" ? item.activities : []);
+    const activities = history.timeline.filter((item) => item.kind === "tool");
     expect(activities.map((item) => item.name)).toEqual(["write", "bash", "read"]);
     expect(activities.every((item) => item.status === "complete")).toBe(true);
     expect(activities.map((item) => item.result)).toEqual(["Wrote LIVE_SEQUENCE.md", "?? LIVE_SEQUENCE.md", "# Live\n"]);
-    // Significant write stays prominent; bash/read group into one process row.
-    expect(history.timeline.some((item) => item.kind === "tool" && item.name === "write")).toBe(true);
-    const process = history.timeline.find((item) => item.kind === "process");
-    expect(process?.kind === "process" ? process.activities.map((item) => item.name) : []).toEqual(["bash", "read"]);
+    // Tool rows stay in chronological (journal) order -- no grouping/reordering.
+    expect(history.timeline.map((item) => item.kind)).toEqual(["user", "tool", "tool", "tool", "assistant"]);
     expect(history.timeline.at(-1)).toMatchObject({ kind: "assistant", text: "File created and verified." });
   });
 
@@ -235,7 +233,7 @@ describe("Pi history projection", () => {
       line({ type: "message", id: "r1", parentId: "a1", timestamp: "t", message: { role: "toolResult", toolCallId: "tc-1", toolName: "get_weather", content: [{ type: "text", text: "sunny" }], isError: false } }),
     ].join("");
     const history = parsePiJsonl(source, revision(source));
-    const tool = history.timeline.flatMap((item) => item.kind === "tool" ? [item] : item.kind === "process" ? item.activities : []).find((item) => item.name === "get_weather");
+    const tool = history.timeline.filter((item) => item.kind === "tool").find((item) => item.name === "get_weather");
     expect(tool).toMatchObject({ status: "complete", significant: false, result: "sunny" });
   });
 });

@@ -589,24 +589,6 @@ button.timeline-concise-badge {
 .timeline-concise-title { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--foreground); font-weight: 500; }
 .timeline-concise-badge code { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 
-/* Process Group Header */
-.timeline-row.process > summary.process-summary {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-height: 24px;
-  padding: 2px 6px;
-  cursor: pointer;
-  user-select: none;
-  font-size: 12.5px;
-  list-style: none;
-  border-radius: 5px;
-}
-.timeline-row.process > summary.process-summary::-webkit-details-marker { display: none; }
-.timeline-row.process > summary.process-summary:hover { background: var(--surface-hover); }
-.process-title { font-weight: 600; color: var(--foreground); }
-.process-count { color: var(--muted); font-size: 12px; }
-
 /* Thinking Row (Marginalia) */
 .thinking-row { margin: 1px 0; border-radius: 5px; }
 .thinking-summary {

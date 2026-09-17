@@ -1,9 +1,10 @@
 import { mkdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { agentCapabilitiesSchema, type AgentHistory, type AgentStatus } from "../../shared/domain/agents.ts";
+import { agentCapabilitiesSchema, type AgentHistory, type AgentStatus, type TimelineItem } from "../../shared/domain/agents.ts";
 import { getSlashCommands } from "./slash-commands.ts";
 import { agentImageSchema, type AgentImage } from "../../shared/protocol/agents.ts";
 import { pageHistory, readPiHistory, type HistoryPage } from "./history/index.ts";
+import { TranscriptState, truncateRowForWire } from "./transcript/index.ts";
 import {
   PiRpcManager,
   responseData,
@@ -20,6 +21,7 @@ import { errorFields, logger } from "../logging.ts";
 
 const MAX_LIST = 100;
 const MAX_LISTENERS = 64;
+const MAX_TRANSCRIPTS = 256;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_SHORT_VALUE_LENGTH = 256;
 const MAX_RUNTIME_DIAGNOSTICS = 100;
@@ -82,6 +84,10 @@ export class AgentService {
   private readonly subscriptions = new Map<string, RuntimeSubscription>();
   private readonly previousRevisions = new Map<string, AgentHistory["revision"]>();
   private readonly leaves = new Map<string, string>();
+  private readonly transcripts = new Map<string, TranscriptState>();
+  private readonly transcriptSeeds = new Map<string, Promise<TranscriptState>>();
+  private readonly transcriptEpochs = new Map<string, number>();
+  private epochCounter = Date.now();
   private readonly diagnostics = new Map<string, RuntimeDiagnostic>();
   private readonly pendingUiRequests = new Map<string, Record<string, unknown>>();
   private readonly cancellations = new Map<string, Cancellation>();
@@ -216,6 +222,7 @@ export class AgentService {
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
     const process = await this.ensureProcess(agentId);
     this.beginRun(agentId);
+    await this.appendUserRow(agentId, text);
     this.updateStatus(agentId, "running", "status", process.generation);
     try {
       await process.request({ type: "prompt", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
@@ -231,6 +238,7 @@ export class AgentService {
     this.rejectWhileStopping(this.requireAgent(agentId));
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
     const process = await this.ensureProcess(agentId);
+    await this.appendUserRow(agentId, text);
     await process.request({ type: "steer", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
   }
 
@@ -239,6 +247,7 @@ export class AgentService {
     this.rejectWhileStopping(this.requireAgent(agentId));
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
     const process = await this.ensureProcess(agentId);
+    await this.appendUserRow(agentId, text);
     await process.request({ type: "follow_up", message: text, ...(validatedImages?.length ? { images: validatedImages } : {}) });
   }
 
@@ -289,6 +298,12 @@ export class AgentService {
     this.rejectWhileStopping(this.requireAgent(agentId));
     const process = await this.ensureProcess(agentId);
     await process.request(customInstructions ? { type: "compact", customInstructions } : { type: "compact" });
+    // Compaction rewrites which journal entries are active, which invalidates
+    // every row identity the current TranscriptState was built from -- unlike
+    // every other mutation, this is a legitimate full reset, not an
+    // incremental delta. Force a fresh seed on next access and tell the
+    // client to refetch and replace its local timeline instead of merging.
+    this.resetTranscript(agentId);
   }
 
   async model(agentId: string, provider: string, modelId: string): Promise<void> {
@@ -302,6 +317,7 @@ export class AgentService {
     const process = await this.ensureProcess(agentId);
     await process.request({ type: "set_model", provider, modelId });
     this.repositories.agents.updateModelPreference(agentId, `${provider}/${modelId}`);
+    (await this.getTranscript(agentId)).setModel(provider, modelId);
   }
 
   async thinking(agentId: string, level: string): Promise<void> {
@@ -316,18 +332,39 @@ export class AgentService {
     this.repositories.agents.updateThinkingPreference(agentId, level);
   }
 
+  /** The transcript (timeline + usage/model/etc.) is served straight from
+   *  the in-memory `TranscriptState`, never a fresh file re-parse -- that is
+   *  what makes it safe to call this on every reconnect/reload without
+   *  racing the live event stream or reordering rows underneath it. A file
+   *  read only happens once, lazily, to seed a brand new instance. */
   async history(agentId: string, before?: number, limit = 100): Promise<AgentHistoryResult> {
     let agent = this.requireAgent(agentId);
     if (!agent.piSessionPath) {
       await this.reconcile(agentId, !this.cancellations.has(agentId));
       agent = this.requireAgent(agentId);
     }
-    if (!agent.piSessionPath) return { unpersisted: true, history: null };
-    const history = await readPiHistory(agent.piSessionPath, {
-      previousRevision: this.previousRevisions.get(agentId),
-      leafId: this.leaves.get(agentId),
-    });
-    this.rememberRevision(agentId, history.revision);
+    if (!agent.piSessionPath && !this.transcripts.has(agentId)) return { unpersisted: true, history: null };
+    const state = await this.getTranscript(agentId);
+    const snapshot = state.snapshot();
+    const revision = this.previousRevisions.get(agentId) ?? { mtimeMs: 0, size: 0, contentHash: "" };
+    const history: AgentHistory = {
+      sessionId: agentId,
+      revision,
+      transcriptEpoch: this.currentEpoch(agentId),
+      timeline: snapshot.timeline,
+      branches: [],
+      usage: snapshot.usage,
+      contextUsage: snapshot.contextUsage,
+      ...(snapshot.currentModel ? { currentModel: snapshot.currentModel } : {}),
+      ...(snapshot.currentThinkingLevel ? { currentThinkingLevel: snapshot.currentThinkingLevel } : {}),
+      ...(snapshot.sessionName ? { sessionName: snapshot.sessionName } : {}),
+      unknownRecordCount: 0,
+      agentErrorCount: snapshot.agentErrorCount,
+      malformedRecordCount: 0,
+      partialTail: false,
+      invalidUtf8Count: 0,
+      rewritten: false,
+    };
     return pageHistory(history, before, limit);
   }
 
@@ -343,6 +380,9 @@ export class AgentService {
     this.leaves.delete(agentId);
     this.diagnostics.delete(agentId);
     this.runStartedAt.delete(agentId);
+    this.transcripts.delete(agentId);
+    this.transcriptSeeds.delete(agentId);
+    this.transcriptEpochs.delete(agentId);
     this.emit({ agentId, type: "status", status: "archived" });
   }
 
@@ -361,6 +401,9 @@ export class AgentService {
     this.diagnostics.clear();
     this.runStartedAt.clear();
     this.eventChains.clear();
+    this.transcripts.clear();
+    this.transcriptSeeds.clear();
+    this.transcriptEpochs.clear();
     await this.manager.shutdown();
   }
 
@@ -461,6 +504,7 @@ export class AgentService {
     if (event.thinking !== undefined) rawPayload.thinking = event.thinking;
 
     const payload = this.sanitizeEventPayload(rawPayload) as Record<string, unknown>;
+    await this.applyTranscriptEvent(agentId, String(event.type ?? "event"), payload);
 
     if (event.type === "agent_settled") {
       this.pendingUiRequests.delete(agentId);
@@ -500,7 +544,10 @@ export class AgentService {
     while (this.diagnostics.size > MAX_RUNTIME_DIAGNOSTICS) this.diagnostics.delete(this.diagnostics.keys().next().value!);
     logger("agent").error("Agent Pi process ended", { event: "agent.process_ended", agentId, generation: event.generation, exitStatus: `${event.lifecycle} (${event.exitCode})`, exitCode: event.exitCode, stderrBytes: event.stderr.reduce((total, part) => total + encoder.encode(part).byteLength, 0), stderrTruncated: event.stderrTruncated });
     this.detach(agentId);
-    this.updateStatus(agentId, "error", "attention", event.generation, `Pi process exited (${event.exitCode})`);
+    const message = `Pi process exited (${event.exitCode})`;
+    const state = await this.getTranscript(agentId);
+    this.emitRowUpsert(agentId, state.appendError(message));
+    this.updateStatus(agentId, "error", "attention", event.generation, message);
   }
 
   private async completeAbort(agentId: string, cancellation: Cancellation): Promise<void> {
@@ -597,6 +644,17 @@ export class AgentService {
         leafId: this.leaves.get(agentId),
       });
       this.rememberRevision(agentId, history.revision);
+      // A rewrite (external edit/truncation of the session file) invalidates
+      // every row identity the live TranscriptState was built from -- unlike
+      // every other mutation, that is a legitimate full reset. Otherwise,
+      // reuse this already-fetched journal read to opportunistically refresh
+      // tool rows (id-matched, safe) and metadata without any extra I/O.
+      if (history.rewritten) {
+        this.resetTranscript(agentId);
+      } else {
+        const state = await this.getTranscript(agentId);
+        for (const row of state.refreshFromJournal(history)) this.emitRowUpsert(agentId, row);
+      }
       const latestItem = history.timeline.at(-1);
       const hasActiveError = latestItem && "error" in latestItem && Boolean(latestItem.error);
       const currentStatus = this.requireAgent(agentId).lastKnownStatus as AgentStatus;
@@ -604,7 +662,12 @@ export class AgentService {
       if (currentStatus === "stopping" && !allowStoppingToSettle) return;
       const confirmedCancellation = allowStoppingToSettle && currentStatus === "stopping" && data.isStreaming === false;
       if (hasActiveError && data.isStreaming !== true && !confirmedCancellation) {
-        this.updateStatus(agentId, "error", "attention", process.generation, String(latestItem.error));
+        const message = String(latestItem.error);
+        const lastRow = (await this.getTranscript(agentId)).snapshot().timeline.at(-1);
+        if (!(lastRow?.kind === "error" && lastRow.text === message)) {
+          this.emitRowUpsert(agentId, (await this.getTranscript(agentId)).appendError(message));
+        }
+        this.updateStatus(agentId, "error", "attention", process.generation, message);
         return;
       }
     } catch (cause) {
@@ -633,6 +696,88 @@ export class AgentService {
 
   private endRun(agentId: string): void {
     this.runStartedAt.delete(agentId);
+  }
+
+  /** Returns this agent's transcript projector, seeding it from the journal
+   *  on first access. Seeding and event application both run inside the
+   *  per-agent serialized event chain (or, for `history()`, before any event
+   *  can race it since it's the first await), so this is race-free without
+   *  needing its own lock -- concurrent callers share the same in-flight
+   *  seed promise instead of reading the file twice. */
+  private async getTranscript(agentId: string): Promise<TranscriptState> {
+    const existing = this.transcripts.get(agentId);
+    if (existing) return existing;
+    const inflight = this.transcriptSeeds.get(agentId);
+    if (inflight) return inflight;
+    const seed = (async () => {
+      const state = new TranscriptState();
+      const agent = this.repositories.agents.get(agentId);
+      if (agent?.piSessionPath) {
+        try {
+          const history = await readPiHistory(agent.piSessionPath, { leafId: this.leaves.get(agentId) });
+          state.seed(history);
+          this.rememberRevision(agentId, history.revision);
+        } catch {
+          // Leave a fresh, empty instance -- live events still build a
+          // reasonable view, and the next reconcile will retry the read.
+        }
+      }
+      this.transcripts.set(agentId, state);
+      while (this.transcripts.size > MAX_TRANSCRIPTS) {
+        const oldest = this.transcripts.keys().next().value!;
+        this.transcripts.delete(oldest);
+        this.transcriptEpochs.delete(oldest);
+      }
+      this.transcriptSeeds.delete(agentId);
+      this.bumpEpoch(agentId);
+      return state;
+    })();
+    this.transcriptSeeds.set(agentId, seed);
+    return seed;
+  }
+
+  /** Applies one Pi/daemon event to the transcript and emits a `row_upsert`
+   *  for every row it changed. This is the sole path that mutates timeline
+   *  rows: whether a row arrived live or was replayed after a client
+   *  reconnect, it goes through the exact same projector and the exact same
+   *  wire event, so there is never a second, differently-ordered view of it. */
+  private async applyTranscriptEvent(agentId: string, type: string, payload: Record<string, unknown>): Promise<void> {
+    const state = await this.getTranscript(agentId);
+    for (const row of state.applyEvent(type, payload)) this.emitRowUpsert(agentId, row);
+  }
+
+  private emitRowUpsert(agentId: string, row: TimelineItem): void {
+    const status = (this.repositories.agents.get(agentId)?.lastKnownStatus as AgentStatus) ?? "running";
+    this.emit({ agentId, type: "row_upsert", status, payload: { row: truncateRowForWire(row) } });
+  }
+
+  private async appendUserRow(agentId: string, text: string): Promise<void> {
+    const state = await this.getTranscript(agentId);
+    this.emitRowUpsert(agentId, state.addUserMessage(text));
+  }
+
+  /** Bumped whenever a `TranscriptState` instance is replaced outright (cold
+   *  seed, daemon restart, or an explicit reset) so a reconnecting client can
+   *  tell "the whole timeline actually changed, replace it" apart from
+   *  "nothing changed but the metadata, merge it" -- see `AgentHistory.transcriptEpoch`.
+   *  The counter starts near `Date.now()` (not 0) specifically so a fresh
+   *  daemon process is exceedingly unlikely to reuse a value a client
+   *  remembers from before a restart. */
+  private bumpEpoch(agentId: string): void {
+    this.epochCounter += 1;
+    this.transcriptEpochs.set(agentId, this.epochCounter);
+  }
+
+  private currentEpoch(agentId: string): number {
+    return this.transcriptEpochs.get(agentId) ?? 0;
+  }
+
+  private resetTranscript(agentId: string): void {
+    this.transcripts.delete(agentId);
+    this.transcriptSeeds.delete(agentId);
+    this.bumpEpoch(agentId);
+    const status = (this.repositories.agents.get(agentId)?.lastKnownStatus as AgentStatus) ?? "idle";
+    this.emit({ agentId, type: "transcript_reset", status, payload: {} });
   }
 
   private emit(event: AgentServiceEvent): void {
