@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { AgentService } from "./agents/service.ts";
 import { AgentEventHub } from "./agents/events/index.ts";
 import { createAgentRoutes } from "./http/agents.ts";
+import { createModelRoutes } from "./http/models.ts";
 import { createWorkspaceRoutes } from "./http/workspaces.ts";
 import { createGitRoutes, createTranscriptPreviewRoutes } from "./http/git.ts";
 import { createFileRoutes } from "./http/files.ts";
@@ -96,6 +97,7 @@ app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (works
 app.route("/", createTerminalRoutes(terminalManager));
 app.route("/", createPreviewRoutes(previewManager, workspaceEvents));
 app.route("/", createAgentRoutes(agentService));
+app.route("/", createModelRoutes());
 app.route("/", createTranscriptPreviewRoutes());
 
 function protocolError(requestId: string, code: string, message: string): ProtocolError {

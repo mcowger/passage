@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import type { ThemePack, FontPack } from "../../shared/domain/customization.ts";
 import { BUILTIN_THEMES, BUILTIN_FONTS } from "../../shared/domain/customization.ts";
 import type { WorkspaceSettings } from "../../shared/domain/settings.ts";
+import type { AgentCapabilities } from "../../shared/domain/agents.ts";
 import type { Project, WorktreeLocation } from "../../shared/domain/workspaces.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { requestNotificationPermission, getNotificationPermission } from "../notifications.ts";
@@ -25,6 +26,9 @@ import { RadioGroup, RadioGroupItem } from "./ui/radio-group.tsx";
 import { Label } from "./ui/label.tsx";
 import { Alert, AlertDescription } from "./ui/alert.tsx";
 import { toast } from "sonner";
+
+/** Sentinel Select value for "use pi default" (stored as an empty suggestModel). Radix requires non-empty item values. */
+const DEFAULT_SUGGEST_MODEL_VALUE = "__pi_default";
 
 export interface SettingsModalProps {
   open: boolean;
@@ -61,6 +65,9 @@ export function SettingsModal({
   const [newPath, setNewPath] = useState("");
   const [newScope, setNewScope] = useState<"global" | "project">("global");
   const [newProjectId, setNewProjectId] = useState("");
+  const [suggestModels, setSuggestModels] = useState<AgentCapabilities["models"]>([]);
+  const [suggestModelsLoading, setSuggestModelsLoading] = useState(false);
+  const [suggestModelsError, setSuggestModelsError] = useState("");
   const [saveError, setSaveError] = useState("");
 
   React.useEffect(() => {
@@ -77,6 +84,15 @@ export function SettingsModal({
     if (api) {
       void api.listLocations().then(setLocations).catch((err: unknown) => {
         setLocationError(err instanceof Error ? err.message : "Unable to load worktree locations");
+      });
+      setSuggestModelsLoading(true);
+      setSuggestModelsError("");
+      void api.listModels().then((models) => {
+        setSuggestModels(models.filter((m) => m.authenticated));
+      }).catch((err: unknown) => {
+        setSuggestModelsError(err instanceof Error ? err.message : "Unable to load pi models");
+      }).finally(() => {
+        setSuggestModelsLoading(false);
       });
     }
   }, [open, api, initialLocations, projects]);
@@ -236,6 +252,68 @@ export function SettingsModal({
             <small className="text-xs text-muted-foreground">
               Permission state: <code className="font-mono">{notificationStatus}</code>. Notifications only fire when tab is inactive.
             </small>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="settings-suggest-model">Suggestion Model</Label>
+            <Select
+              value={(currentSettings.suggestModel?.trim() || DEFAULT_SUGGEST_MODEL_VALUE)}
+              onValueChange={(value) =>
+                setCurrentSettings({
+                  ...currentSettings,
+                  suggestModel: value === DEFAULT_SUGGEST_MODEL_VALUE ? "" : value,
+                })
+              }
+              disabled={suggestModelsLoading || !api}
+            >
+              <SelectTrigger id="settings-suggest-model" className="w-full">
+                <SelectValue placeholder={suggestModelsLoading ? "Loading models\u2026" : "Select a model"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_SUGGEST_MODEL_VALUE}>Use pi default</SelectItem>
+                {suggestModels.map((m) => {
+                  const value = `${m.provider}/${m.id}`;
+                  return (
+                    <SelectItem key={value} value={value}>
+                      {m.name} ({m.provider})
+                    </SelectItem>
+                  );
+                })}
+                {(() => {
+                  const stored = currentSettings.suggestModel?.trim() ?? "";
+                  const known = new Set(suggestModels.map((m) => `${m.provider}/${m.id}`));
+                  return stored && !known.has(stored) ? (
+                    <SelectItem value={stored}>{stored} (saved)</SelectItem>
+                  ) : null;
+                })()}
+              </SelectContent>
+            </Select>
+            <small className="text-xs font-normal text-muted-foreground">
+              Model passed as <code className="font-mono">pi --model</code> when generating worktree label/branch/folder suggestions.
+            </small>
+            {suggestModelsError && (
+              <small className="text-xs font-normal text-muted-foreground">
+                Could not load the pi model list ({suggestModelsError}). Using pi default is still available.
+                <button
+                  type="button"
+                  className="ml-1 underline"
+                  onClick={() => {
+                    if (!api) return;
+                    setSuggestModelsLoading(true);
+                    setSuggestModelsError("");
+                    void api.listModels().then((models) => {
+                      setSuggestModels(models.filter((m) => m.authenticated));
+                    }).catch((err: unknown) => {
+                      setSuggestModelsError(err instanceof Error ? err.message : "Unable to load pi models");
+                    }).finally(() => {
+                      setSuggestModelsLoading(false);
+                    });
+                  }}
+                >
+                  Retry
+                </button>
+              </small>
+            )}
           </div>
 
           <label className="flex flex-col gap-1 text-sm font-medium">

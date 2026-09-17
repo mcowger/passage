@@ -29,6 +29,7 @@ type Props = {
   defaultProjectId?: string;
   lockedProjectId?: string;
   initialTab?: "create" | "discover";
+  suggestModel?: string;
   api: WorkspaceApi;
   onClose: () => void;
   onCreated: (workspace: Workspace) => void;
@@ -41,6 +42,7 @@ export function NewWorktreeModal({
   defaultProjectId,
   lockedProjectId,
   initialTab = "create",
+  suggestModel,
   api,
   onClose,
   onCreated,
@@ -113,7 +115,7 @@ export function NewWorktreeModal({
     setSuggesting(true);
     setError("");
     try {
-      const suggestion = await api.suggestWorktree(projectId, purpose.trim());
+      const suggestion = await api.suggestWorktree(projectId, purpose.trim(), suggestModel);
       setLabel(suggestion.label);
       setBranch(suggestion.branch);
       setFolder(suggestion.folder);
@@ -374,7 +376,7 @@ export function NewWorktreeModal({
                   </Button>
                 </div>
               </label>
-              <p className="text-[11px] text-muted-foreground">Type your goal and click Suggest to auto-fill metadata.</p>
+              <p className="text-[11px] text-muted-foreground">Type your goal and click Suggest to auto-fill metadata.{suggestModel?.trim() ? ` Uses model ${suggestModel.trim()} (Settings).` : " Uses the default model (change in Settings)."}</p>
             </div>
 
             <label className="flex flex-col gap-1 text-xs font-medium">

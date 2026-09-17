@@ -14,6 +14,7 @@ import {
   type PiRpcProcess,
 } from "./rpc/index.ts";
 import { MetadataRepositories, type Agent } from "../metadata/repositories.ts";
+import { normalizeAvailableModels } from "../models/catalog.ts";
 
 const MAX_LIST = 100;
 const MAX_LISTENERS = 64;
@@ -261,35 +262,7 @@ export class AgentService {
     ]);
     const modelsData = responseData<{ models?: unknown[] }>(modelsResponse);
     const thinkingData = responseData<{ levels?: unknown[] }>(thinkingResponse);
-    const models = (modelsData?.models ?? []).flatMap((value) => {
-      if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
-      const record = value as Record<string, unknown>;
-      if (typeof record.provider !== "string" || typeof record.id !== "string") return [];
-
-      let supportedThinkingLevels: string[] = [];
-      if (Array.isArray(record.supportedThinkingLevels)) {
-        supportedThinkingLevels = record.supportedThinkingLevels.filter((item): item is string => typeof item === "string").slice(0, 16);
-      } else if (record.thinkingLevelMap && typeof record.thinkingLevelMap === "object" && !Array.isArray(record.thinkingLevelMap)) {
-        const map = record.thinkingLevelMap as Record<string, unknown>;
-        supportedThinkingLevels = Object.keys(map).filter((k) => map[k] !== null).slice(0, 16);
-      }
-
-      return [{
-        provider: record.provider,
-        id: record.id,
-        name: typeof record.name === "string" ? record.name : record.id,
-        api: typeof record.api === "string" ? record.api : "unknown",
-        input: Array.isArray(record.input) ? record.input.filter((item): item is string => typeof item === "string").slice(0, 8) : [],
-        authenticated: record.authenticated !== false,
-        supportedThinkingLevels,
-        ...(typeof record.contextWindow === "number" && Number.isSafeInteger(record.contextWindow) && record.contextWindow > 0
-          ? { contextWindow: record.contextWindow }
-          : {}),
-        ...(typeof record.maxTokens === "number" && Number.isSafeInteger(record.maxTokens) && record.maxTokens > 0
-          ? { maxTokens: record.maxTokens }
-          : {}),
-      }];
-    }).slice(0, 100);
+    const models = normalizeAvailableModels(modelsData);
     const thinkingLevels = (thinkingData?.levels ?? [])
       .filter((value): value is string => typeof value === "string")
       .slice(0, 16);

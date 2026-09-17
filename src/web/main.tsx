@@ -1389,6 +1389,7 @@ function App() {
           defaultProjectId={worktreeModalProjectId ?? activeProject?.id}
           lockedProjectId={worktreeModalProjectId}
           initialTab={worktreeModalTab}
+          suggestModel={settings.suggestModel}
           api={api}
           onClose={() => {
             setForm(undefined);

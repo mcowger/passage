@@ -26,10 +26,10 @@ export class WorktreeService {
     private readonly metadataGenerator = new MetadataGenerator(),
   ) {}
 
-  async suggest(projectId: string, purpose: string): Promise<WorktreeSuggestion> {
+  async suggest(projectId: string, purpose: string, model?: string): Promise<WorktreeSuggestion> {
     const project = this.repositories.projects.get(projectId);
     if (!project || project.archivedAt) throw new WorktreeError("invalid-project", "Active project required");
-    return this.metadataGenerator.suggest(purpose, project.canonicalRootPath);
+    return this.metadataGenerator.suggest(purpose, project.canonicalRootPath, model);
   }
   async create(projectId: string, locationId: string, ref: string, label: string, folder?: string, options?: { createBranch?: boolean; baseRef?: string }): Promise<Workspace> {
     const project = this.repositories.projects.get(projectId); if (!project || project.archivedAt) throw new WorktreeError("invalid-project", "Active project required");
