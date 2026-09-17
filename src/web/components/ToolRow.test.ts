@@ -294,6 +294,49 @@ describe("ToolRow component", () => {
     expect(html).toContain("sleep 30");
     expect(html).toContain("Running command");
     expect(html).not.toContain("rawInput");
+    // Nothing output yet -- skeleton is correct here.
+    expect(html).toContain("tool-pending-skeleton");
+  });
+
+  test("running bash with partial output shows output so far, not skeleton", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-running-bash-partial",
+      kind: "tool",
+      name: "bash",
+      input: { command: "npm test" },
+      result: "partial line 1\npartial line 2",
+      status: "running",
+    };
+
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(ToolRow, { item })
+    );
+
+    expect(html).toContain("npm test");
+    // Syntax highlighting splits words into spans, so assert on the
+    // output wrapper + individual tokens rather than the raw string.
+    expect(html).toContain("tool-output-wrap");
+    expect(html).toContain("partial");
+    expect(html).toContain("tool-running-footer");
+    expect(html).not.toContain("tool-pending-skeleton");
+  });
+
+  test("running bash with whitespace-only result still shows skeleton", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-running-bash-blank",
+      kind: "tool",
+      name: "bash",
+      input: { command: "npm test" },
+      result: "   \n  ",
+      status: "running",
+    };
+
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(ToolRow, { item })
+    );
+
+    expect(html).toContain("tool-pending-skeleton");
+    expect(html).not.toContain("tool-running-footer");
   });
 
   test("partial rawInput still surfaces path/command in the summary", () => {

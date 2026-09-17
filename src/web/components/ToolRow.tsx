@@ -538,6 +538,13 @@ function ToolOutputDisplay({
   );
 }
 
+function hasRenderableOutput(result: unknown): boolean {
+  if (result === undefined || result === null) return false;
+  const text = typeof result === "string" ? result : extractToolResultText(result) ?? "";
+  const trimmed = text.trim();
+  return trimmed !== "" && trimmed !== "[object Object]";
+}
+
 function ToolPendingBody({ item, hint }: { item: Extract<TimelineItem, { kind: "tool" }>; hint?: string }) {
   return (
     <div className="tool-pending-body" role="status" aria-label={`${getToolSummary(item).title} is running`}>
@@ -604,10 +611,13 @@ function ToolExpandedBodyInner({
   const command = isBash && typeof input.command === "string" ? input.command : "";
   const renderable = hasRenderableInput(item.name, input);
   const imagePath = getReadToolImagePath(item);
+  const hasOutput = hasRenderableOutput(item.result);
 
   // Args still streaming (e.g. `{ rawInput: "" }`) -- never show the raw
-  // fragment, show a spinner + skeleton instead.
-  if (isRunning && !renderable && !item.result && !item.error) {
+  // fragment, show a spinner + skeleton instead. A running command with
+  // no output yet also shows the skeleton here; once partial output
+  // arrives it falls through to the progressive output below.
+  if (isRunning && !renderable && !hasOutput && !item.error) {
     const hint = String(input.path ?? input.filePath ?? input.filename ?? input.command ?? input.pattern ?? "");
     return (
       <div className="tool-expanded-body">
@@ -710,7 +720,7 @@ function ToolExpandedBodyInner({
           </div>
           <pre className="tool-output-pre error"><code>{item.error}</code></pre>
         </div>
-      ) : item.result && item.result !== "[object Object]" ? (
+      ) : hasOutput ? (
         <>
           <ToolOutputDisplay item={item} filePath={filePath} />
           {isRunning ? <ToolRunningFooter item={item} /> : null}
