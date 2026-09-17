@@ -1,10 +1,13 @@
-import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { AgentCapabilities, AgentHistory, AgentSummary, SlashCommand, TimelineItem, ToolActivity, UserImageRef } from "../../shared/domain/agents.ts";
 import type { WorkspaceSettings, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
 import { DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
 import { MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentImage } from "../../shared/protocol/agents.ts";
-import type { WorkspaceApi } from "../api.ts";
+import { friendlyApiError, type WorkspaceApi } from "../api.ts";
+import { toast } from "sonner";
+import { subscribeWorkspace } from "../workspaceSocket.ts";
+import type { GitStatus } from "../../shared/domain/git.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { DisplayOptionsPopover } from "./DisplayOptionsPopover.tsx";
 import { collectExpandedIds, computeLatestTimelineIds, isItemExpanded, type LatestTimelineIds } from "../lib/timeline-expansion.ts";
@@ -50,7 +53,9 @@ import {
   Wrench,
   PencilSparkles,
   GraduationCap,
+  GitMerge,
 } from "lucide-react";
+import { Spinner } from "./ui/spinner.tsx";
 
 const STREAMING_STATS_INTERVAL_MS = 300;
 /** Distance from the bottom that still counts as following the live tail. */
@@ -243,6 +248,125 @@ export function resolveStreamStartMs(runStartedAt: number | undefined, observedA
 
 export function isComposerLocked(status: AgentSummary["status"]): boolean {
   return status === "stopping";
+}
+
+/** Same relevance rule as the Changes panel: a non-main branch with commits ahead of main. */
+export function isComposerMergeRelevant(status: GitStatus | null | undefined): boolean {
+  if (!status) return false;
+  const isMainWorktree = status.checkoutRoot === status.mainCheckoutRoot || status.branchRef === "main";
+  return !isMainWorktree && status.aheadOfMain > 0;
+}
+
+/**
+ * Merge shortcut for the bottom composer bar. Fetches its own Git status and
+ * only renders when a merge is relevant (non-main branch ahead of main),
+ * so non-Git workspaces, main, and fully-merged branches add no UI noise.
+ * The actual merge runs only after explicit confirmation.
+ */
+function ComposerMergeButton({
+  workspaceId,
+  api,
+  disabled,
+}: {
+  workspaceId: string;
+  api: WorkspaceApi;
+  disabled?: boolean;
+}) {
+  const [status, setStatus] = useState<GitStatus | null>(null);
+  const [merging, setMerging] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await api.gitStatus(workspaceId));
+    } catch {
+      // Non-Git workspaces (or transient failures): hide the button.
+      setStatus(null);
+    }
+  }, [api, workspaceId]);
+
+  useEffect(() => {
+    setStatus(null);
+    setConfirmOpen(false);
+    void refresh();
+  }, [refresh]);
+
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  useEffect(() => {
+    let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
+    const subscription = subscribeWorkspace(
+      workspaceId,
+      (event) => {
+        if (event.type !== "git-status-changed" && event.type !== "files-changed") return;
+        if (invalidateTimer) clearTimeout(invalidateTimer);
+        invalidateTimer = setTimeout(() => {
+          invalidateTimer = undefined;
+          void refreshRef.current();
+        }, 750);
+      },
+      async () => {
+        await refreshRef.current();
+      },
+    );
+    return () => {
+      if (invalidateTimer) clearTimeout(invalidateTimer);
+      subscription.close();
+    };
+  }, [workspaceId]);
+
+  const handleConfirmMerge = () => {
+    if (merging) return;
+    const branchRef = status?.branchRef ?? "branch";
+    setConfirmOpen(false);
+    setMerging(true);
+    void api.gitMergeIntoMain(workspaceId).then(
+      (next) => {
+        setStatus(next);
+        toast.success(`Merged ${next.branchRef ?? branchRef} into main`);
+      },
+      (err: unknown) => {
+        const message = friendlyApiError(err, "Could not merge into main. Resolve any conflicts and try again.");
+        toast.error("Merge into main failed", { description: message });
+      },
+    ).finally(() => setMerging(false));
+  };
+
+  if (!isComposerMergeRelevant(status)) return null;
+  const branchRef = status?.branchRef ?? "branch";
+  const ahead = status?.aheadOfMain ?? 0;
+  return (
+    <>
+      <Button
+        variant="secondary"
+        size="xs"
+        className="composer-action-btn"
+        onClick={() => setConfirmOpen(true)}
+        disabled={disabled || merging}
+        title={`Merge ${branchRef} into main (${ahead} commit${ahead === 1 ? "" : "s"} ahead)`}
+        aria-label={`Merge ${branchRef} into main`}
+      >
+        {merging ? <Spinner className="size-3" /> : <GitMerge size={14} aria-hidden="true" />}
+        Merge
+      </Button>
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Merge into main?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Merge <code className="font-mono">{branchRef}</code> ({ahead} commit{ahead === 1 ? "" : "s"} ahead)
+              into <code className="font-mono">main</code>? The branch is rebased onto main, then main
+              fast-forwards to it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmMerge}>Merge into main</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
 }
 
 export function AgentPanel({
@@ -1192,6 +1316,7 @@ function AgentComposerInner({
             )}
           </div>
           <div className="composer-toolbar-right">
+            <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} />
             <DisplayOptionsPopover
               expansion={sessionExpansion}
               onExpansionChange={onSessionExpansionChange}

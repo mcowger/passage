@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { formatDuration, formatThinkingPreview, isComposerLocked, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
+import { formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 
@@ -65,6 +65,32 @@ describe("resolveCurrentModel", () => {
       provider: "test",
       id: "old-model",
     });
+  });
+});
+
+describe("isComposerMergeRelevant", () => {
+  const base: import("../../shared/domain/git.ts").GitStatus = {
+    checkoutRoot: "/wt/feature",
+    mainCheckoutRoot: "/repo",
+    repositoryRoot: "/repo",
+    branchRef: "feature",
+    detached: false,
+    ahead: 0,
+    behind: 0,
+    aheadOfMain: 2,
+    dirty: false,
+    conflicted: false,
+    truncated: false,
+    files: [],
+  };
+
+  test("shows only for a non-main branch ahead of main", () => {
+    expect(isComposerMergeRelevant({ ...base })).toBe(true);
+    expect(isComposerMergeRelevant({ ...base, aheadOfMain: 0 })).toBe(false);
+    expect(isComposerMergeRelevant({ ...base, branchRef: "main" })).toBe(false);
+    expect(isComposerMergeRelevant({ ...base, checkoutRoot: "/repo", mainCheckoutRoot: "/repo" })).toBe(false);
+    expect(isComposerMergeRelevant(null)).toBe(false);
+    expect(isComposerMergeRelevant(undefined)).toBe(false);
   });
 });
 
