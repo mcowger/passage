@@ -17,6 +17,19 @@
   color: var(--muted);
   font-family: var(--font-mono);
 }
+.composer-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 2px 8px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.composer-status-pill .live-streaming-stats {
+  display: contents;
+}
 .composer-status-duration {
   font-weight: 600;
   color: var(--foreground);
