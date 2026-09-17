@@ -26,6 +26,7 @@ import { Switch } from "./ui/switch.tsx";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group.tsx";
 import { Label } from "./ui/label.tsx";
 import { Alert, AlertDescription } from "./ui/alert.tsx";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs.tsx";
 import { toast } from "sonner";
 
 /** Sentinel Select value for "use pi default" (stored as an empty suggestModel). Radix requires non-empty item values. */
@@ -358,7 +359,14 @@ export function SettingsModal({
           <DialogTitle className="text-lg font-semibold">Workspace Settings</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4 py-2">
+        <Tabs defaultValue="fonts-colors" className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="fonts-colors">Fonts &amp; Colors</TabsTrigger>
+            <TabsTrigger value="suggestion-output">Suggestion &amp; Output</TabsTrigger>
+            <TabsTrigger value="worktree-locations">Worktree Locations</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="fonts-colors" className="flex flex-col gap-4 py-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="settings-theme">Color Theme</Label>
             <Select
@@ -413,6 +421,24 @@ export function SettingsModal({
             </small>
           </div>
 
+          <label className="flex flex-col gap-1 text-sm font-medium">
+            <span>Terminal Font Size</span>
+            <Input
+              type="number"
+              min={9}
+              max={32}
+              value={currentSettings.terminalFontSize}
+              onChange={(e) =>
+                setCurrentSettings({
+                  ...currentSettings,
+                  terminalFontSize: parseInt(e.target.value, 10) || 13,
+                })
+              }
+            />
+          </label>
+          </TabsContent>
+
+          <TabsContent value="suggestion-output" className="flex flex-col gap-4 py-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="settings-suggest-model">Suggestion Model</Label>
             <Select
@@ -475,35 +501,15 @@ export function SettingsModal({
             )}
           </div>
 
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            <span>Terminal Font Size</span>
-            <Input
-              type="number"
-              min={9}
-              max={32}
-              value={currentSettings.terminalFontSize}
-              onChange={(e) =>
-                setCurrentSettings({
-                  ...currentSettings,
-                  terminalFontSize: parseInt(e.target.value, 10) || 13,
-                })
-              }
-            />
-          </label>
-
           <OutputExpansionSection
             expansion={expansion}
             onExpansionChange={handleUpdateExpansion}
           />
+          </TabsContent>
 
-          {saveError && (
-            <Alert variant="destructive">
-              <AlertDescription className="text-xs">{saveError}</AlertDescription>
-            </Alert>
-          )}
-
-          {api && (
-            <section className="flex flex-col gap-2 border-t border-border/50 pt-3" aria-label="Worktree locations">
+          <TabsContent value="worktree-locations" className="flex flex-col gap-2 py-2">
+          {api ? (
+            <section className="flex flex-col gap-2" aria-label="Worktree locations">
               <h3 className="text-sm font-semibold">Worktree Locations</h3>
               <p className="text-xs text-muted-foreground">
                 Named directories where new Git worktrees are created. Global locations work for every project.
@@ -599,8 +605,17 @@ export function SettingsModal({
                 </Button>
               </form>
             </section>
+          ) : (
+            <p className="text-xs text-muted-foreground py-2">Worktree locations are unavailable without an API connection.</p>
           )}
-        </div>
+          </TabsContent>
+        </Tabs>
+
+          {saveError && (
+            <Alert variant="destructive">
+              <AlertDescription className="text-xs">{saveError}</AlertDescription>
+            </Alert>
+          )}
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="secondary" onClick={onClose} disabled={busy}>
