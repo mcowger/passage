@@ -1,7 +1,7 @@
 import { mkdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { agentCapabilitiesSchema, type AgentHistory, type AgentStatus, type TimelineItem } from "../../shared/domain/agents.ts";
-import { getSlashCommands } from "./slash-commands.ts";
+import { getSlashCommands, piCommandsToSlashCommands } from "./slash-commands.ts";
 import { agentImageSchema, type AgentImage } from "../../shared/protocol/agents.ts";
 import { pageHistory, readPiHistory, type HistoryPage } from "./history/index.ts";
 import { TranscriptState, truncateRowForWire } from "./transcript/index.ts";
@@ -278,9 +278,11 @@ export class AgentService {
 
   async capabilities(agentId: string): Promise<AgentCapabilities> {
     const process = await this.ensureProcess(agentId);
-    const [modelsResponse, thinkingResponse] = await Promise.all([
+    const [modelsResponse, thinkingResponse, commandsResponse] = await Promise.all([
       process.request({ type: "get_available_models" }),
       process.request({ type: "get_available_thinking_levels" }),
+      // Best-effort: older pi releases may not know `get_commands`.
+      process.request({ type: "get_commands" }).catch(() => undefined),
     ]);
     const modelsData = responseData<{ models?: unknown[] }>(modelsResponse);
     const thinkingData = responseData<{ levels?: unknown[] }>(thinkingResponse);
@@ -288,9 +290,18 @@ export class AgentService {
     const thinkingLevels = (thinkingData?.levels ?? [])
       .filter((value): value is string => typeof value === "string")
       .slice(0, 16);
-    // All workspaces are untrusted until an explicit persisted trust decision
-    // exists (see slash-commands.ts): Pi built-ins only, no skill entries.
-    return agentCapabilitiesSchema.parse({ models, thinkingLevels, slashCommands: getSlashCommands(), skillsAvailable: false });
+    // User-level skills load like the pi TUI; project-local resources stay
+    // disabled via the `--no-approve` spawn flag (see slash-commands.ts).
+    const skillCommands = piCommandsToSlashCommands(
+      commandsResponse ? responseData<{ commands?: unknown }>(commandsResponse)?.commands : undefined,
+    );
+    return agentCapabilitiesSchema.parse({
+      models,
+      thinkingLevels,
+      slashCommands: [...getSlashCommands(), ...skillCommands],
+      skillsAvailable: skillCommands.length > 0,
+      skillsSupported: commandsResponse !== undefined,
+    });
   }
 
   async compact(agentId: string, customInstructions?: string): Promise<void> {

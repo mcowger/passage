@@ -725,7 +725,6 @@ function AgentComposerInner({
     () => capabilities?.slashCommands ?? [],
     [capabilities?.slashCommands],
   );
-  const skillsAvailable = capabilities?.skillsAvailable ?? false;
   const filteredCommands = useMemo(
     () =>
       autocomplete.trigger?.kind === "/"
@@ -972,7 +971,8 @@ function AgentComposerInner({
           filesLoading={autocomplete.filesLoading}
           filesError={autocomplete.filesError}
           commands={filteredCommands}
-          skillsAvailable={skillsAvailable}
+          skillsAvailable={capabilities?.skillsAvailable ?? false}
+          skillsSupported={capabilities?.skillsSupported ?? false}
           activeIndex={autocomplete.activeIndex}
           activeValue={activeValue}
           onActiveValueChange={(value) => {

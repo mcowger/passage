@@ -21,7 +21,8 @@ export const agentSummarySchema = z.object({
 export type AgentSummary = z.infer<typeof agentSummarySchema>;
 
 export const slashCommandSchema = z.object({
-  name: z.string().min(1).max(64).regex(/^[a-z0-9-]+$/),
+  // Plain built-ins (`compact`) plus pi skill commands (`skill:name`).
+  name: z.string().min(1).max(64).regex(/^[A-Za-z0-9_:.-]+$/),
   description: z.string().min(1).max(256),
   hint: z.string().min(1).max(128),
   kind: z.enum(["prompt-text", "action"]),
@@ -43,6 +44,10 @@ export const agentCapabilitiesSchema = z.object({
   thinkingLevels: z.array(z.string().min(1).max(64)).max(16),
   slashCommands: z.array(slashCommandSchema).max(50).default([]),
   skillsAvailable: z.boolean().default(false),
+  /** True when the live Pi process answered `get_commands`. False means
+   *  skills state is unknown (disabled or unsupported Pi), as opposed to
+   *  `skillsAvailable: false` with support, which means none installed. */
+  skillsSupported: z.boolean().default(false),
 }).strict();
 export type AgentCapabilities = z.infer<typeof agentCapabilitiesSchema>;
 

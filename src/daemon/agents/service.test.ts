@@ -46,6 +46,8 @@ test("validates Pi model capabilities before persisting preferences", async () =
   expect(await f.service.capabilities(agent.id)).toMatchObject({
     models: [{ provider: "test", id: "model" }],
     thinkingLevels: ["medium", "high"],
+    skillsAvailable: false,
+    skillsSupported: true,
   });
   await f.service.model(agent.id, "test", "model");
   await f.service.thinking(agent.id, "high");

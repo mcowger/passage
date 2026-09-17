@@ -104,7 +104,7 @@ describe("filterSlashCommands", () => {
   });
   test("filters case-insensitively over name and description", () => {
     expect(filterSlashCommands(commands, "COMP").map((c) => c.name)).toContain("compact");
-    expect(filterSlashCommands(commands, "thinking").map((c) => c.name)).toContain("thinking");
+    expect(filterSlashCommands(commands, "context").map((c) => c.name)).toContain("compact");
     expect(filterSlashCommands(commands, "nope")).toHaveLength(0);
   });
 });

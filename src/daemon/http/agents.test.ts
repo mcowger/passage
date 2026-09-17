@@ -22,7 +22,8 @@ process.stdin.on("data", chunk => {
     if (command.type === "prompt") process.stdout.write(JSON.stringify({ type: "agent_start" }) + "\\n");
     const data = command.type === "get_available_models"
       ? { models: [{ provider: "test", id: "model", name: "Model", api: "test", input: ["text"], authenticated: true, supportedThinkingLevels: ["medium", "high"] }] }
-      : command.type === "get_available_thinking_levels" ? { levels: ["medium", "high"] } : {};
+      : command.type === "get_available_thinking_levels" ? { levels: ["medium", "high"] }
+      : command.type === "get_commands" ? { commands: [{ name: "skill:gh-cli", description: "GitHub CLI help", source: "skill" }] } : {};
     process.stdout.write(JSON.stringify({ type: "response", id: command.id, success: true, data }) + "\\n");
     if (command.type === "prompt") setTimeout(() => process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n"), 5);
   }
@@ -173,10 +174,13 @@ describe("agent HTTP API", () => {
     expect(compact.status).toBe(202);
     expect(await compact.json()).toEqual({ accepted: true });
     const capabilities = await json(await app.fetch(request(`/api/agents/${agentId}/capabilities`)));
-    expect((capabilities as { skillsAvailable: boolean }).skillsAvailable).toBe(false);
-    expect((capabilities as { slashCommands: Array<{ name: string; kind: string }> }).slashCommands[0]).toMatchObject({
+    const slashCommands = (capabilities as { slashCommands: Array<{ name: string; kind: string }> }).slashCommands;
+    expect((capabilities as { skillsAvailable: boolean }).skillsAvailable).toBe(true);
+    expect((capabilities as { skillsSupported: boolean }).skillsSupported).toBe(true);
+    expect(slashCommands[0]).toMatchObject({
       name: "compact",
       kind: "action",
     });
+    expect(slashCommands).toContainEqual(expect.objectContaining({ name: "skill:gh-cli", kind: "prompt-text" }));
   });
 });

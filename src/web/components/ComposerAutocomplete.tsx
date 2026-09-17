@@ -12,6 +12,14 @@ import {
 
 export const COMPOSER_SUGGESTION_LIST_ID = "composer-autocomplete-list";
 
+/** Footer text for the `/` popup when no skill commands are offered:
+ *  distinguishes "Pi can't report skills" from "none installed".
+ *  Null when skills are available (the items speak for themselves). */
+export function composerSkillsFooter(skillsAvailable: boolean, skillsSupported: boolean): string | null {
+  if (skillsAvailable) return null;
+  return skillsSupported ? "no skills installed" : "skills disabled";
+}
+
 function directoryHint(path: string): string {
   const slash = path.lastIndexOf("/");
   if (slash <= 0) return "";
@@ -26,7 +34,10 @@ export type ComposerAutocompleteProps = {
   filesLoading: boolean;
   filesError: string;
   commands: SlashCommand[];
+  /** Unfiltered skill facts from capabilities: the footer reflects overall
+   *  skill state, not the current query filter. */
   skillsAvailable: boolean;
+  skillsSupported: boolean;
   activeIndex: number;
   activeValue: string;
   onActiveValueChange: (value: string) => void;
@@ -57,6 +68,7 @@ export function ComposerAutocomplete({
   filesError,
   commands,
   skillsAvailable,
+  skillsSupported,
   activeIndex,
   activeValue,
   onActiveValueChange,
@@ -149,9 +161,10 @@ export function ComposerAutocomplete({
                   </CommandGroup>
                 )}
               </CommandList>
-              {!skillsAvailable && (
-                <div className="composer-autocomplete-footer">skills unavailable — untrusted workspace</div>
-              )}
+              {(() => {
+                const footer = composerSkillsFooter(skillsAvailable, skillsSupported);
+                return footer ? <div className="composer-autocomplete-footer">{footer}</div> : null;
+              })()}
             </>
           )}
         </Command>

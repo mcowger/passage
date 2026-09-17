@@ -13,7 +13,7 @@ import { errorFields, logger } from "../../logging.ts";
 export type PiRecord = { type?: string; id?: string; [key: string]: unknown };
 export type PiImageBlock = AgentImage;
 export type PiCommand =
-  | { type: "get_state" | "get_tree" | "get_available_models" | "get_available_thinking_levels" | "abort" | "abort_bash" | "clear_queue" }
+  | { type: "get_state" | "get_tree" | "get_available_models" | "get_available_thinking_levels" | "get_commands" | "abort" | "abort_bash" | "clear_queue" }
   | { type: "get_entries"; start?: number; end?: number; limit?: number }
   | { type: "prompt" | "steer" | "follow_up"; message: string; images?: readonly PiImageBlock[]; streamingBehavior?: "steer" | "followUp" }
   | { type: "set_steering_mode"; mode: "one-at-a-time" | "all" }
@@ -22,6 +22,14 @@ export type PiCommand =
   | { type: "set_thinking_level"; level: string }
   | { type: "compact"; customInstructions?: string }
   | { type: "bash"; command: string; excludeFromContext?: boolean };
+/** One entry from pi's `get_commands` response (extension, prompt, or skill command). */
+export type PiAvailableCommand = {
+  name: string;
+  description?: string;
+  source: string;
+  location?: string;
+  path?: string;
+};
 export type PiResponse<T = unknown> = PiRecord & { type: "response"; id: string; command: PiCommand["type"]; success: boolean; data?: T; error?: unknown };
 export function isPiResponse(record: PiRecord): record is PiResponse { return record.type === "response" && typeof record.id === "string" && typeof record.success === "boolean"; }
 export function responseData<T>(record: PiRecord): T | undefined { return isPiResponse(record) ? record.data as T | undefined : undefined; }
@@ -92,7 +100,7 @@ export class PiRpcProcess {
     if (!pi) throw new Error("Pi CLI was not found; set PASSAGE_PI_PATH");
     const command = options.executable ? [options.executable, ...(options.executableArgs ?? [])] : [pi];
     if (options.model) command.push("--model", options.model);
-    command.push("--mode", "rpc", "--session-dir", options.sessionDir, "--session-id", options.sessionId, "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve");
+    command.push("--mode", "rpc", "--session-dir", options.sessionDir, "--session-id", options.sessionId, "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve");
     if (options.disableTools) command.push("--no-tools");
     this.child = Bun.spawn(command, {
       cwd: options.cwd,

@@ -2,6 +2,19 @@ import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
 import { renderFileRefs, truncateFileRefPath, TimelineRow } from "./AgentPanel.tsx";
+import { composerSkillsFooter } from "./ComposerAutocomplete.tsx";
+
+describe("composerSkillsFooter", () => {
+  test("hides the footer when skills are available", () => {
+    expect(composerSkillsFooter(true, true)).toBeNull();
+  });
+  test("reports none installed when Pi answers with zero skills", () => {
+    expect(composerSkillsFooter(false, true)).toBe("no skills installed");
+  });
+  test("reports disabled when Pi can't answer get_commands", () => {
+    expect(composerSkillsFooter(false, false)).toBe("skills disabled");
+  });
+});
 
 describe("truncateFileRefPath", () => {
   test("keeps short paths intact", () => {
