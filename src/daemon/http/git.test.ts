@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MetadataRepositories, MetadataStore } from "../metadata/index.ts";
@@ -142,6 +142,43 @@ describe("git HTTP API", () => {
     expect(f.received.every((e) => e.stream === "workspace" && e.subjectId === f.workspace.id && e.type === "git-status-changed")).toBe(true);
     expect(f.received.map((e) => e.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7]);
 
+    f.store.close();
+  });
+
+  test("merges a linked worktree branch into main and publishes an invalidation", async () => {
+    const f = await fixture();
+    const received: EventEnvelope[] = [];
+    const subscription = f.events.subscribe("wsp_feature", 0, (event) => received.push(event));
+    subscription.activate();
+    const worktree = join(f.root, "feature-worktree");
+    await runGit(f.root, ["worktree", "add", "-b", "feature", worktree]);
+    await writeFile(join(worktree, "feature.txt"), "feature\n");
+    await runGit(worktree, ["add", "."]);
+    await runGit(worktree, ["commit", "-m", "feature"]);
+    const workspace = workspaceSchema.parse({
+      id: "wsp_feature",
+      projectId: "prj_git",
+      kind: "worktree",
+      cwd: worktree,
+      checkoutRoot: worktree,
+      mainRepositoryRoot: f.root,
+      branchRef: "feature",
+      displayLabel: "Feature",
+      locationId: null,
+      ownershipState: "owned",
+      markerId: null,
+      markerPath: null,
+      repairDetail: null,
+      archivedAt: null,
+    });
+    f.repos.workspaces.save(workspace);
+
+    const response = await f.app.fetch(request(`/api/workspaces/${workspace.id}/git/merge`, { method: "POST", body: "{}" }));
+    expect(response.status).toBe(200);
+    expect((await readFile(join(f.root, "feature.txt"), "utf8"))).toBe("feature\n");
+    expect(received.at(-1)?.payload).toEqual({ workspaceId: workspace.id, reason: "merge" });
+
+    subscription.unsubscribe();
     f.store.close();
   });
 });

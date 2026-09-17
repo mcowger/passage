@@ -191,4 +191,37 @@ describe("GitService", () => {
     await service.fetch(root);
     expect((await service.status(root)).behind).toBe(0);
   });
+  test("merges a linked worktree branch into main and leaves main disabled as a source", async () => {
+    const root = await fixture();
+    const service = new GitService();
+    await writeFile(join(root, "base.txt"), "base\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "initial");
+    const worktree = join(root, "feature-worktree");
+    await git(root, "worktree", "add", "-b", "feature", worktree);
+    await writeFile(join(worktree, "feature.txt"), "feature\n");
+    await git(worktree, "add", ".");
+    await git(worktree, "commit", "-m", "feature");
+
+    await service.mergeIntoMain(worktree);
+
+    expect(await readFile(join(root, "feature.txt"), "utf8")).toBe("feature\n");
+    await expect(service.mergeIntoMain(root)).rejects.toBeInstanceOf(GitError);
+  });
+  test("preserves Git's merge conflict for the caller to resolve", async () => {
+    const root = await fixture();
+    const service = new GitService();
+    await writeFile(join(root, "shared.txt"), "base\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "initial");
+    const worktree = join(root, "conflicting-worktree");
+    await git(root, "worktree", "add", "-b", "feature", worktree);
+    await writeFile(join(worktree, "shared.txt"), "feature\n");
+    await git(worktree, "commit", "-am", "feature change");
+    await writeFile(join(root, "shared.txt"), "main\n");
+    await git(root, "commit", "-am", "main change");
+
+    await expect(service.mergeIntoMain(worktree)).rejects.toBeInstanceOf(GitError);
+    expect((await service.status(root)).conflicted).toBe(true);
+  });
 });

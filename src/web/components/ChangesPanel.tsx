@@ -30,7 +30,7 @@ type ChangesProps = {
   onOpenDiff: (path: string, staged?: boolean) => void;
 };
 
-type BulkOp = "stage-all" | "unstage-all" | "commit" | "pull" | "fetch";
+type BulkOp = "stage-all" | "unstage-all" | "commit" | "pull" | "fetch" | "merge";
 
 const draftKey = (workspaceId: string) => `passage:commit-draft:${workspaceId}`;
 const loadDraft = (workspaceId: string): string => {
@@ -108,6 +108,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
     : files;
 
   const anyBusy = bulkOp !== null || pendingPaths.size > 0;
+  const isMainWorktree = status?.checkoutRoot === status?.mainCheckoutRoot || status?.branchRef === "main";
 
   const trackFileOp = (path: string, run: () => Promise<GitStatus>, done?: (s: GitStatus) => void) => {
     setPendingPaths((prev) => new Set(prev).add(path));
@@ -172,6 +173,23 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
     trackBulkOp("fetch", () => api.gitFetch(workspaceId), () => toast.success("Fetched from remote"));
   };
 
+  const handleMerge = () => {
+    if (bulkOp !== null || isMainWorktree) return;
+    setBulkOp("merge");
+    void api.gitMergeIntoMain(workspaceId).then(
+      (s) => {
+        setStatus(s);
+        setError("");
+        toast.success(`Merged ${status?.branchRef ?? "branch"} into main`);
+      },
+      (err: unknown) => {
+        const message = friendlyApiError(err, "Could not merge into main. Resolve any conflicts and try again.");
+        setError(message);
+        toast.error("Merge into main failed", { description: message });
+      },
+    ).finally(() => setBulkOp(null));
+  };
+
   return (
     <div className="changes-panel" aria-label="Git Changes">
       <div className="panel-header">
@@ -207,6 +225,16 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff }: Chang
             title="Open unified workspace diff"
           >
             Review All Diffs ↗
+          </Button>
+          <Button
+            variant="secondary"
+            size="xs"
+            onClick={handleMerge}
+            disabled={bulkOp !== null || isMainWorktree}
+            title={isMainWorktree ? "The main worktree or branch cannot be merged into itself" : "Merge this branch into main"}
+          >
+            {bulkOp === "merge" ? <Spinner className="size-3" /> : null}
+            Merge
           </Button>
           <Button
             variant="ghost"

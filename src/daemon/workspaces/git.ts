@@ -80,6 +80,16 @@ export class GitService {
   async fetch(cwd: string, options?: Options): Promise<void> {
     await this.run(cwd, ["fetch", "--prune"], { timeoutMs: 30_000, ...options });
   }
+  async mergeIntoMain(cwd: string, options?: Options): Promise<void> {
+    const source = await this.discover(cwd, options);
+    if (!source.branchRef) throw new GitError("Cannot merge a detached HEAD into main");
+    if (!source.mainCheckoutRoot || source.checkoutRoot === source.mainCheckoutRoot || source.branchRef === "main") {
+      throw new GitError("The main worktree or branch cannot be merged into itself");
+    }
+    const main = await this.discover(source.mainCheckoutRoot, options);
+    if (main.branchRef !== "main") throw new GitError("The main checkout must be on the main branch before merging");
+    await this.run(source.mainCheckoutRoot, ["merge", "--no-edit", source.branchRef], { timeoutMs: 30_000, ...options });
+  }
   async diff(cwd: string, target: "staged" | "working-tree" = "working-tree", options?: Options): Promise<GitDiff[]> { const args = ["diff", "--no-ext-diff", "--no-color", "--unified=3", "--binary", ...(target === "staged" ? ["--cached"] : [])]; const r = await this.run(cwd, args, options); if (r.truncated) return [{ path: "", binary: false, oversized: true, truncated: true, additions: 0, deletions: 0, hunks: [] }]; const result: GitDiff[] = []; let current: GitDiff | undefined; let hunk: DiffHunk | undefined; for (const line of r.stdout.split("\n")) { if (line.startsWith("diff --git ")) { const m = /^diff --git a\/(.*) b\/(.*)$/.exec(line); current = { path: m?.[2] ?? "", oldPath: m?.[1], binary: false, oversized: false, truncated: false, additions: 0, deletions: 0, hunks: [] }; result.push(current); hunk = undefined; } else if (line.startsWith("Binary files") || line.startsWith("GIT binary patch")) { if (current) current.binary = true; } else if (line.startsWith("@@ ") && current) { const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)/.exec(line); if (m) { hunk = { oldStart: +m[1], oldLines: +(m[2] ?? 1), newStart: +m[3], newLines: +(m[4] ?? 1), header: m[5], lines: [] }; current.hunks.push(hunk); } } else if (hunk && /^[ +\-]/.test(line)) { const kind: DiffLine["kind"] = line[0] === "+" ? "added" : line[0] === "-" ? "removed" : "context"; hunk.lines.push({ kind, text: line.slice(1) }); if (current) { if (kind === "added") current.additions++; if (kind === "removed") current.deletions++; } } }
     if (target === "working-tree" && !r.truncated) {
       try {
