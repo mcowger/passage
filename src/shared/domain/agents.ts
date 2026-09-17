@@ -83,8 +83,11 @@ export type ToolActivity = {
 export type TimelineItem =
   | { kind: "user" | "assistant" | "thinking"; id: string; text: string; lazy?: boolean; error?: string }
   | ToolActivity
-  | { kind: "process"; id: string; activities: ToolActivity[] }
   | { kind: "summary"; id: string; summaryType: "compaction" | "branch"; text: string }
+  /** Daemon/process-level failure (crash, RPC error, permission denial). Not
+   *  journaled -- positioned chronologically in the live transcript so it
+   *  survives a browser reconnect but not a daemon restart. */
+  | { kind: "error"; id: string; text: string }
   | { kind: "unknown"; id: string; entryType: string };
 
 export type AgentBranchEntry = {
@@ -106,6 +109,13 @@ export type AgentHistory = {
   currentThinkingLevel?: string;
   revision: AgentHistoryRevision;
   timeline: TimelineItem[];
+  /** Bumped by the daemon whenever the in-memory transcript backing `timeline`
+   *  is rebuilt from scratch (cold seed, daemon restart, or a compaction that
+   *  invalidates row identity). The client replaces its local timeline when
+   *  this changes and otherwise only merges the non-timeline fields below,
+   *  since live `row_upsert` events are the sole, authoritative source of
+   *  timeline mutations while the epoch is unchanged. */
+  transcriptEpoch: number;
   branches: AgentBranchEntry[];
   usage: AgentUsage;
   /** Current context-window occupancy from the latest assistant turn, not the session cumulative total. */
@@ -132,10 +142,11 @@ const toolActivitySchema = z.object({
 const timelineItemSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.enum(["user", "assistant", "thinking"]), id: z.string(), text: z.string(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
   toolActivitySchema,
-  z.object({ kind: z.literal("process"), id: z.string(), activities: z.array(toolActivitySchema).max(500) }).strict(),
   z.object({ kind: z.literal("summary"), id: z.string(), summaryType: z.enum(["compaction", "branch"]), text: z.string() }).strict(),
+  z.object({ kind: z.literal("error"), id: z.string(), text: z.string() }).strict(),
   z.object({ kind: z.literal("unknown"), id: z.string(), entryType: z.string() }).strict(),
 ]);
+export const timelineItemPayloadSchema = timelineItemSchema;
 
 export const agentHistorySchema: z.ZodType<AgentHistory> = z.object({
   sessionId: z.string(),
@@ -147,6 +158,7 @@ export const agentHistorySchema: z.ZodType<AgentHistory> = z.object({
   currentThinkingLevel: z.string().optional(),
   revision: z.object({ mtimeMs: z.number(), size: z.number().int().nonnegative(), contentHash: z.string() }).strict(),
   timeline: z.array(timelineItemSchema).max(500),
+  transcriptEpoch: z.number().int().nonnegative(),
   branches: z.array(z.object({ id: z.string(), parentId: z.string().nullable(), type: z.string(), timestamp: z.string().optional(), fromId: z.string().optional(), active: z.boolean() }).strict()).max(20_000),
   usage: z.object({
     input: z.number(), output: z.number(), cacheRead: z.number(), cacheWrite: z.number(), totalTokens: z.number(), cost: z.number(),

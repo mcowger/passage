@@ -55,7 +55,6 @@ function toolInputText(input: unknown): string {
 function timelineItemText(item: TimelineItem): string[] {
   if (item.kind === "assistant" || item.kind === "thinking") return [item.text];
   if (item.kind === "tool") return [toolInputText(item.input)];
-  if (item.kind === "process") return item.activities.map((activity) => toolInputText(activity.input));
   return [];
 }
 

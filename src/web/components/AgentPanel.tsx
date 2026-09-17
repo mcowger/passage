@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { AgentCapabilities, AgentHistory, AgentSummary, SlashCommand, TimelineItem, ToolActivity } from "../../shared/domain/agents.ts";
 import type { WorkspaceSettings, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
@@ -7,7 +7,7 @@ import { MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentImage } from ".
 import type { WorkspaceApi } from "../api.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { DisplayOptionsPopover } from "./DisplayOptionsPopover.tsx";
-import { computeLatestTimelineIds, isItemExpanded, type LatestTimelineIds } from "../lib/timeline-expansion.ts";
+import { collectExpandedIds, computeLatestTimelineIds, isItemExpanded, type LatestTimelineIds } from "../lib/timeline-expansion.ts";
 import { Streamdown } from "streamdown";
 import { Button } from "./ui/button.tsx";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert.tsx";
@@ -49,6 +49,8 @@ import {
 } from "lucide-react";
 
 const STREAMING_STATS_INTERVAL_MS = 300;
+/** Distance from the bottom that still counts as following the live tail. */
+const STICK_TO_BOTTOM_SLACK_PX = 48;
 
 export type AgentPanelProps = {
   agent: AgentSummary;
@@ -310,27 +312,45 @@ export function AgentPanel({
     return () => clearInterval(interval);
   }, [streamActive, agent.runStartedAt]);
 
-  useEffect(() => {
-    if (timelineRef.current) {
-      timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
-    }
-  }, [effectiveHistory?.timeline]);
+  // Whether the viewport is following the live tail. A manual scroll away
+  // unpins it; scrolling back within the slack re-pins it. Row heights can
+  // change many times a second while streaming (tool output growing,
+  // expansion resolving) -- driving autoscroll off a single post-commit
+  // effect let that outpace React and yanked the viewport around. Instead
+  // this is re-asserted continuously (every frame while streaming, and
+  // synchronously before paint on every other render), so it can only ever
+  // sit exactly at the bottom or exactly where the user left it.
+  const pinnedRef = useRef(true);
+  const scrollToBottomIfPinned = () => {
+    const el = timelineRef.current;
+    if (!el || !pinnedRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  };
 
-  // After a run settles, layout can shift (composer status line hides, change
-  // summary appears, tool details expand). Scroll again after paint so the
-  // latest assistant content is fully above the composer.
-  const wasStreaming = useRef(streamActive);
   useEffect(() => {
-    const settled = wasStreaming.current && !streamActive;
-    wasStreaming.current = streamActive;
-    if (!settled || !timelineRef.current) return;
-    const frame = requestAnimationFrame(() => {
-      if (timelineRef.current) {
-        timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
-      }
-    });
+    const el = timelineRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_TO_BOTTOM_SLACK_PX;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!streamActive) return;
+    let frame: number;
+    const tick = () => {
+      scrollToBottomIfPinned();
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [streamActive]);
+
+  useLayoutEffect(() => {
+    scrollToBottomIfPinned();
+  });
 
   useEffect(() => {
     setConcise(localStorage.getItem(conciseKey) === "true");
@@ -377,11 +397,18 @@ export function AgentPanel({
     [timeline, questionRequest]
   );
 
+  // A question needing the user's response should always be brought into
+  // view even if they had scrolled away to read earlier output.
   useEffect(() => {
-    if (questionRequest && timelineRef.current) {
-      timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
-    }
+    if (questionRequest) pinnedRef.current = true;
   }, [questionRequest]);
+
+  const [stickyExpandedIds, setStickyExpandedIds] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    setStickyExpandedIds((previous) =>
+      collectExpandedIds(effectiveHistory?.timeline ?? [], sessionExpansion, latestIds, manualToggles, concise, previous)
+    );
+  }, [effectiveHistory?.timeline, sessionExpansion, latestIds, manualToggles, concise]);
 
   const handleRespondUi = async (result: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) => {
     try {
@@ -418,6 +445,7 @@ export function AgentPanel({
                   expansion={sessionExpansion}
                   latestIds={latestIds}
                   manualToggles={manualToggles}
+                  stickyExpandedIds={stickyExpandedIds}
                   onToggleManual={(id, open) => {
                     setManualToggles((prev) => ({ ...prev, [id]: open }));
                   }}
@@ -447,7 +475,12 @@ export function AgentPanel({
         toggleConcise={toggleConcise}
         onRefresh={onRefresh}
         onModelChanged={onModelChanged}
-        onOptimisticMessage={onOptimisticMessage}
+        onOptimisticMessage={(message) => {
+          // A user sending a new message always wants to see it, even if they
+          // had scrolled up to read earlier output.
+          pinnedRef.current = true;
+          onOptimisticMessage?.(message);
+        }}
         currentModel={currentModel}
         currentModelDisplayName={currentModelDisplayName}
         thinking={thinking}
@@ -1176,7 +1209,7 @@ function summarizeChanges(timeline: TimelineItem[]): { fileCount: number; additi
   const files = new Set<string>();
   let additions = 0;
   let deletions = 0;
-  const activities = timeline.flatMap((item): ToolActivity[] => item.kind === "tool" ? [item] : item.kind === "process" ? item.activities : []);
+  const activities = timeline.filter((item): item is ToolActivity => item.kind === "tool");
   for (const activity of activities) {
     const diff = getToolDiff(activity);
     if (!diff || !diff.path || (diff.additions === 0 && diff.deletions === 0)) continue;
@@ -1193,6 +1226,7 @@ export interface TimelineRowProps {
   expansion?: TimelineExpansionSettings;
   latestIds?: LatestTimelineIds;
   manualToggles?: Record<string, boolean>;
+  stickyExpandedIds?: ReadonlySet<string>;
   onToggleManual?: (id: string, open: boolean) => void;
 }
 
@@ -1202,11 +1236,12 @@ export const TimelineRow = memo(function TimelineRow({
   expansion = DEFAULT_TIMELINE_EXPANSION,
   latestIds = { latestToolIds: {} },
   manualToggles = {},
+  stickyExpandedIds,
   onToggleManual,
 }: TimelineRowProps) {
   if (item.kind === "unknown") return <article className="timeline-row unknown"><strong>Unknown activity</strong><code>{item.entryType}</code></article>;
   if (item.kind === "tool") {
-    const isExpanded = isItemExpanded(item, expansion, latestIds, manualToggles, concise);
+    const isExpanded = isItemExpanded(item, expansion, latestIds, manualToggles, concise, stickyExpandedIds);
     if (concise && !item.significant && item.status !== "error") {
       return (
         <ToolRow
@@ -1225,41 +1260,8 @@ export const TimelineRow = memo(function TimelineRow({
       />
     );
   }
-  if (item.kind === "process") {
-    const isAnyActivityExpanded = item.activities.some((activity) =>
-      isItemExpanded(activity, expansion, latestIds, manualToggles, concise)
-    );
-    const isProcessOpen = manualToggles[item.id] !== undefined
-      ? manualToggles[item.id]
-      : isAnyActivityExpanded;
-
-    return (
-      <details
-        className="timeline-row process"
-        open={isProcessOpen}
-        onToggle={(e) => onToggleManual?.(item.id, e.currentTarget.open)}
-      >
-        <summary className="process-summary">
-          <span className="process-title">Process</span>
-          <span className="process-count">{item.activities.length} {item.activities.length === 1 ? "activity" : "activities"}</span>
-        </summary>
-        {item.activities.map((activity) => {
-          const isActExpanded = isItemExpanded(activity, expansion, latestIds, manualToggles, concise);
-          return (
-            <ToolRow
-              key={activity.id}
-              item={activity}
-              conciseBadge={concise && !activity.significant && activity.status !== "error"}
-              open={isActExpanded}
-              onOpenChange={(open) => onToggleManual?.(activity.id, open)}
-            />
-          );
-        })}
-      </details>
-    );
-  }
   if (item.kind === "thinking") {
-    const isExpanded = isItemExpanded(item, expansion, latestIds, manualToggles, concise);
+    const isExpanded = isItemExpanded(item, expansion, latestIds, manualToggles, concise, stickyExpandedIds);
     const preview = formatThinkingPreview(item.text);
     return (
       <details
@@ -1286,6 +1288,15 @@ export const TimelineRow = memo(function TimelineRow({
         <strong>{item.summaryType === "compaction" ? "Compacted context" : "Branch summary"}</strong>
         <p>{item.text}</p>
       </article>
+    );
+  }
+  if (item.kind === "error") {
+    return (
+      <Alert variant="destructive" className="assistant-error-alert px-3 py-2 border-destructive/40 bg-destructive/5">
+        <CircleAlert aria-hidden="true" />
+        <AlertTitle>Agent error</AlertTitle>
+        <AlertDescription>{item.text}</AlertDescription>
+      </Alert>
     );
   }
   if (item.kind === "user") {

@@ -115,28 +115,7 @@ function activeEntryIds(entries: ObjectValue[], leafId?: string): Set<string> {
   return active;
 }
 
-function groupTools(items: TimelineItem[]): TimelineItem[] {
-  const result: TimelineItem[] = [];
-  let pending: ToolActivity[] = [];
-  const flush = () => {
-    if (pending.length === 1) result.push(pending[0]);
-    if (pending.length > 1) result.push({ kind: "process", id: `process-${pending[0].id}`, activities: pending });
-    pending = [];
-  };
-
-  for (const item of items) {
-    if (item.kind === "tool" && item.status === "complete" && !item.significant) {
-      pending.push(item);
-      continue;
-    }
-    flush();
-    result.push(item);
-  }
-  flush();
-  return result;
-}
-
-function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "sessionId" | "parentSession" | "revision" | "malformedRecordCount" | "partialTail" | "invalidUtf8Count" | "rewritten"> {
+function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "sessionId" | "parentSession" | "revision" | "malformedRecordCount" | "partialTail" | "invalidUtf8Count" | "rewritten" | "transcriptEpoch"> {
   const activeIds = activeEntryIds(entries, leafId);
   let activeEntries = entries.filter((entry) => {
     const id = string(entry.id);
@@ -299,7 +278,7 @@ function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "s
   }));
 
   return {
-    timeline: groupTools(timeline),
+    timeline,
     branches,
     usage,
     contextUsage: { tokens: contextTokens },
@@ -361,6 +340,11 @@ export function parsePiJsonl(source: string, revision: AgentHistoryRevision, opt
     ...(inferred ? { leafInferred: true } : {}),
     ...(typeof parsed.header.parentSession === "string" ? { parentSession: parsed.header.parentSession } : {}),
     revision,
+    // Journal parsing has no notion of the daemon's in-memory transcript
+    // epoch; callers that surface this over the wire (AgentService) stamp
+    // the real value on. 0 is only observed by callers that read a raw
+    // parse directly (history/fixture and their tests).
+    transcriptEpoch: 0,
     ...projection,
     malformedRecordCount: parsed.malformedRecordCount,
     partialTail: parsed.partialTail,

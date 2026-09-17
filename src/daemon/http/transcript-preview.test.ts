@@ -19,11 +19,9 @@ describe("transcript preview endpoint", () => {
       expect(res.status).toBe(200);
       const json = (await res.json()) as { history: unknown };
       const history = agentHistorySchema.parse(json.history);
-      expect(history.timeline.map((item) => item.kind)).toEqual(["user", "tool", "process", "assistant"]);
-      const tool = history.timeline.find((item) => item.kind === "tool");
-      expect(tool?.kind === "tool" ? tool.name : "").toBe("write");
-      const process = history.timeline.find((item) => item.kind === "process");
-      expect(process?.kind === "process" ? process.activities.map((item) => item.name) : []).toEqual(["bash", "read"]);
+      expect(history.timeline.map((item) => item.kind)).toEqual(["user", "tool", "tool", "tool", "assistant"]);
+      const tools = history.timeline.filter((item) => item.kind === "tool");
+      expect(tools.map((item) => item.name)).toEqual(["write", "bash", "read"]);
     } finally {
       delete process.env.PASSAGE_TRANSCRIPT_PREVIEW;
     }

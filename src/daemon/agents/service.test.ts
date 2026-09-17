@@ -1,4 +1,4 @@
-import { expect, test, afterEach } from "bun:test";
+import { expect, test, afterEach, describe } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { MetadataStore } from "../metadata/database.ts";
@@ -181,4 +181,79 @@ test("projects Pi's native dialog request to attention state and responds", asyn
 
   await service.shutdown();
   f.store.close();
+});
+
+describe("transcript row ordering (regression: reorder/duplicate chat rows)", () => {
+  test("concurrent tool calls stay in start order with no duplication, and the user row lands before them", async () => {
+    const f = await make();
+    // Two tools start back-to-back, then finish in the OPPOSITE order --
+    // the scenario that used to hijack rows via the "last running tool"
+    // fallback and made the transcript re-sort/duplicate mid-stream.
+    const concurrentScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');if(r.type==='prompt'){process.stdout.write(JSON.stringify({type:'tool_call',toolCallId:'a',toolName:'bash',args:{command:'one'}})+'\\n');process.stdout.write(JSON.stringify({type:'tool_call',toolCallId:'b',toolName:'bash',args:{command:'two'}})+'\\n');process.stdout.write(JSON.stringify({type:'tool_execution_end',toolCallId:'b',result:'b-done',isError:false})+'\\n');process.stdout.write(JSON.stringify({type:'tool_execution_end',toolCallId:'a',result:'a-done',isError:false})+'\\n');process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n')}}})`;
+    const service = new AgentService(f.repos, {
+      sessionsRoot: join(f.root, "order-sessions"),
+      manager: new PiRpcManager(1),
+      pi: { executable: process.execPath, executableArgs: ["-e", concurrentScript] },
+    });
+    const rowEvents: Array<{ id: string; kind: string }> = [];
+    service.subscribe((event) => {
+      if (event.type !== "row_upsert") return;
+      const row = (event.payload as { row?: { id: string; kind: string } } | undefined)?.row;
+      if (row) rowEvents.push({ id: row.id, kind: row.kind });
+    });
+    const agent = await service.create("w");
+    await service.prompt(agent.id, "run two commands");
+    await Bun.sleep(30);
+
+    const result = await service.history(agent.id);
+    if ("unpersisted" in result) throw new Error("expected a persisted transcript");
+    const kinds = result.history.timeline.map((item) => item.kind);
+    expect(kinds).toEqual(["user", "tool", "tool"]);
+    const [, toolA, toolB] = result.history.timeline as Array<{ id: string; result?: string; status: string }>;
+    expect(toolA).toMatchObject({ id: "a", result: "a-done", status: "complete" });
+    expect(toolB).toMatchObject({ id: "b", result: "b-done", status: "complete" });
+
+    // The user row was pushed (and its row_upsert emitted) before either tool
+    // call landed -- ordering by first-sighted time, not by settle order.
+    const firstUserIndex = rowEvents.findIndex((e) => e.kind === "user");
+    const firstToolIndex = rowEvents.findIndex((e) => e.kind === "tool");
+    expect(firstUserIndex).toBeGreaterThanOrEqual(0);
+    expect(firstUserIndex).toBeLessThan(firstToolIndex);
+
+    // No row was ever emitted under the wrong id (no hijacking): every "a"
+    // upsert stayed an "a", every "b" upsert stayed a "b".
+    const idsSeen = new Set(rowEvents.filter((e) => e.kind === "tool").map((e) => e.id));
+    expect(idsSeen).toEqual(new Set(["a", "b"]));
+
+    // Fetching history again returns the identical epoch and an unchanged
+    // timeline shape -- a reload never re-sorts or duplicates rows.
+    const again = await service.history(agent.id);
+    if ("unpersisted" in again) throw new Error("expected a persisted transcript");
+    expect(again.history.transcriptEpoch).toBe(result.history.transcriptEpoch);
+    expect(again.history.timeline.map((item) => item.kind)).toEqual(["user", "tool", "tool"]);
+
+    await service.shutdown();
+    f.store.close();
+  });
+
+  test("an unexpected process exit appends a chronological error row instead of only flipping status", async () => {
+    const f = await make();
+    const crashingScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');if(r.type==='get_entries')setTimeout(()=>process.exit(7),5)}})`;
+    const service = new AgentService(f.repos, {
+      sessionsRoot: join(f.root, "crash-row-sessions"),
+      manager: new PiRpcManager(1),
+      pi: { executable: process.execPath, executableArgs: ["-e", crashingScript] },
+    });
+    const agent = await service.create("w");
+    await Bun.sleep(30);
+
+    const result = await service.history(agent.id);
+    if ("unpersisted" in result) throw new Error("expected a persisted transcript");
+    const errorRow = result.history.timeline.find((item) => item.kind === "error");
+    expect(errorRow).toBeTruthy();
+    expect((errorRow as { text: string }).text).toContain("Pi process exited (7)");
+
+    await service.shutdown();
+    f.store.close();
+  });
 });

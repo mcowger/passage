@@ -32,10 +32,9 @@ const bytes = new TextEncoder().encode(source);
 
 /**
  * Deterministic transcript used to verify the agent timeline without
- * contacting a model provider: one significant `write` tool activity, one
- * `bash`/`read` process group with long outputs, and a long final response
- * that exercises settlement scrolling. Shape: user, tool:write, process,
- * assistant.
+ * contacting a model provider: a `write` tool activity, a `bash`/`read` pair
+ * with long outputs, and a long final response that exercises settlement
+ * scrolling. Shape: user, tool:write, tool:bash, tool:read, assistant.
  */
 export function fixtureTranscriptHistory(): AgentHistory {
   return parsePiJsonl(source, {
