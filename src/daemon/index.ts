@@ -104,6 +104,7 @@ const terminalManager = new TerminalManager(workspaceService);
 const previewManager = new WebPreviewManager(repositories, workspaceService);
 const agentService = new AgentService(repositories, {
   sessionsRoot: process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(metadataPath), "sessions"),
+  ...(process.env.PASSAGE_MAX_ACTIVE_AGENTS ? { maxActiveAgents: Number(process.env.PASSAGE_MAX_ACTIVE_AGENTS) } : {}),
   // Agent tool calls (e.g. `git commit` via Pi's bash tool) mutate the repo
   // outside the Git HTTP routes, so the service reports likely Git mutations
   // here and the daemon publishes them as `git-status-changed` invalidations

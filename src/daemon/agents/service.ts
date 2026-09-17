@@ -140,6 +140,9 @@ export class AgentService {
       manager?: PiRpcManager;
       listLimit?: number;
       abortTimeoutMs?: number;
+      /** Cap on concurrently live `pi --mode rpc` processes (default 32; see
+       *  `PiRpcManager`). Ignored when `manager` is supplied directly. */
+      maxActiveAgents?: number;
       attachmentCacheRoot?: string;
       attachmentCacheBytes?: number;
       pi?: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
@@ -155,7 +158,10 @@ export class AgentService {
     if (options.abortTimeoutMs !== undefined && (!Number.isSafeInteger(options.abortTimeoutMs) || options.abortTimeoutMs < 1)) {
       throw new AgentError("invalid-input", "invalid abort timeout");
     }
-    this.manager = options.manager ?? new PiRpcManager();
+    if (options.maxActiveAgents !== undefined && (!Number.isSafeInteger(options.maxActiveAgents) || options.maxActiveAgents < 1)) {
+      throw new AgentError("invalid-input", "invalid max active agents");
+    }
+    this.manager = options.manager ?? new PiRpcManager(options.maxActiveAgents);
     this.listLimit = options.listLimit ?? MAX_LIST;
     this.pi = options.pi ?? {};
     this.sessionsRoot = resolve(options.sessionsRoot);

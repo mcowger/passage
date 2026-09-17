@@ -250,7 +250,11 @@ export class PiRpcProcess {
 
 export class PiRpcManager {
   private readonly processes = new Map<string, PiRpcProcess>(); private readonly starts = new Map<string, Promise<PiRpcProcess>>(); private readonly generations = new Map<string, number>();
-  constructor(private readonly maxActiveAgents = 8) { if (!Number.isSafeInteger(maxActiveAgents) || maxActiveAgents < 1) throw new Error("maxActiveAgents must be positive"); }
+  // Every open (non-archived) agent holds a slot until archived or the
+  // daemon restarts -- there is no idle eviction -- so this needs headroom
+  // for realistic concurrent-open-agent counts, not just concurrent runs.
+  // Each idle `pi --mode rpc` process costs roughly 150-200MB RSS.
+  constructor(private readonly maxActiveAgents = 32) { if (!Number.isSafeInteger(maxActiveAgents) || maxActiveAgents < 1) throw new Error("maxActiveAgents must be positive"); }
   start(agentId: string, options: PiRpcOptions) {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(agentId)) return Promise.reject(new Error("invalid agentId"));
     const live = this.processes.get(agentId); if (live?.lifecycle === "running") return Promise.resolve(live); this.processes.delete(agentId);

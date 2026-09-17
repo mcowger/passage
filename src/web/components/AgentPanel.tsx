@@ -544,6 +544,15 @@ export function AgentPanel({
   onWorkspaceDeleted,
 }: AgentPanelProps) {
   const effectiveHistory = previewHistory ?? history;
+  // Distinct from `error` (a failed agent/history fetch): this is the agent
+  // itself reporting a stopped/errored Pi process (e.g. it never booted, or
+  // crashed mid-run). Nothing retries this automatically -- capabilities and
+  // model info stay stuck ("model unavailable") until the user retries --
+  // so it needs its own visible, actionable banner.
+  const statusErrorMessage = agent.status === "error"
+    ? "This agent hit an error and stopped responding. Retry to reconnect."
+    : "";
+  const bannerMessage = error || statusErrorMessage;
   const [sessionExpansion, setSessionExpansion] = useState<TimelineExpansionSettings>(
     () => settings?.timelineExpansion ?? DEFAULT_TIMELINE_EXPANSION
   );
@@ -783,9 +792,9 @@ export function AgentPanel({
       onDragLeave={handlePanelDragLeave}
       onDrop={handlePanelDrop}
     >
-      {error && (
+      {bannerMessage && (
         <div className="alert agent-alert" role="alert">
-          <span>{error}</span>
+          <span>{bannerMessage}</span>
           <button className="secondary small" onClick={() => void onRefresh()}>Retry</button>
         </div>
       )}
