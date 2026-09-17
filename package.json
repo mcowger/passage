@@ -12,7 +12,7 @@
     "stop": "bun scripts/dev-stop.ts",
     "build": "bun run scripts/build.ts",
     "start": "bun --cwd dist run ./index.js",
-    "package": "bun build --compile --target=bun --production --outfile=dist/passage ./src/daemon/index.ts",
+    "package": "bun run scripts/build.ts --compile",
     "test": "bun test",
     "test:gate": "bun run tests/gate.ts",
     "test:pi-rpc": "bun test tests/pi-rpc",
