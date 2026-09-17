@@ -50,10 +50,10 @@
   box-shadow: 0 1px 6px rgba(0,0,0,0.02);
   min-height: 0;
 }
-.composer-card textarea {
+.composer-card textarea,
+.composer-editor {
   display: block;
   width: 100%;
-  resize: vertical;
   min-height: 44px;
   max-height: 140px;
   border: 0;
@@ -63,6 +63,49 @@
   font-size: 13.5px;
   line-height: 1.4;
   padding: 0;
+}
+.composer-card textarea {
+  resize: vertical;
+}
+.composer-editor {
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.composer-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+}
+.composer-editor:focus-visible {
+  outline: none;
+}
+.composer-file-mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  margin: 0 1px;
+  padding: 1px 5px;
+  background: var(--accent-subtle);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: 5px;
+  vertical-align: baseline;
+  line-height: 1.2;
+  user-select: all;
+}
+.composer-file-mention-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-file-mention .tool-path-wrap {
+  font-size: 11.5px;
+}
+.composer-file-mention .tool-path-name {
+  font-weight: 650;
 }
 .composer-error-alert {
   margin: 6px 0 2px;

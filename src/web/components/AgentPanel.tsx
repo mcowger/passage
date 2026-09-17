@@ -14,6 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from "./ui/alert.tsx";
 import { ToolRow } from "./ToolRow.tsx";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { ComposerAutocomplete, COMPOSER_SUGGESTION_LIST_ID } from "./ComposerAutocomplete.tsx";
+import { ComposerEditor, type ComposerEditorHandle } from "./ComposerEditor.tsx";
 import {
   applyFileInsert,
   applySlashInsert,
@@ -601,7 +602,7 @@ function AgentComposerInner({
   const [images, setImages] = useState<Array<AgentImage & { name: string }>>([]);
   const [ctxDetailsOpen, setCtxDetailsOpen] = useState(false);
   const ctxDetailsRef = useRef<HTMLDivElement>(null);
-  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const composerInputRef = useRef<ComposerEditorHandle>(null);
   const reservedImageCount = useRef(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [caret, setCaret] = useState<number | null>(null);
@@ -638,9 +639,7 @@ function AgentComposerInner({
       const input = composerInputRef.current;
       if (!input) return;
       input.focus();
-      try {
-        input.setSelectionRange(position, position);
-      } catch {}
+      input.setCaret(position);
     });
   };
 
@@ -681,17 +680,8 @@ function AgentComposerInner({
     return true;
   };
 
-  const syncCaret = (target: HTMLTextAreaElement) => {
-    try {
-      setCaret(target.selectionStart);
-    } catch {
-      setCaret(null);
-    }
-  };
-
   const insertTriggerChar = (char: "@" | "/") => {
-    const input = composerInputRef.current;
-    const position = input?.selectionStart ?? draft.length;
+    const position = caret ?? draft.length;
     const value = `${draft.slice(0, position)}${char}${draft.slice(position)}`;
     updateDraft(value);
     placeCaret(position + 1);
@@ -884,16 +874,14 @@ function AgentComposerInner({
             if (!insideComposer) autocomplete.dismiss();
           }}
         />
-        <textarea
+        <ComposerEditor
           ref={composerInputRef}
           value={draft}
-          onChange={(event) => {
-            updateDraft(event.target.value);
-            syncCaret(event.target);
-          }}
-          onSelect={(event) => syncCaret(event.currentTarget)}
-          onKeyUp={(event) => syncCaret(event.currentTarget)}
-          onClick={(event) => syncCaret(event.currentTarget)}
+          onChange={updateDraft}
+          onCaretChange={setCaret}
+          ariaExpanded={suggestionOpen}
+          ariaControls={suggestionOpen ? COMPOSER_SUGGESTION_LIST_ID : undefined}
+          ariaActivedescendant={suggestionOpen && activeValue ? `composer-option-${activeValue}` : undefined}
           onKeyDown={(event) => {
             if (suggestionOpen && autocomplete.trigger) {
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -929,13 +917,7 @@ function AgentComposerInner({
               ? "Steer now (Enter) or queue follow-up…"
               : "@ for files; / for commands"
           }
-          aria-label="Agent message"
-          role="combobox"
-          aria-expanded={suggestionOpen}
-          aria-controls={suggestionOpen ? COMPOSER_SUGGESTION_LIST_ID : undefined}
-          aria-activedescendant={suggestionOpen && activeValue ? `composer-option-${activeValue}` : undefined}
           disabled={stopping}
-          rows={2}
         />
         {composerError && (
           <div className="composer-error-alert" role="alert">
