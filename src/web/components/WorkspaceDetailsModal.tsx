@@ -161,11 +161,11 @@ export function WorkspaceDetailsModal({
                 </Button>
               </form>
             ) : (
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-muted-foreground min-w-0 break-words">
                   {isWorktree ? "Worktree" : "Workspace"} label: <b>{workspace.displayLabel}</b>
                 </span>
-                <Button size="xs" variant="outline" onClick={() => setEditing(true)}>
+                <Button size="xs" variant="outline" className="shrink-0" onClick={() => setEditing(true)}>
                   Rename
                 </Button>
               </div>
