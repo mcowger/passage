@@ -186,6 +186,59 @@ describe("TranscriptState", () => {
     expect(timeline[0].id).toBe(liveId);
   });
 
+  test("a non-streamed mixed message keeps journal order: tools first, text last", () => {
+    const state = new TranscriptState();
+    // message_end with no preceding deltas (non-streaming provider, or a
+    // live gap): the journal persists this as [toolCall, text].
+    const changed = state.applyEvent("message_end", { message: { role: "assistant", content: [
+      { type: "toolCall", id: "t1", name: "bash", arguments: { command: "ls" } },
+      { type: "text", text: "done" },
+    ] } });
+    expect(changed.map((i) => i.kind)).toEqual(["tool", "assistant"]);
+    expect(state.snapshot().timeline.map((i) => i.kind)).toEqual(["tool", "assistant"]);
+    expect(state.snapshot().timeline[0]).toMatchObject({ id: "t1", name: "bash", input: { command: "ls" }, status: "running" });
+    expect(state.snapshot().timeline[1]).toMatchObject({ kind: "assistant", text: "done" });
+
+    // Later execution events complete the tool row in place, never reorder.
+    state.applyEvent("tool_execution_start", { toolCallId: "t1", toolName: "bash", args: { command: "ls" } });
+    state.applyEvent("tool_execution_end", { toolCallId: "t1", result: "ok", isError: false });
+    const { timeline } = state.snapshot();
+    expect(timeline.map((i) => i.kind)).toEqual(["tool", "assistant"]);
+    expect(timeline[0]).toMatchObject({ id: "t1", status: "complete", result: "ok" });
+  });
+
+  test("a toolcall event swallowed behind streamed text still yields an ordered tool row", () => {
+    const state = new TranscriptState();
+    state.applyEvent("message_update", { delta: "Looking it up." });
+    // Pi attaches the cumulative partial message to every message_update;
+    // with content [text, toolCall] the text branch returns early, so the
+    // tool row must come from the message content, ordered after the text.
+    state.applyEvent("message_update", {
+      assistantMessageEvent: { type: "toolcall_end", id: "t1", toolName: "bash", toolCall: { id: "t1", name: "bash", arguments: { command: "ls" } } },
+      message: { role: "assistant", content: [
+        { type: "text", text: "Looking it up." },
+        { type: "toolCall", id: "t1", name: "bash", arguments: { command: "ls" } },
+      ] },
+    });
+    const { timeline } = state.snapshot();
+    expect(timeline.map((i) => i.kind)).toEqual(["assistant", "tool"]);
+    expect(timeline[1]).toMatchObject({ id: "t1", name: "bash", status: "running" });
+  });
+
+  test("streamed tools-then-text never duplicates rows on message_end", () => {
+    const state = new TranscriptState();
+    state.applyEvent("message_update", { assistantMessageEvent: { type: "toolcall_end", id: "t1", toolName: "bash", toolCall: { id: "t1", name: "bash", arguments: {} } } });
+    state.applyEvent("message_update", { delta: "done" });
+    state.applyEvent("message_end", { message: { role: "assistant", content: [
+      { type: "toolCall", id: "t1", name: "bash", arguments: {} },
+      { type: "text", text: "done" },
+    ] } });
+    const { timeline } = state.snapshot();
+    expect(timeline.map((i) => i.kind)).toEqual(["tool", "assistant"]);
+    expect(timeline).toHaveLength(2);
+    expect(timeline[1]).toMatchObject({ kind: "assistant", text: "done" });
+  });
+
   test("usage and context tokens update without a positive total not clobbering the last known value", () => {
     const state = new TranscriptState();
     state.applyEvent("message_update", { usage: { input: 100, output: 50, totalTokens: 150 } });

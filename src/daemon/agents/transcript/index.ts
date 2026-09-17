@@ -250,7 +250,7 @@ export class TranscriptState {
       return changed;
     }
 
-    const messageObj = object(payload.message) as { role?: string; content?: string | Array<{ type?: string; text?: string }> } | undefined;
+    const messageObj = object(payload.message) as { role?: string; content?: string | Array<{ type?: string; text?: string; id?: string; name?: string; arguments?: JsonValue }> } | undefined;
     const fullTextFromMessage = typeof messageObj?.content === "string"
       ? messageObj.content
       : Array.isArray(messageObj?.content)
@@ -259,6 +259,24 @@ export class TranscriptState {
     const fullText = (messageObj && (messageObj.role === "assistant" || !messageObj.role) ? fullTextFromMessage : undefined)
       ?? (typeof payload.text === "string" ? payload.text : undefined);
     if (fullText !== undefined && fullText.length > 0) {
+      // A full assistant message can carry toolCall blocks alongside its
+      // text (a non-streamed response, or stream deltas that never arrived).
+      // Materialize those tool rows here, in content-block order, BEFORE the
+      // text row: tool rows created later (e.g. by tool_execution_start)
+      // would otherwise land after the text and render the message inverted
+      // relative to the journal (which lists tools first, text last).
+      // Upserts are idempotent, so rows already built live keep their
+      // position, status, and result.
+      if (messageObj && (messageObj.role === "assistant" || !messageObj.role) && Array.isArray(messageObj.content)) {
+        for (const value of messageObj.content) {
+          const block = object(value);
+          if (!block || block.type !== "toolCall") continue;
+          const toolCallId = string(block.id)?.trim() ?? "";
+          if (!toolCallId) continue;
+          const toolName = string(block.name)?.trim() || "tool";
+          note(this.upsertTool(toolCallId, { name: toolName, input: (block.arguments ?? {}) as JsonValue }));
+        }
+      }
       note(this.replaceFullText("assistant", fullText));
       return changed;
     }
