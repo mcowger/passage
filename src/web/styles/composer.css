@@ -33,6 +33,12 @@
   font-variant-numeric: tabular-nums;
   font-size: 11px;
 }
+.composer-status-traffic {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-size: 11px;
+}
 .agent-change-summary { display: flex; align-items: center; gap: 7px; min-height: 24px; padding: 0 5px 4px; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
 .agent-change-files { display: inline-flex; align-items: center; gap: 4px; color: var(--foreground); font-family: var(--font-ui); }
 .agent-change-summary .add-count, .agent-change-summary .del-count { font-weight: 650; }

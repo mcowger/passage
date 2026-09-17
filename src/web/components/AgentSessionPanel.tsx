@@ -5,7 +5,7 @@ import type { WorkspaceSettings } from "../../shared/domain/settings.ts";
 import { subscribeAgent } from "../agentSocket.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { addOptimisticUserMessage, applyRowUpsert, applyUsageEvent } from "../lib/transcript-apply.ts";
-import { deriveStreamPhase, type StreamActivity } from "../lib/stream-activity.ts";
+import { deriveStreamPhase, emptyStreamActivity, measureEnvelopeBytes, trackStreamFrame, type StreamActivity } from "../lib/stream-activity.ts";
 import { AgentPanel } from "./AgentPanel.tsx";
 
 export type AgentSessionPanelProps = {
@@ -133,7 +133,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   historyRef.current = history;
   // Written on every relayed `pi` frame (a ref, not state, so a frame burst
   // never adds a render); the pill samples it on its own interval tick.
-  const streamActivityRef = useRef<StreamActivity>({ lastFrameAt: 0, phase: null });
+  const streamActivityRef = useRef<StreamActivity>(emptyStreamActivity());
   const loadingOlderRef = useRef(false);
   const onAgentChangedRef = useRef(onAgentChanged);
   onAgentChangedRef.current = onAgentChanged;
@@ -205,7 +205,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
     setNextBefore(undefined);
     loadingOlderRef.current = false;
     setLoadingOlder(false);
-    streamActivityRef.current = { lastFrameAt: 0, phase: null };
+    streamActivityRef.current = emptyStreamActivity();
     void loadWithRetry(true);
 
     const subscription = subscribeAgent(
@@ -236,10 +236,10 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
         if (value && typeof value === "object" && "type" in value) {
           const type = (value as { type?: string }).type;
           const payload = envelopePayload;
-          streamActivityRef.current.lastFrameAt = Date.now();
           if (typeof type === "string") {
-            const phase = deriveStreamPhase(type, payload);
-            if (phase) streamActivityRef.current.phase = phase;
+            trackStreamFrame(streamActivityRef.current, measureEnvelopeBytes(value), deriveStreamPhase(type, payload));
+          } else {
+            trackStreamFrame(streamActivityRef.current, measureEnvelopeBytes(value), null);
           }
           if (type === "attention" && payload?.id) {
             setAgent((current) => {

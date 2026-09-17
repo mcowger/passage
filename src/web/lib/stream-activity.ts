@@ -13,7 +13,51 @@ export type StreamActivity = {
   lastFrameAt: number;
   /** Latest content phase observed in the frame stream. */
   phase: StreamPhase | null;
+  /** Total `pi` envelopes relayed for the current run. Proves liveness even when chunks are tiny. */
+  frames: number;
+  /** Total UTF-8 bytes of relayed envelopes for the current run (wire-level, proves data is flowing). */
+  bytes: number;
 };
+
+/** Fresh activity holder for the start of a run. */
+export function emptyStreamActivity(): StreamActivity {
+  return { lastFrameAt: 0, phase: null, frames: 0, bytes: 0 };
+}
+
+/**
+ * Records one relayed envelope in place. Kept as a mutating helper because
+ * the holder lives in a ref sampled on the pill's interval -- never state,
+ * so a frame burst never adds a render.
+ */
+export function trackStreamFrame(activity: StreamActivity, byteLength: number, phase: StreamPhase | null): void {
+  activity.lastFrameAt = Date.now();
+  activity.frames += 1;
+  if (Number.isSafeInteger(byteLength) && byteLength > 0) activity.bytes += byteLength;
+  if (phase) activity.phase = phase;
+}
+
+/** UTF-8 byte length of one relayed envelope value (best-effort, never throws). */
+export function measureEnvelopeBytes(value: unknown): number {
+  try {
+    const json = JSON.stringify(value);
+    if (typeof json !== "string") return 0;
+    return new TextEncoder().encode(json).byteLength;
+  } catch {
+    return 0;
+  }
+}
+
+/** Compact human-readable byte count for the pill (`842 B`, `12.4 KB`, `3.1 MB`). */
+export function formatByteCount(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb >= 100 ? Math.round(kb) : kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb >= 100 ? Math.round(mb) : mb.toFixed(1)} MB`;
+  const gb = mb / 1024;
+  return `${gb >= 100 ? Math.round(gb) : gb.toFixed(1)} GB`;
+}
 
 /** How long after the last relayed frame the pill still counts as receiving. */
 export const RECEIVING_ACTIVITY_WINDOW_MS = 1200;

@@ -34,7 +34,7 @@ import {
 import { QuestionCard, type QuestionRequest, type QuestionOption } from "./QuestionCard.tsx";
 import { getToolDiff } from "../lib/tool-diff.ts";
 import { formatCompactTokens } from "../lib/utils.ts";
-import { RECEIVING_ACTIVITY_WINDOW_MS, STREAM_PHASE_LABELS, type StreamActivity, type StreamPhase } from "../lib/stream-activity.ts";
+import { RECEIVING_ACTIVITY_WINDOW_MS, STREAM_PHASE_LABELS, emptyStreamActivity, formatByteCount, type StreamActivity, type StreamPhase } from "../lib/stream-activity.ts";
 import {
   Clock,
   CircleAlert,
@@ -288,12 +288,14 @@ export function AgentPanel({
   const stopping = isComposerLocked(agent.status);
   const timeline = effectiveHistory?.timeline ?? [];
   const streamActive = resolveStreamActive(agent.status);
-  const fallbackStreamActivityRef = useRef<StreamActivity>({ lastFrameAt: 0, phase: null });
+  const fallbackStreamActivityRef = useRef<StreamActivity>(emptyStreamActivity());
   const activityRef = streamActivityRef ?? fallbackStreamActivityRef;
   const streamingStartedAtRef = useRef<number | null>(null);
   const [streamPhase, setStreamPhase] = useState<StreamPhase | null>(null);
   const [receiving, setReceiving] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [streamFrames, setStreamFrames] = useState(0);
+  const [streamBytes, setStreamBytes] = useState(0);
 
   // The interval is the pill's only render driver, so the elapsed timer keeps
   // advancing while Pi is silent (waiting for the first token after a prompt
@@ -305,6 +307,8 @@ export function AgentPanel({
       setStreamPhase(null);
       setReceiving(false);
       setElapsedSeconds(0);
+      setStreamFrames(0);
+      setStreamBytes(0);
       return;
     }
 
@@ -312,7 +316,7 @@ export function AgentPanel({
       streamingStartedAtRef.current = Date.now();
       // Drop the previous run's final phase so a new run does not briefly show
       // it before its first content frame lands.
-      activityRef.current = { lastFrameAt: 0, phase: null };
+      activityRef.current = emptyStreamActivity();
     }
     const startedAt = resolveStreamStartMs(agent.runStartedAt, streamingStartedAtRef.current);
     const tick = () => {
@@ -321,6 +325,8 @@ export function AgentPanel({
       const activity = activityRef.current;
       setStreamPhase(activity.phase);
       setReceiving(activity.lastFrameAt > 0 && now - activity.lastFrameAt < RECEIVING_ACTIVITY_WINDOW_MS);
+      setStreamFrames(activity.frames);
+      setStreamBytes(activity.bytes);
     };
     tick();
     const interval = setInterval(tick, STREAMING_STATS_INTERVAL_MS);
@@ -508,6 +514,8 @@ export function AgentPanel({
         streamPhase={streamPhase}
         receiving={receiving}
         elapsedSeconds={elapsedSeconds}
+        streamFrames={streamFrames}
+        streamBytes={streamBytes}
         capabilities={capabilities}
         api={api}
         busy={busy}
@@ -576,6 +584,25 @@ const LiveStreamPhase = memo(function LiveStreamPhase({
   );
 });
 
+const LiveStreamTraffic = memo(function LiveStreamTraffic({
+  frames,
+  bytes,
+}: {
+  frames: number;
+  bytes: number;
+}) {
+  const label = `${formatByteCount(bytes)} · ${frames} frame${frames === 1 ? "" : "s"}`;
+  return (
+    <span
+      className="composer-status-traffic"
+      aria-hidden="true"
+      title={`${bytes.toLocaleString()} bytes across ${frames} frame${frames === 1 ? "" : "s"} this run (live wire traffic)`}
+    >
+      · {label}
+    </span>
+  );
+});
+
 type AgentComposerProps = {
   agentId: string;
   workspaceId: string;
@@ -585,6 +612,8 @@ type AgentComposerProps = {
   streamPhase: StreamPhase | null;
   receiving: boolean;
   elapsedSeconds: number;
+  streamFrames: number;
+  streamBytes: number;
   capabilities?: AgentCapabilities;
   api: WorkspaceApi;
   busy: boolean;
@@ -656,6 +685,8 @@ function AgentComposerInner({
   streamPhase,
   receiving,
   elapsedSeconds,
+  streamFrames,
+  streamBytes,
   capabilities,
   api,
   busy,
@@ -916,6 +947,7 @@ function AgentComposerInner({
             <span className="pulse-dot" />
             <span className="composer-status-duration">{formatDuration(elapsedSeconds)}</span>
             <LiveStreamPhase phase={streamPhase} receiving={receiving} />
+            <LiveStreamTraffic frames={streamFrames} bytes={streamBytes} />
           </div>
         )}
       </div>
