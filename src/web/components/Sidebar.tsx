@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { Project, Workspace, WorkspaceSnapshot } from "../../shared/domain/workspaces.ts";
 import type { AgentSummary } from "../../shared/domain/agents.ts";
-import type { TerminalSummary } from "../../shared/domain/terminals.ts";
 import { Button } from "./ui/button.tsx";
 import { CopyValueButton } from "./CopyValueButton.tsx";
 import {
@@ -11,8 +10,6 @@ import {
   ChevronDown,
   ChevronRight,
   MoreHorizontal,
-  Bot,
-  Terminal as TerminalIcon,
   Trash2,
   Plus,
 } from "lucide-react";
@@ -33,17 +30,12 @@ import { buttonVariants } from "./ui/button.tsx";
 export type SidebarProps = {
   data: WorkspaceSnapshot;
   selected?: string;
-  selectedAgent?: string;
-  selectedTerminal?: string;
   open: boolean;
   onClose: () => void;
   onSelect: (id: string) => void;
   onNewProject: () => void;
   onNewWorktree?: (projectId: string) => void;
   agents: AgentSummary[];
-  onSelectAgent: (id: string) => void;
-  terminals: TerminalSummary[];
-  onSelectTerminal: (id: string) => void;
   onManageWorkspace?: (workspace: Workspace) => void;
   onDiscoverWorktrees?: (projectId?: string) => void;
   onArchiveProject?: (id: string) => void;
@@ -52,17 +44,12 @@ export type SidebarProps = {
 export function Sidebar({
   data,
   selected,
-  selectedAgent,
-  selectedTerminal,
   open,
   onClose,
   onSelect,
   onNewProject,
   onNewWorktree,
   agents,
-  onSelectAgent,
-  terminals,
-  onSelectTerminal,
   onManageWorkspace,
   onDiscoverWorktrees,
   onArchiveProject,
@@ -84,13 +71,8 @@ export function Sidebar({
             project={project}
             workspaces={data.workspaces}
             selected={selected}
-            selectedAgent={selectedAgent}
-            selectedTerminal={selectedTerminal}
+            agents={agents}
             onSelect={onSelect}
-            agents={selected ? agents : []}
-            onSelectAgent={onSelectAgent}
-            terminals={selected ? terminals : []}
-            onSelectTerminal={onSelectTerminal}
             onManageWorkspace={onManageWorkspace}
             onNewWorktree={onNewWorktree}
             onDiscoverWorktrees={onDiscoverWorktrees}
@@ -143,13 +125,8 @@ function ProjectRow({
   project,
   workspaces,
   selected,
-  selectedAgent,
-  selectedTerminal,
-  onSelect,
   agents,
-  onSelectAgent,
-  terminals,
-  onSelectTerminal,
+  onSelect,
   onManageWorkspace,
   onNewWorktree,
   onDiscoverWorktrees,
@@ -158,13 +135,8 @@ function ProjectRow({
   project: Project;
   workspaces: Workspace[];
   selected?: string;
-  selectedAgent?: string;
-  selectedTerminal?: string;
-  onSelect: (id: string) => void;
   agents: AgentSummary[];
-  onSelectAgent: (id: string) => void;
-  terminals: TerminalSummary[];
-  onSelectTerminal: (id: string) => void;
+  onSelect: (id: string) => void;
   onManageWorkspace?: (workspace: Workspace) => void;
   onNewWorktree?: (projectId: string) => void;
   onDiscoverWorktrees?: (projectId?: string) => void;
@@ -233,16 +205,16 @@ function ProjectRow({
         <div className="workspace-list">
           {rows.map((workspace) => {
             const isWorkspaceSelected = workspace.id === selected;
-            const workspaceAgents = isWorkspaceSelected ? agents.filter((agent) => agent.workspaceId === workspace.id) : [];
-            const workspaceTerminals = isWorkspaceSelected ? terminals.filter((term) => term.workspaceId === workspace.id) : [];
-            const hasActiveAgent = workspaceAgents.some((a) => a.status === "running" || a.status === "stopping");
+            const hasActiveAgent = agents.some(
+              (agent) => agent.workspaceId === workspace.id && (agent.status === "running" || agent.status === "stopping")
+            );
 
             return (
               <div className="workspace-group group/ws" key={workspace.id}>
                 <div
                   className={cn(
                     "workspace-row group flex items-center justify-between",
-                    isWorkspaceSelected && !selectedAgent && !selectedTerminal && "selected"
+                    isWorkspaceSelected && "selected"
                   )}
                   onClick={() => onSelect(workspace.id)}
                   role="button"
@@ -310,38 +282,6 @@ function ProjectRow({
                   )}
                 </div>
 
-                {isWorkspaceSelected && (workspaceAgents.length > 0 || workspaceTerminals.length > 0) && (
-                  <div className="agent-tree-list">
-                    {workspaceAgents.map((agent) => (
-                      <button
-                        className={cn("agent-row", agent.id === selectedAgent && "selected")}
-                        key={agent.id}
-                        onClick={() => onSelectAgent(agent.id)}
-                      >
-                        <span
-                          className={cn("status-dot dot-sm shrink-0", (agent.status === "running" || agent.status === "stopping") ? "running" : "idle")}
-                          aria-hidden="true"
-                        />
-                        <Bot className="w-3 h-3 text-muted-foreground shrink-0" />
-                        <span className="agent-row-title text-xs">{agent.title}</span>
-                        <small className={cn("agent-row-meta", (agent.status === "running" || agent.status === "stopping") && "running")}>
-                          {agent.status === "stopping" ? "stopping" : agent.status === "running" ? "running" : agent.status}
-                        </small>
-                      </button>
-                    ))}
-                    {workspaceTerminals.map((term) => (
-                      <button
-                        className={cn("agent-row", term.id === selectedTerminal && "selected")}
-                        key={term.id}
-                        onClick={() => onSelectTerminal(term.id)}
-                      >
-                        <TerminalIcon className="w-3 h-3 text-muted-foreground shrink-0" />
-                        <span className="agent-row-title text-xs">{term.title}</span>
-                        <small className="agent-row-meta">{term.status}</small>
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
             );
           })}

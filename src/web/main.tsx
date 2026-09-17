@@ -1055,8 +1055,6 @@ function App() {
         <Sidebar
           data={snapshot}
           selected={selectedWorkspaceId}
-          selectedAgent={selectedAgentId}
-          selectedTerminal={selectedTerminalId}
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
           onSelect={handleSelectWorkspace}
@@ -1067,16 +1065,13 @@ function App() {
             setWorktreeModalProjectId(projectId);
             setForm("worktree");
           }}
+          agents={agents}
           onDiscoverWorktrees={(projId) => {
             setFormError("");
             setWorktreeModalTab("discover");
             setWorktreeModalProjectId(projId);
             setForm("worktree");
           }}
-          agents={agents}
-          onSelectAgent={handleSelectAgent}
-          terminals={terminals}
-          onSelectTerminal={handleSelectTerminal}
           onManageWorkspace={(ws) => {
             setSelectedWorkspaceId(ws.id);
             setWorkspaceDetailsOpen(true);
