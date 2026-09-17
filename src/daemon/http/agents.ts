@@ -24,6 +24,7 @@ const thinkingInput = z.object({ level: z.string().trim().min(1).max(MAX_AGENT_S
 const uiResponseInput = z.object({
   id: z.string().min(1).max(256),
   value: z.string().max(MAX_AGENT_MESSAGE_BYTES).optional(),
+  custom: z.boolean().optional(),
   confirmed: z.boolean().optional(),
   cancelled: z.literal(true).optional(),
 }).refine(

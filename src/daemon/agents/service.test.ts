@@ -185,6 +185,72 @@ test("projects Pi's native dialog request to attention state and responds", asyn
   f.store.close();
 });
 
+// Mirrors ask_user_question's RPC fallback: the select rows carry a "Type
+// something." escape, and picking it re-prompts with `input`. Any other value
+// parses as "nothing selected" there and declines the whole questionnaire, so
+// the daemon has to answer with the row and pass the text to the follow-up.
+const DIALOG_ROWS = ["1. Pepperoni \u2014 classic", "2. Pineapple \u2014 sweet", "3. Type something."];
+const dialogScript = (logPath: string, followUp: boolean) => [
+  `const fs=require('fs'),rows=${JSON.stringify(DIALOG_ROWS)};let asked=false;`,
+  `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);`,
+  `if(r.type==='extension_ui_response'){fs.appendFileSync(${JSON.stringify(logPath)},JSON.stringify({id:r.id,value:r.value})+'\\n');`,
+  followUp
+    ? `if(r.value===rows[2])process.stdout.write(JSON.stringify({type:'extension_ui_request',id:'prompt-2',method:'input',title:'Type your answer:'})+'\\n');`
+    : "",
+  `continue}process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');`,
+  `if(r.type==='get_entries'&&!asked){asked=true;setTimeout(()=>process.stdout.write(JSON.stringify({type:'extension_ui_request',id:'prompt-1',method:'select',title:'[Pizza] Favorite topping?',options:rows})+'\\n'),5)}}})`,
+].join("");
+const readUiResponses = async (logPath: string) =>
+  (await Bun.file(logPath).text()).split("\n").flatMap((line) => (line ? [JSON.parse(line)] : []));
+
+test("a typed answer takes the select dialog's free-text row and auto-answers the follow-up prompt", async () => {
+  const f = await make();
+  const log = join(f.root, "ui-responses.jsonl");
+  const service = new AgentService(f.repos, {
+    sessionsRoot: join(f.root, "question-sessions"),
+    manager: new PiRpcManager(1),
+    pi: { executable: process.execPath, executableArgs: ["-e", dialogScript(log, true)] },
+  });
+  const agent = await service.create("w");
+  await Bun.sleep(30);
+  expect(service.snapshot(agent.id).pendingUiRequest?.id).toBe("prompt-1");
+
+  await service.respondExtensionUi(agent.id, { id: "prompt-1", value: "anchovies and honey", custom: true });
+  await Bun.sleep(60);
+
+  // The select was answered with the escape row, then the typed text went to
+  // the input follow-up Pi opened for it.
+  expect(await readUiResponses(log)).toEqual([
+    { id: "prompt-1", value: DIALOG_ROWS[2] },
+    { id: "prompt-2", value: "anchovies and honey" },
+  ]);
+  // The follow-up never surfaced as a second card.
+  const snap = service.snapshot(agent.id);
+  expect(snap.pendingUiRequest).toBeUndefined();
+  expect(snap.lastKnownStatus).toBe("running");
+
+  await service.shutdown();
+  f.store.close();
+});
+
+test("a picked option still resolves to the row Pi offered", async () => {
+  const f = await make();
+  const log = join(f.root, "ui-responses.jsonl");
+  const service = new AgentService(f.repos, {
+    sessionsRoot: join(f.root, "pick-sessions"),
+    manager: new PiRpcManager(1),
+    pi: { executable: process.execPath, executableArgs: ["-e", dialogScript(log, false)] },
+  });
+  const agent = await service.create("w");
+  await Bun.sleep(30);
+  // The card shows bare labels; Pi needs the numbered row back.
+  await service.respondExtensionUi(agent.id, { id: "prompt-1", value: "Pineapple" });
+  await Bun.sleep(60);
+  expect(await readUiResponses(log)).toEqual([{ id: "prompt-1", value: DIALOG_ROWS[1] }]);
+  await service.shutdown();
+  f.store.close();
+});
+
 describe("transcript row ordering (regression: reorder/duplicate chat rows)", () => {
   test("concurrent tool calls stay in start order with no duplication, and the user row lands before them", async () => {
     const f = await make();

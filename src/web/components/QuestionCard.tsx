@@ -42,7 +42,7 @@ export interface QuestionRequest {
 
 export interface QuestionCardProps {
   request: QuestionRequest;
-  onRespond: (result: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) => Promise<void>;
+  onRespond: (result: { id: string; value?: string; custom?: boolean; confirmed?: boolean; cancelled?: true }) => Promise<void>;
 }
 
 const SUMMARY_TAB = "summary";
@@ -163,17 +163,21 @@ export function QuestionCard({ request, onRespond }: QuestionCardProps) {
       } else {
         // Collect answers for questions
         const answers: string[] = [];
+        let isCustom = false;
         questions.forEach((_q, idx) => {
           const selected = selectedOptions[idx] ?? [];
           const custom = customText[idx]?.trim();
           if (customMode[idx] && custom) {
             answers.push(custom);
+            isCustom = true;
           } else if (selected.length > 0) {
             answers.push(selected.join(", "));
           }
         });
         const finalValue = answers.length === 1 ? answers[0] : answers.join("; ");
-        await onRespond({ id: request.id, value: finalValue });
+        // Flag typed answers: the daemon must not match them against the
+        // offered rows, it has to take the dialog's free-text path instead.
+        await onRespond({ id: request.id, value: finalValue, ...(isCustom ? { custom: true } : {}) });
       }
       setHasResponded(true);
     } catch {

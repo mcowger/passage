@@ -9,7 +9,7 @@ import {
   MAX_AGENT_MESSAGE_BYTES,
   type AgentImage,
 } from "../../../shared/protocol/agents.ts";
-import { parsePiExtensionUiDialog } from "../ui.ts";
+import { parsePiExtensionUiDialog, type PiExtensionUiDialog } from "../ui.ts";
 import { errorFields, logger } from "../../logging.ts";
 
 export type PiRecord = { type?: string; id?: string; [key: string]: unknown };
@@ -58,6 +58,14 @@ const asError = (value: unknown) => value instanceof Error ? value : new Error(S
 function piAgentDirectory(): string {
   return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
 }
+/** Map a card answer back to the select row pi offered, label-first. */
+function matchSelectOption(options: string[], value: string): string | undefined {
+  if (options.includes(value)) return value;
+  const target = value.trim().toLowerCase();
+  return options.find((option) => option.replace(/^\d+\.\s*/, "").split(/\s*[\u2014\u2013-]\s*/)[0]?.trim().toLowerCase() === target)
+    ?? options.find((option) => option.toLowerCase().includes(target));
+}
+
 async function drain(stream: ReadableStream<Uint8Array>, consume: (chunk: Uint8Array) => void) {
   const reader = stream.getReader();
   try { while (true) { const result = await reader.read(); if (result.done) return; consume(result.value); } }
@@ -65,9 +73,14 @@ async function drain(stream: ReadableStream<Uint8Array>, consume: (chunk: Uint8A
 }
 
 export type PiExtensionUiResponse =
-  | { id: string; value: string }
+  | { id: string; value: string; custom?: boolean }
   | { id: string; confirmed: boolean }
   | { id: string; cancelled: true };
+
+// ask_user_question's RPC fallback appends a free-text escape row to every
+// select dialog; picking it is how the extension is told to re-prompt with
+// `ctx.ui.input` for a typed answer.
+const CUSTOM_ANSWER_ROW = /^(?:\d+\.\s*)?(?:Type something\.?|Other\b.*)$/i;
 
 export class PiRpcProcess {
   readonly child: Bun.Subprocess<"pipe", "pipe", "pipe">;
@@ -79,6 +92,7 @@ export class PiRpcProcess {
   stderrTruncated = false;
   private sequence = 0; private eventBytes = 0; private stderrBytes = 0; private nextId = 0;
   private pendingUiRequest?: PiRecord;
+  private customAnswer?: string;
   private readonly stderrDecoder = new TextDecoder();
   private readonly listeners = new Set<(event: PiEvent) => void>();
   private readonly lifecycleListeners = new Set<(event: PiLifecycleEvent) => void>();
@@ -129,9 +143,12 @@ export class PiRpcProcess {
       if (record.success === false) request.reject(new Error(String(record.error ?? "Pi command failed"))); else request.resolve(record);
       return;
     }
-    if (parsePiExtensionUiDialog(record)) {
+    const dialog = parsePiExtensionUiDialog(record);
+    if (dialog) {
+      if (this.answerCustomFollowUp(dialog)) return;
       this.pendingUiRequest = record;
     } else if (record.type === "agent_settled" || record.type === "turn_end") {
+      this.customAnswer = undefined;
       this.pendingUiRequest = undefined;
     }
     const event = { ...record, sequence: ++this.sequence, generation: this.generation };
@@ -202,17 +219,24 @@ export class PiRpcProcess {
     const pending = this.getPendingUiRequest();
     const targetId = pending?.id ? String(pending.id) : response.id;
     let finalValue = "value" in response ? response.value : undefined;
+    this.customAnswer = undefined;
 
-    // If this is a select dialog, match the value to the offered options so plugins like ask_user_question accept it
     if (pending?.method === "select" && Array.isArray(pending.options) && finalValue) {
-      const options = pending.options as string[];
-      if (!options.includes(finalValue)) {
-        const match = options.find((opt) =>
-          opt.toLowerCase().includes(finalValue!.toLowerCase()) ||
-          opt.replace(/^\d+\.\s*/, "").split(" — ")[0]?.trim().toLowerCase() === finalValue!.toLowerCase()
-        );
-        if (match) {
-          finalValue = match;
+      const options = (pending.options as unknown[]).filter((option): option is string => typeof option === "string");
+      const custom = "custom" in response && response.custom === true;
+      // Select answers must be one of the offered rows: pi hands the raw
+      // string back to the extension, which reads the row number off it. A
+      // typed answer parses as "nothing selected" and cancels the whole
+      // questionnaire ("User declined to answer questions"), so answer with
+      // the free-text row and let the input follow-up carry the text.
+      const match = custom ? undefined : matchSelectOption(options, finalValue);
+      if (match !== undefined) {
+        finalValue = match;
+      } else {
+        const escape = options.find((option) => CUSTOM_ANSWER_ROW.test(option.trim()));
+        if (escape !== undefined) {
+          this.customAnswer = finalValue;
+          finalValue = escape;
         }
       }
     }
@@ -229,10 +253,34 @@ export class PiRpcProcess {
       payload.value = finalValue;
     }
 
+    this.writeUiResponse(payload);
+    this.pendingUiRequest = undefined;
+  }
+
+  private writeUiResponse(payload: Record<string, unknown>): void {
     const line = `${JSON.stringify(payload)}\n`;
     if (encoder.encode(line).byteLength > this.limits.maxCommandBytes) throw new Error("Pi UI response exceeds byte limit");
     this.child.stdin.write(line);
+  }
+
+  /**
+   * After the free-text row is selected, ask_user_question re-prompts with
+   * `ctx.ui.input` to collect the answer. The user already typed it into the
+   * Passage card, so answer that hop inline and keep it out of the event log —
+   * surfacing it would pop a second, redundant prompt.
+   */
+  private answerCustomFollowUp(dialog: PiExtensionUiDialog): boolean {
+    const value = this.customAnswer;
+    this.customAnswer = undefined;
+    if (value === undefined || dialog.method !== "input") return false;
+    try {
+      this.writeUiResponse({ type: "extension_ui_response", id: dialog.id, value });
+    } catch (error) {
+      logger("pi-rpc").warn("Pi custom answer follow-up failed", { event: "pi.custom_answer_failed", generation: this.generation, ...errorFields(error) });
+      return false;
+    }
     this.pendingUiRequest = undefined;
+    return true;
   }
   replay(after = 0): ReplayResult { const first = this.events[0]?.sequence; return { snapshotRequired: this.eventsTruncated && first !== undefined && after < first - 1, events: this.events.filter(event => event.sequence > after) }; }
   subscribe(listener: (event: PiEvent) => void, after = 0) { for (const event of this.replay(after).events) { try { listener(event); } catch {} } this.listeners.add(listener); return () => this.listeners.delete(listener); }

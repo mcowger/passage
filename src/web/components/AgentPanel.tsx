@@ -774,7 +774,7 @@ export function AgentPanel({
 
 
 
-  const handleRespondUi = async (result: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) => {
+  const handleRespondUi = async (result: { id: string; value?: string; custom?: boolean; confirmed?: boolean; cancelled?: true }) => {
     try {
       await api.respondUi(agent.id, result);
       await onRefresh();

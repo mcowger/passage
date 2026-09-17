@@ -254,7 +254,7 @@ export function createWorkspaceApi(
       const query = new URLSearchParams({ path, limit: String(Math.min(Math.max(limit, 1), 50)) });
       return directorySuggestResponseSchema.parse(await request(`/api/filesystem/directories?${query}`));
     },
-    async respondUi(id: string, response: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) {
+    async respondUi(id: string, response: { id: string; value?: string; custom?: boolean; confirmed?: boolean; cancelled?: true }) {
       okResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/ui-response`, {
         method: "POST",
         body: JSON.stringify(response),
