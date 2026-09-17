@@ -85,6 +85,7 @@ export type AgentPanelProps = {
   onLoadMoreHistory?: () => void;
   /** Live activity holder written by the socket owner; sampled on the pill's interval. */
   streamActivityRef?: { current: StreamActivity };
+  onWorkspaceDeleted?: () => void | Promise<void>;
 };
 
 export function resolveActiveQuestionRequest(agent: AgentSummary): QuestionRequest | null {
@@ -267,14 +268,19 @@ function ComposerMergeButton({
   workspaceId,
   api,
   disabled,
+  onWorkspaceDeleted,
 }: {
   workspaceId: string;
   api: WorkspaceApi;
   disabled?: boolean;
+  onWorkspaceDeleted?: () => void | Promise<void>;
 }) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [merging, setMerging] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [mergedBranch, setMergedBranch] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -288,6 +294,8 @@ function ComposerMergeButton({
   useEffect(() => {
     setStatus(null);
     setConfirmOpen(false);
+    setMergedBranch(null);
+    setDeleteError("");
     void refresh();
   }, [refresh]);
 
@@ -323,6 +331,8 @@ function ComposerMergeButton({
     void api.gitMergeIntoMain(workspaceId).then(
       (next) => {
         setStatus(next);
+        setDeleteError("");
+        setMergedBranch(next.branchRef ?? branchRef);
         toast.success(`Merged ${next.branchRef ?? branchRef} into main`);
       },
       (err: unknown) => {
@@ -332,23 +342,44 @@ function ComposerMergeButton({
     ).finally(() => setMerging(false));
   };
 
-  if (!isComposerMergeRelevant(status)) return null;
-  const branchRef = status?.branchRef ?? "branch";
+  const handleDeleteWorkspace = () => {
+    if (mergedBranch === null || deleting) return;
+    setDeleting(true);
+    setDeleteError("");
+    void api.removeWorktree(workspaceId).then(
+      async () => {
+        setDeleting(false);
+        setMergedBranch(null);
+        toast.success("Workspace deleted");
+        await onWorkspaceDeleted?.();
+      },
+      (err: unknown) => {
+        setDeleting(false);
+        setDeleteError(friendlyApiError(err, "Could not delete the workspace. Remove it from workspace details."));
+      },
+    );
+  };
+
+  const mergeRelevant = isComposerMergeRelevant(status);
+  if (!mergeRelevant && mergedBranch === null) return null;
+  const branchRef = status?.branchRef ?? mergedBranch ?? "branch";
   const ahead = status?.aheadOfMain ?? 0;
   return (
     <>
-      <Button
-        variant="secondary"
-        size="xs"
-        className="composer-action-btn"
-        onClick={() => setConfirmOpen(true)}
-        disabled={disabled || merging}
-        title={`Merge ${branchRef} into main (${ahead} commit${ahead === 1 ? "" : "s"} ahead)`}
-        aria-label={`Merge ${branchRef} into main`}
-      >
-        {merging ? <Spinner className="size-3" /> : <GitMerge size={14} aria-hidden="true" />}
-        Merge
-      </Button>
+      {mergeRelevant ? (
+        <Button
+          variant="secondary"
+          size="xs"
+          className="composer-action-btn"
+          onClick={() => setConfirmOpen(true)}
+          disabled={disabled || merging}
+          title={`Merge ${branchRef} into main (${ahead} commit${ahead === 1 ? "" : "s"} ahead)`}
+          aria-label={`Merge ${branchRef} into main`}
+        >
+          {merging ? <Spinner className="size-3" /> : <GitMerge size={14} aria-hidden="true" />}
+          Merge
+        </Button>
+      ) : null}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -362,6 +393,32 @@ function ComposerMergeButton({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmMerge}>Merge into main</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={mergedBranch !== null} onOpenChange={(open) => { if (!open && !deleting) setMergedBranch(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Merged into main</AlertDialogTitle>
+            <AlertDialogDescription>
+              <code className="font-mono">{mergedBranch}</code> was merged into main. Delete this workspace?
+              The branch is kept; the worktree directory is removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteError && <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Keep workspace</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(event) => {
+                event.preventDefault();
+                handleDeleteWorkspace();
+              }}
+            >
+              {deleting ? <Spinner className="size-3" /> : null}
+              Delete workspace
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -386,6 +443,7 @@ export function AgentPanel({
   loadingMoreHistory,
   onLoadMoreHistory,
   streamActivityRef,
+  onWorkspaceDeleted,
 }: AgentPanelProps) {
   const effectiveHistory = previewHistory ?? history;
   const conciseKey = `passage:agent:${agent.id}:concise`;
@@ -674,6 +732,7 @@ export function AgentPanel({
         onSessionExpansionChange={handleUpdateSessionExpansion}
         onResetSessionExpansion={handleResetSessionExpansion}
         isExpansionOverridden={sessionExpansionOverridden}
+        onWorkspaceDeleted={onWorkspaceDeleted}
       />
     </section>
   );
@@ -778,6 +837,7 @@ type AgentComposerProps = {
   onSessionExpansionChange: (next: TimelineExpansionSettings) => void;
   onResetSessionExpansion: () => void;
   isExpansionOverridden: boolean;
+  onWorkspaceDeleted?: () => void | Promise<void>;
 };
 
 /** Middle-out truncation that preserves the filename suffix. */
@@ -866,6 +926,7 @@ function AgentComposerInner({
   onSessionExpansionChange,
   onResetSessionExpansion,
   isExpansionOverridden,
+  onWorkspaceDeleted,
 }: AgentComposerProps) {
   const draftKey = `passage:agent:${agentId}:draft`;
   const [draft, setDraft] = useState(() => localStorage.getItem(draftKey) ?? "");
@@ -1318,7 +1379,7 @@ function AgentComposerInner({
             )}
           </div>
           <div className="composer-toolbar-right">
-            <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} />
+            <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} onWorkspaceDeleted={onWorkspaceDeleted} />
             <DisplayOptionsPopover
               expansion={sessionExpansion}
               onExpansionChange={onSessionExpansionChange}

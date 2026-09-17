@@ -903,6 +903,7 @@ function App() {
               setAgents((current) => current.map((agent) => agent.id === updatedAgent.id ? updatedAgent : agent));
             }}
             previewHistory={previewEnabled ? previewHistory ?? undefined : undefined}
+            onWorkspaceDeleted={handleWorkspaceRemoved}
           />
         ) : tab.kind === "overview" ? (
           <WorkspaceOverview

@@ -14,6 +14,7 @@ export type AgentSessionPanelProps = {
   onAgentChanged?: (agent: AgentSummary) => void;
   previewHistory?: AgentHistory;
   settings?: WorkspaceSettings;
+  onWorkspaceDeleted?: () => void | Promise<void>;
 };
 
 /** Timeline rows fetched for the initial render and on every full reload.
@@ -119,7 +120,7 @@ export function prependOlderHistory(current: AgentHistory | undefined, older: Ag
   return { ...current, timeline: [...olderRows, ...current.timeline] };
 }
 
-export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, previewHistory, settings }: AgentSessionPanelProps) {
+export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, previewHistory, settings, onWorkspaceDeleted }: AgentSessionPanelProps) {
   const [agent, setAgent] = useState(initialAgent);
   const [history, setHistory] = useState<AgentHistory>();
   const [capabilities, setCapabilities] = useState<AgentCapabilities>();
@@ -289,6 +290,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       loadingMoreHistory={loadingOlder}
       onLoadMoreHistory={loadOlder}
       streamActivityRef={streamActivityRef}
+      onWorkspaceDeleted={onWorkspaceDeleted}
     />
   );
 }
