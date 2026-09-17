@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { formatDuration, isComposerLocked, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
+import { formatDuration, formatThinkingPreview, isComposerLocked, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 
 const modelOptions: AgentCapabilities["models"] = [
@@ -38,6 +38,14 @@ describe("formatDuration", () => {
     expect(formatDuration(65)).toBe("1m 05s");
     expect(formatDuration(125)).toBe("2m 05s");
     expect(formatDuration(365)).toBe("6m 05s");
+  });
+});
+
+describe("formatThinkingPreview", () => {
+  test("removes balanced bold markers from consecutive thinking summaries", () => {
+    expect(formatThinkingPreview("**Summary Line**\n\n**Another Summary Line**")).toBe(
+      "Summary Line Another Summary Line",
+    );
   });
 });
 

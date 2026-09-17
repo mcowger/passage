@@ -460,6 +460,16 @@ export function formatDuration(seconds: number): string {
   return `${mins}m ${remSecs}s`;
 }
 
+export function formatThinkingPreview(text: string, maxLength = 70): string {
+  return text
+    .replace(/^(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)/gm, "")
+    .replace(/(\*\*|__|~~)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
 const LiveStreamingStats = memo(function LiveStreamingStats({
   tokens,
   tokensPerSecond,
@@ -1254,7 +1264,7 @@ export const TimelineRow = memo(function TimelineRow({
   }
   if (item.kind === "thinking") {
     const isExpanded = isItemExpanded(item, expansion, latestIds, manualToggles, concise);
-    const preview = item.text.replace(/^[#*\-\s]+/, "").slice(0, 70).replace(/\n/g, " ");
+    const preview = formatThinkingPreview(item.text);
     return (
       <details
         className="thinking-row"
