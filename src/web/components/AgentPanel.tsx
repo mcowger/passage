@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { DragEvent, ReactNode } from "react";
 import type { AgentCapabilities, AgentHistory, AgentSummary, SlashCommand, TimelineItem, ToolActivity, UserImageRef } from "../../shared/domain/agents.ts";
 import type { WorkspaceSettings, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
 import { DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
@@ -11,6 +11,7 @@ import type { GitStatus } from "../../shared/domain/git.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { DisplayOptionsPopover } from "./DisplayOptionsPopover.tsx";
 import { collectExpandedIds, computeLatestTimelineIds, isItemExpanded, type LatestTimelineIds } from "../lib/timeline-expansion.ts";
+import { hasFileDrag } from "../lib/image-drop.ts";
 import { Streamdown } from "streamdown";
 import { Button } from "./ui/button.tsx";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert.tsx";
@@ -541,6 +542,39 @@ export function AgentPanel({
     [agent]
   );
   const pinnedQuestionIdRef = useRef<string | null>(null);
+  // Image drop zone: files dropped anywhere on the chat window attach to
+  // the composer draft via the ref below. The depth counter balances the
+  // bubbled dragenter/dragleave pairs from nested children so the overlay
+  // only clears once the pointer truly leaves the panel.
+  const attachFilesRef = useRef<((files: FileList | File[] | null) => void) | null>(null);
+  const [dropActive, setDropActive] = useState(false);
+  const dropDepthRef = useRef(0);
+
+  const handlePanelDragEnter = (event: DragEvent) => {
+    if (stopping || !hasFileDrag(event.dataTransfer.types)) return;
+    event.preventDefault();
+    dropDepthRef.current += 1;
+    setDropActive(true);
+  };
+  const handlePanelDragOver = (event: DragEvent) => {
+    if (stopping || !hasFileDrag(event.dataTransfer.types)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+  const handlePanelDragLeave = (event: DragEvent) => {
+    if (!hasFileDrag(event.dataTransfer.types)) return;
+    event.preventDefault();
+    dropDepthRef.current = Math.max(0, dropDepthRef.current - 1);
+    if (dropDepthRef.current === 0) setDropActive(false);
+  };
+  const handlePanelDrop = (event: DragEvent) => {
+    if (stopping || !hasFileDrag(event.dataTransfer.types)) return;
+    event.preventDefault();
+    dropDepthRef.current = 0;
+    setDropActive(false);
+    const files = event.dataTransfer.files;
+    if (files && files.length > 0) attachFilesRef.current?.(files);
+  };
 
   // Scrolling near the top backfills the previous page of history. Refs
   // (rather than effect deps) keep the mount-only scroll listener below
@@ -655,7 +689,14 @@ export function AgentPanel({
   };
 
   return (
-    <section className="agent-panel" aria-label={`Agent conversation ${agent.title}`}>
+    <section
+      className={`agent-panel${dropActive ? " agent-panel-drop-active" : ""}`}
+      aria-label={`Agent conversation ${agent.title}`}
+      onDragEnter={handlePanelDragEnter}
+      onDragOver={handlePanelDragOver}
+      onDragLeave={handlePanelDragLeave}
+      onDrop={handlePanelDrop}
+    >
       {error && (
         <div className="alert agent-alert" role="alert">
           <span>{error}</span>
@@ -733,7 +774,13 @@ export function AgentPanel({
         onResetSessionExpansion={handleResetSessionExpansion}
         isExpansionOverridden={sessionExpansionOverridden}
         onWorkspaceDeleted={onWorkspaceDeleted}
+        attachFilesRef={attachFilesRef}
       />
+      {dropActive && (
+        <div className="agent-drop-overlay" aria-hidden="true">
+          <span className="agent-drop-overlay-label">Drop images to attach</span>
+        </div>
+      )}
     </section>
   );
 }
@@ -838,6 +885,8 @@ type AgentComposerProps = {
   onResetSessionExpansion: () => void;
   isExpansionOverridden: boolean;
   onWorkspaceDeleted?: () => void | Promise<void>;
+  /** Receives the composer's file-attach function so panel-level drops can attach. */
+  attachFilesRef?: { current: ((files: FileList | File[] | null) => void) | null };
 };
 
 /** Middle-out truncation that preserves the filename suffix. */
@@ -927,6 +976,7 @@ function AgentComposerInner({
   onResetSessionExpansion,
   isExpansionOverridden,
   onWorkspaceDeleted,
+  attachFilesRef,
 }: AgentComposerProps) {
   const draftKey = `passage:agent:${agentId}:draft`;
   const [draft, setDraft] = useState(() => localStorage.getItem(draftKey) ?? "");
@@ -1114,7 +1164,7 @@ function AgentComposerInner({
     );
   };
 
-  const addImages = async (files: FileList | null) => {
+  const addImages = async (files: FileList | File[] | null) => {
     if (!files) return;
     let reserved = 0;
     try {
@@ -1162,6 +1212,14 @@ function AgentComposerInner({
       setComposerError(cause instanceof Error ? cause.message : "Unable to attach image");
     }
   };
+
+  useEffect(() => {
+    if (!attachFilesRef) return;
+    attachFilesRef.current = addImages;
+    return () => {
+      attachFilesRef.current = null;
+    };
+  });
 
   return (
     <footer className="composer-container">

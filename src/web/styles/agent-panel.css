@@ -1,5 +1,6 @@
 /* Agent Panel */
 .agent-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -156,4 +157,30 @@
 .composer-mode-toggle:hover { background: var(--surface-hover); color: var(--foreground); }
 
 .agent-alert { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 18px 0; }
+
+/* Image drop zone overlay: files dragged over the chat window attach to
+ * the composer draft on drop. Pointer events stay off so the drop itself
+ * still targets (and bubbles from) the underlying panel children. */
+.agent-drop-overlay {
+  position: absolute;
+  inset: 8px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  pointer-events: none;
+}
+.agent-drop-overlay-label {
+  padding: 8px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+}
 
