@@ -348,15 +348,55 @@ function pointAtOffset(root: HTMLElement, target: number): { node: Node; offset:
   return visit(root) ?? { node: root, offset: root.childNodes.length };
 }
 
-function setSelectionOffset(root: HTMLElement, position: number): void {
-  const point = pointAtOffset(root, position);
+function clampPointOffset(point: { node: Node; offset: number }): number {
+  const max = point.node.nodeType === Node.TEXT_NODE
+    ? point.node.nodeValue?.length ?? 0
+    : point.node.childNodes.length;
+  return Math.max(0, Math.min(point.offset, max));
+}
+
+function selectRawRange(root: HTMLElement, start: number, end: number): boolean {
   const selection = window.getSelection();
-  if (!selection) return;
-  const range = document.createRange();
-  range.setStart(point.node, Math.min(point.offset, point.node.nodeType === Node.TEXT_NODE ? point.node.nodeValue?.length ?? 0 : point.node.childNodes.length));
-  range.collapse(true);
-  selection.removeAllRanges();
-  selection.addRange(range);
+  if (!selection) return false;
+  try {
+    const anchor = pointAtOffset(root, start);
+    const focus = pointAtOffset(root, end);
+    const range = document.createRange();
+    range.setStart(anchor.node, clampPointOffset(anchor));
+    range.setEnd(focus.node, clampPointOffset(focus));
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Programmatic edits applied as string splices + replaceChildren bypass the
+ * browser's native undo stack — the edit never lands on it, and the DOM
+ * replacement wipes whatever was there (paste-then-Cmd+Z-does-nothing).
+ * Routing the same edit through execCommand keeps it on the native stack so
+ * undo/redo keep working. Returns true when the browser performed the edit;
+ * the resulting input event then flows through onInput -> onChange as usual,
+ * so callers must not apply a manual update on success.
+ */
+function editWithNativeUndo(editor: HTMLElement, start: number, end: number, text: string): boolean {
+  if (typeof document.execCommand !== "function") return false;
+  try {
+    if (document.activeElement !== editor) editor.focus();
+    if (!selectRawRange(editor, start, end)) return false;
+    const applied = text === ""
+      ? document.execCommand("delete")
+      : document.execCommand("insertText", false, text);
+    return applied !== false;
+  } catch {
+    return false;
+  }
+}
+
+function setSelectionOffset(root: HTMLElement, position: number): void {
+  if (!selectRawRange(root, position, position)) return;
 }
 
 export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(function ComposerEditor(
@@ -404,7 +444,15 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
       replaceEditorContent(editor);
     }
     const position = pendingCaretRef.current;
-    if (position !== null && document.activeElement === editor) setSelectionOffset(editor, position);
+    if (position !== null && document.activeElement === editor) {
+      // Re-setting an identical collapsed selection splits the browser's
+      // typing coalescing, degrading native undo to char-by-char. Only move
+      // the caret when it isn't already where we want it.
+      const current = selectionOffsets(editor);
+      if (!current || current.start !== position || current.end !== position) {
+        setSelectionOffset(editor, position);
+      }
+    }
   }, [value]);
 
   useEffect(() => {
@@ -426,6 +474,10 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
 
   const replaceRange = (start: number, end: number, text: string, event?: ClipboardEvent<HTMLDivElement>) => {
     event?.preventDefault();
+    const editor = editorRef.current;
+    // Prefer the native undo stack; fall back to a manual splice (which the
+    // layout effect reconciles into the DOM) when execCommand is unavailable.
+    if (editor && editWithNativeUndo(editor, start, end, text)) return;
     const next = value.slice(0, start) + text + value.slice(end);
     const caret = start + text.length;
     pendingCaretRef.current = caret;
