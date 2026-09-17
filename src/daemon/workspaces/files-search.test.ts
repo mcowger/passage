@@ -101,4 +101,44 @@ describe("FileService.search", () => {
     await expect(f.files.search("missing-workspace", "x", 20)).rejects.toThrow();
     f.store.close();
   });
+
+  test("respects gitignore and never surfaces .git internals", async () => {
+    const f = await fixture();
+    const run = (args: string[]) => Bun.spawn(["git", "-C", f.root, ...args], { stdout: "ignore", stderr: "ignore" }).exited;
+    await run(["init", "-q"]);
+    await writeFile(join(f.root, ".gitignore"), "node_modules/\ndist/\n*.log\n");
+    await mkdir(join(f.root, "src"));
+    await writeFile(join(f.root, "src", "index.ts"), "x");
+    await writeFile(join(f.root, "src", "debug.log"), "x");
+    await mkdir(join(f.root, "node_modules"));
+    await writeFile(join(f.root, "node_modules", "dep.js"), "x");
+    await mkdir(join(f.root, "dist"));
+    await writeFile(join(f.root, "dist", "bundle.js"), "x");
+
+    expect((await f.files.search(f.workspace.id, "dep", 20)).entries).toHaveLength(0);
+    expect((await f.files.search(f.workspace.id, "bundle", 20)).entries).toHaveLength(0);
+    expect((await f.files.search(f.workspace.id, "debug", 20)).entries).toHaveLength(0);
+    const visible = await f.files.search(f.workspace.id, "index", 20);
+    expect(visible.entries.map((e) => e.path)).toContain("src/index.ts");
+    const unfiltered = await f.files.search(f.workspace.id, "", 50);
+    expect(unfiltered.entries.some((e) => e.path.startsWith("node_modules"))).toBe(false);
+    expect(unfiltered.entries.some((e) => e.path.startsWith("dist"))).toBe(false);
+    expect(unfiltered.entries.some((e) => e.path === ".git" || e.path.startsWith(".git/"))).toBe(false);
+    expect((await f.files.search(f.workspace.id, "HEAD", 20)).entries).toHaveLength(0);
+    f.store.close();
+  });
+
+  test("still surfaces tracked files that match gitignore", async () => {
+    const f = await fixture();
+    const run = (args: string[]) => Bun.spawn(["git", "-C", f.root, ...args], { stdout: "ignore", stderr: "ignore" }).exited;
+    await run(["init", "-q"]);
+    await writeFile(join(f.root, ".gitignore"), "node_modules/\n");
+    await mkdir(join(f.root, "node_modules"));
+    await writeFile(join(f.root, "node_modules", "keep.js"), "x");
+    await run(["add", "-f", "node_modules/keep.js"]);
+
+    const { entries } = await f.files.search(f.workspace.id, "keep", 20);
+    expect(entries.map((e) => e.path)).toContain("node_modules/keep.js");
+    f.store.close();
+  });
 });

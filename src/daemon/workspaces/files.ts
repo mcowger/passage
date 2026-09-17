@@ -8,6 +8,8 @@ import { WorkspaceService, WorkspaceError } from "./service.ts";
 
 export class FileError extends Error { constructor(public readonly code: "not-found" | "invalid-path" | "outside-root" | "archived" | "not-file" | "not-directory" | "binary" | "oversize" | "conflict" | "io", message: string) { super(message); this.name = "FileError"; } }
 
+const GIT_SEARCH_TIMEOUT_MS = 2000;
+const MAX_GIT_LS_BYTES = 5_000_000;
 const MAX_NAME_LENGTH = 255;
 function validateName(name: string): void {
   if (!name || name.length > MAX_NAME_LENGTH || name === "." || name === ".." || name.includes("/") || name.includes("\\") || name.includes("\0")) {
@@ -64,14 +66,23 @@ export class FileService {
   }
   async read(workspaceId: string, path: string): Promise<FileRead> { const absolute = await this.resolve(workspaceId, path); const s = await this.safeStat(absolute); if (!s.isFile()) throw new FileError("not-file", "Path is not a file"); if (s.size > this.maxBytes) throw new FileError("oversize", "File is too large"); const data = await readFile(absolute); if (data.includes(0)) throw new FileError("binary", "Binary files are not supported"); return { path, content: new TextDecoder().decode(data), revision: revision(s, hash(data)) }; }
   /**
-   * Bounded case-insensitive substring/prefix match over a bounded walk from
-   * the workspace canonical root. Used by the composer `@` autocomplete.
-   * Never follows symlinks; rejects traversal via `resolve()`.
+   * Bounded case-insensitive substring/prefix match from the workspace
+   * canonical root. Used by the composer `@` autocomplete. Never follows
+   * symlinks; rejects traversal via `resolve()`.
+   *
+   * Respects gitignore: inside a git checkout the candidate set comes from
+   * `git ls-files --cached --others --exclude-standard`, so ignored
+   * untracked paths (node_modules/, dist/, .data/, *.har, ...) never
+   * surface as mentions. Tracked files still surface even when they match
+   * an ignore pattern, matching git semantics. Outside a git checkout it
+   * falls back to a bounded walk (always skipping `.git`).
    */
   async search(workspaceId: string, query: string, limit = 20): Promise<{ entries: { path: string; kind: "file" | "directory" }[]; truncated: boolean }> {
     const capped = Math.min(Math.max(Math.floor(limit) || 20, 1), 50);
     const needle = query.slice(0, 64).toLowerCase();
     const root = await this.resolve(workspaceId, ".");
+    const gitFiles = await this.listGitFiles(root);
+    if (gitFiles !== null) return this.searchGitEntries(root, gitFiles, needle, capped);
     const matches: { path: string; kind: "file" | "directory"; score: number }[] = [];
     const queue: { absolute: string; relative: string }[] = [{ absolute: root, relative: "." }];
     let visited = 0;
@@ -89,6 +100,8 @@ export class FileService {
           const item = await directory.read();
           if (!item) break;
           if (!item.isDirectory() && !item.isFile()) continue;
+          // `.git` internals are never mentionable, git or not.
+          if (item.name === ".git") continue;
           visited += 1;
           const relativePath = current.relative === "." ? item.name : `${current.relative}/${item.name}`;
           if (relativePath.length > 4096) continue;
@@ -128,6 +141,92 @@ export class FileService {
     matches.sort((a, b) => a.score - b.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     const truncated = matches.length > capped;
     return { entries: matches.slice(0, capped).map(({ path, kind }) => ({ path, kind })), truncated };
+  }
+  /**
+   * Non-ignored file paths under `root` via git, relative to `root`
+   * (`git -C root` scopes output to the subtree). Returns null when `root`
+   * is not in a git checkout or git fails, so callers fall back to a walk.
+   */
+  private async listGitFiles(root: string): Promise<string[] | null> {
+    let process: ReturnType<typeof Bun.spawn>;
+    try {
+      process = Bun.spawn(
+        ["git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        { stdout: "pipe", stderr: "ignore" },
+      );
+    } catch {
+      return null;
+    }
+    const timeout = setTimeout(() => {
+      if (process.exitCode === null) process.kill();
+    }, GIT_SEARCH_TIMEOUT_MS);
+    try {
+      const buffer = await new Response(process.stdout as ReadableStream).arrayBuffer();
+      if (await process.exited !== 0) return null;
+      if (buffer.byteLength > MAX_GIT_LS_BYTES) return null;
+      const text = new TextDecoder().decode(buffer);
+      const files = text
+        .split("\0")
+        .filter((entry) => entry.length > 0 && entry.length <= 4096)
+        .filter((entry) => !entry.startsWith("/") && !entry.split("/").includes(".."));
+      return files;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+      if (process.exitCode === null) process.kill();
+      await process.exited;
+    }
+  }
+  /**
+   * Score/filter a git file list with the same prefix-first ordering as the
+   * walk fallback. Directories are derived from file parents (an ignored
+   * directory has no non-ignored files under it, so it never surfaces).
+   * Symlinks are re-checked via lstat to preserve the no-follow invariant.
+   */
+  private async searchGitEntries(
+    root: string,
+    gitFiles: string[],
+    needle: string,
+    capped: number,
+  ): Promise<{ entries: { path: string; kind: "file" | "directory" }[]; truncated: boolean }> {
+    const directories = new Set<string>();
+    for (const file of gitFiles) {
+      const parts = file.split("/");
+      for (let depth = 1; depth < parts.length; depth += 1) {
+        directories.add(parts.slice(0, depth).join("/"));
+      }
+    }
+    const scored: { path: string; kind: "file" | "directory"; score: number }[] = [];
+    const score = (relativePath: string): number | null => {
+      if (!needle) return 1;
+      const lowered = relativePath.toLowerCase();
+      const base = relativePath.split("/").at(-1)!.toLowerCase();
+      if (base.startsWith(needle)) return 0;
+      if (lowered.includes(needle)) return 1;
+      return null;
+    };
+    for (const file of gitFiles) {
+      const value = score(file);
+      if (value !== null) scored.push({ path: file, kind: "file", score: value });
+    }
+    for (const directory of directories) {
+      const value = score(directory);
+      if (value !== null) scored.push({ path: directory, kind: "directory", score: value });
+    }
+    scored.sort((a, b) => a.score - b.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    const truncated = scored.length > capped;
+    const entries: { path: string; kind: "file" | "directory" }[] = [];
+    for (const candidate of scored) {
+      if (entries.length >= capped) break;
+      try {
+        if ((await lstat(join(root, candidate.path))).isSymbolicLink()) continue;
+      } catch {
+        continue;
+      }
+      entries.push({ path: candidate.path, kind: candidate.kind });
+    }
+    return { entries, truncated };
   }
   listDirectory(workspaceId: string, path = ".", cursor?: string) { return this.list(workspaceId, path, cursor); }
   /**
