@@ -90,3 +90,27 @@ export const workspaceActionsChangedPayloadSchema = z.object({
   runId: z.string().min(1).max(128),
 }).strict();
 export type WorkspaceActionsChangedPayload = z.infer<typeof workspaceActionsChangedPayloadSchema>;
+
+/** Well-known subject for workspace-list invalidations. Per-workspace
+ *  subjects (`files-changed`, `git-status-changed`, `actions-changed`)
+ *  only reach clients subscribed to that workspace; the sidebar snapshot
+ *  (`GET /api/workspaces/snapshot`) needs a global subject so a second
+ *  window learns about creates, deletes, archives, renames, and location
+ *  changes made elsewhere. */
+export const WORKSPACES_SNAPSHOT_SUBJECT = "workspaces" as const;
+
+export const workspacesChangedReasonSchema = z.enum([
+  "create", "remove", "archive", "reopen", "update",
+]);
+export type WorkspacesChangedReason = z.infer<typeof workspacesChangedReasonSchema>;
+
+/** Invalidation-only payload for `workspaces-changed` events on the
+ *  `WORKSPACES_SNAPSHOT_SUBJECT` subject. Receivers refetch
+ *  `GET /api/workspaces/snapshot`; workspace/project detail never rides
+ *  the wire. `workspaceId`/`projectId` are opaque hints only. */
+export const workspacesChangedPayloadSchema = z.object({
+  reason: workspacesChangedReasonSchema,
+  workspaceId: workspaceIdSchema.optional(),
+  projectId: workspaceIdSchema.optional(),
+}).strict();
+export type WorkspacesChangedPayload = z.infer<typeof workspacesChangedPayloadSchema>;

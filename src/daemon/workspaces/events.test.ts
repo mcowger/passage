@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { WorkspaceEventHub } from "./events.ts";
+import { WORKSPACES_SNAPSHOT_SUBJECT } from "../../shared/protocol/index.ts";
 import type { FilesChangedPayload, GitStatusChangedPayload } from "../../shared/protocol/index.ts";
 
 const payload = (workspaceId: string, extra: Partial<FilesChangedPayload> = {}): FilesChangedPayload => ({
@@ -65,6 +66,29 @@ describe("WorkspaceEventHub", () => {
     expect(got[1].type).toBe("git-status-changed");
     expect(got[1].payload).toMatchObject({ workspaceId: "wsp_a", reason: "stage" });
     expect(h.currentSequence("wsp_a")).toBe(3);
+  });
+  test("emits workspaces-changed on the shared list subject", () => {
+    const h = new WorkspaceEventHub();
+    const got: Array<{ sequence: number; type: string; subjectId: string; payload: unknown }> = [];
+    const sub = h.subscribe(WORKSPACES_SNAPSHOT_SUBJECT, 0, (e) => got.push({ sequence: e.sequence, type: e.type, subjectId: e.subjectId, payload: e.payload }));
+    sub.activate();
+    const event = h.emitWorkspacesChanged({ reason: "remove", workspaceId: "wsp_x" });
+    expect(event?.type).toBe("workspaces-changed");
+    expect(event?.subjectId).toBe(WORKSPACES_SNAPSHOT_SUBJECT);
+    expect(got).toHaveLength(1);
+    expect(got[0]).toMatchObject({ sequence: 1, type: "workspaces-changed", subjectId: WORKSPACES_SNAPSHOT_SUBJECT });
+    // The list sequence is independent of per-workspace subjects.
+    expect(h.currentSequence("wsp_x")).toBe(0);
+    expect(h.currentSequence(WORKSPACES_SNAPSHOT_SUBJECT)).toBe(1);
+    const replay = h.subscribe(WORKSPACES_SNAPSHOT_SUBJECT, 0, () => {}).replay;
+    expect(replay.kind).toBe("replay");
+  });
+  test("drops invalid workspaces-changed payloads without throwing", () => {
+    const h = new WorkspaceEventHub();
+    expect(h.emitWorkspacesChanged({ reason: "explode" as never })).toBeNull();
+    expect(h.emitWorkspacesChanged({ reason: "remove", workspaceId: "" })).toBeNull();
+    expect(h.currentSequence(WORKSPACES_SNAPSHOT_SUBJECT)).toBe(0);
+    expect(h.emitWorkspacesChanged({ reason: "archive", workspaceId: "wsp_a" })?.sequence).toBe(1);
   });
   test("drops invalid git payloads without throwing", () => {
     const h = new WorkspaceEventHub();

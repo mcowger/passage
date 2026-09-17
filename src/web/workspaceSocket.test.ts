@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PROTOCOL_VERSION, type EventEnvelope } from "../shared/protocol/index.ts";
+import { PROTOCOL_VERSION, WORKSPACES_SNAPSHOT_SUBJECT, type EventEnvelope } from "../shared/protocol/index.ts";
 import { parseWorkspaceMessage, subscribeEnvelope, unsubscribeEnvelope, type WorkspaceSocketState } from "./workspaceSocket.ts";
 
 const initial: WorkspaceSocketState = { sequence: 0, connected: true, snapshotRequired: false };
@@ -34,6 +34,33 @@ describe("workspace socket protocol", () => {
     expect(parseWorkspaceMessage({ ...event, stream: "pi", subjectId: "wsp-1" }, initial, "wsp-1")).toBe(initial);
   });
 
+  test("tracks workspaces-changed events on the shared list subject", () => {
+    expect(WORKSPACES_SNAPSHOT_SUBJECT).toBe("workspaces");
+    expect(subscribeEnvelope(WORKSPACES_SNAPSHOT_SUBJECT, 0)).toMatchObject({
+      version: PROTOCOL_VERSION,
+      channel: "workspace",
+      type: "subscribe",
+      payload: { workspaceId: WORKSPACES_SNAPSHOT_SUBJECT, afterSequence: 0 },
+    });
+    const event: EventEnvelope = {
+      version: PROTOCOL_VERSION,
+      stream: "workspace",
+      subjectId: WORKSPACES_SNAPSHOT_SUBJECT,
+      sequence: 1,
+      type: "workspaces-changed",
+      payload: { reason: "remove", workspaceId: "wsp-1" },
+    };
+    expect(parseWorkspaceMessage(event, initial, WORKSPACES_SNAPSHOT_SUBJECT)).toMatchObject({ sequence: 1 });
+    // List events never leak into per-workspace state and vice versa.
+    expect(parseWorkspaceMessage(event, initial, "wsp-1")).toBe(initial);
+    expect(parseWorkspaceMessage({
+      version: PROTOCOL_VERSION,
+      stream: "workspace",
+      subjectId: "wsp-1",
+      kind: "snapshot-required",
+      metadata: { snapshotUrl: "/api/workspaces/wsp-1/files?path=.", sequence: "9" },
+    }, initial, WORKSPACES_SNAPSHOT_SUBJECT)).toBe(initial);
+  });
   test("marks gaps and snapshot requirements for authoritative reload", () => {
     const gap = parseWorkspaceMessage({
       version: PROTOCOL_VERSION,

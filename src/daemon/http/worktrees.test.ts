@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MetadataRepositories, MetadataStore } from "../metadata/index.ts";
 import { WorktreeService } from "../workspaces/worktrees.ts";
+import { WorkspaceEventHub } from "../workspaces/events.ts";
 import { MetadataGenerator } from "../workspaces/metadata-generator.ts";
 import { createWorktreeRoutes } from "./worktrees.ts";
-import { projectSchema } from "../../shared/domain/workspaces.ts";
+import { projectSchema, workspaceSchema } from "../../shared/domain/workspaces.ts";
+import { WORKSPACES_SNAPSHOT_SUBJECT } from "../../shared/protocol/index.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -77,6 +79,53 @@ describe("worktrees HTTP API", () => {
     f.store.close();
   });
 
+  test("emits workspaces-changed on worktree remove and nothing on failure", async () => {
+    const f = await fixture();
+    const hub = new WorkspaceEventHub();
+    const service = new WorktreeService(f.repos, undefined, new MetadataGenerator(50, { executable: "/does/not/exist" }));
+    const app = createWorktreeRoutes(service, undefined, hub);
+    const sequence = () => hub.currentSequence(WORKSPACES_SNAPSHOT_SUBJECT);
+    // Failed removes (missing workspace, invalid body) emit nothing.
+    expect((await app.fetch(request("/api/workspaces/wsp_nonexistent/worktree/remove", { method: "POST", body: JSON.stringify({}) }))).status).toBe(404);
+    expect(sequence()).toBe(0);
+    const project = projectSchema.parse({
+      id: "prj_remove_emit",
+      configuredRootPath: f.root,
+      canonicalRootPath: f.root,
+      displayLabel: "Remove Emit",
+      archivedAt: null,
+    });
+    f.repos.projects.save(project);
+    // A worktree whose directory is already gone removes straight from the DB.
+    const workspace = workspaceSchema.parse({
+      id: "wsp_remove_emit",
+      projectId: project.id,
+      kind: "worktree",
+      cwd: join(f.root, "gone-worktree"),
+      checkoutRoot: join(f.root, "gone-worktree"),
+      mainRepositoryRoot: f.root,
+      branchRef: "feature/gone",
+      displayLabel: "Gone",
+      locationId: null,
+      ownershipState: "owned",
+      markerId: null,
+      markerPath: null,
+      repairDetail: null,
+      archivedAt: null,
+    });
+    f.repos.workspaces.save(workspace);
+    const res = await app.fetch(request(`/api/workspaces/${workspace.id}/worktree/remove`, { method: "POST", body: JSON.stringify({}) }));
+    expect(res.status).toBe(200);
+    expect(sequence()).toBe(1);
+    const replay = hub.subscribe(WORKSPACES_SNAPSHOT_SUBJECT, 0, () => {}).replay;
+    expect(replay.kind).toBe("replay");
+    if (replay.kind !== "replay") throw new Error("expected replay");
+    expect(replay.events).toHaveLength(1);
+    expect(replay.events[0]).toMatchObject({ type: "workspaces-changed", subjectId: WORKSPACES_SNAPSHOT_SUBJECT });
+    expect(replay.events[0].payload).toMatchObject({ reason: "remove", workspaceId: workspace.id });
+    expect(f.repos.workspaces.get(workspace.id)).toBeUndefined();
+    f.store.close();
+  });
   test("rejects remove with invalid body with 400 invalid-request", async () => {
     const f = await fixture();
     const res = await f.app.fetch(

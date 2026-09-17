@@ -11,7 +11,7 @@ import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
 import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
 import { BUILTIN_THEMES, BUILTIN_FONTS } from "../shared/domain/customization.ts";
 import { createWorkspaceApi, friendlyApiError } from "./api.ts";
-import { subscribeWorkspace } from "./workspaceSocket.ts";
+import { subscribeWorkspace, subscribeWorkspaces } from "./workspaceSocket.ts";
 import type { WorkspaceActionRun } from "../shared/domain/workspace-actions.ts";
 import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
@@ -350,6 +350,33 @@ function App() {
   }, [api]);
 
   useEffect(() => { void refreshWorkspaces(); }, [refreshWorkspaces]);
+
+  // Live workspace-list invalidation from other windows/tabs: the mutating
+  // window already reloaded its snapshot inline, so WS echoes (own or
+  // remote) are debounced into a single refetch. Reconnects, missed
+  // sequences, and mobile suspension reconcile immediately. Without this,
+  // a workspace deleted in one window lingers in every other window.
+  const refreshWorkspacesRef = useRef(refreshWorkspaces);
+  refreshWorkspacesRef.current = refreshWorkspaces;
+  useEffect(() => {
+    let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
+    const subscription = subscribeWorkspaces(
+      () => {
+        if (invalidateTimer) clearTimeout(invalidateTimer);
+        invalidateTimer = setTimeout(() => {
+          invalidateTimer = undefined;
+          void refreshWorkspacesRef.current();
+        }, 750);
+      },
+      async () => {
+        void refreshWorkspacesRef.current();
+      },
+    );
+    return () => {
+      if (invalidateTimer) clearTimeout(invalidateTimer);
+      subscription.close();
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedWorkspaceId) return;

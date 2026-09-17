@@ -6,10 +6,13 @@ import {
   opaqueIdSchema,
   PROTOCOL_VERSION,
   workspaceActionsChangedPayloadSchema,
+  WORKSPACES_SNAPSHOT_SUBJECT,
+  workspacesChangedPayloadSchema,
   type EventEnvelope,
   type FilesChangedPayload,
   type GitStatusChangedPayload,
   type WorkspaceActionsChangedPayload,
+  type WorkspacesChangedPayload,
 } from "../../shared/protocol/index.ts";
 
 const DEFAULT_MAX_SUBJECTS = 256;
@@ -74,6 +77,16 @@ export class WorkspaceEventHub {
     const parsed = workspaceActionsChangedPayloadSchema.safeParse(payload);
     if (!parsed.success) return null;
     return this.publish(parsed.data.workspaceId, "actions-changed", parsed.data);
+  }
+
+  /** Publish a `workspaces-changed` invalidation on the well-known
+   *  workspace-list subject. Never throws; invalid payloads are dropped
+   *  so HTTP mutations always succeed. Receivers refetch
+   *  `GET /api/workspaces/snapshot` over HTTP. */
+  emitWorkspacesChanged(payload: WorkspacesChangedPayload): EventEnvelope | null {
+    const parsed = workspacesChangedPayloadSchema.safeParse(payload);
+    if (!parsed.success) return null;
+    return this.publish(WORKSPACES_SNAPSHOT_SUBJECT, "workspaces-changed", parsed.data);
   }
 
   private publish(workspaceId: string, type: string, payload: unknown): EventEnvelope | null {

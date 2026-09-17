@@ -43,6 +43,7 @@ import {
   commandEnvelopeSchema,
   decodeBinaryFrame,
   opaqueIdSchema,
+  WORKSPACES_SNAPSHOT_SUBJECT,
   workspaceSubscriptionPayloadSchema,
   workspaceTargetPayloadSchema,
   type Acknowledgement,
@@ -150,10 +151,10 @@ app.get("/api/daemon/snapshot", (context) => context.json({
   protocolVersion: PROTOCOL_VERSION,
   metadataSchemaVersion: metadata.schemaVersion,
 }));
-app.route("/", createWorkspaceRoutes(workspaceService, { onArchiveWorkspace: (workspaceId) => previewManager.stopForWorkspace(workspaceId) }));
+app.route("/", createWorkspaceRoutes(workspaceService, { onArchiveWorkspace: (workspaceId) => previewManager.stopForWorkspace(workspaceId) }, workspaceEvents));
 app.route("/", createGitRoutes(workspaceService, gitService, workspaceEvents));
 app.route("/", createFileRoutes(fileService, workspaceEvents));
-app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (workspaceId) => previewManager.stopForWorkspace(workspaceId) }));
+app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (workspaceId) => previewManager.stopForWorkspace(workspaceId) }, workspaceEvents));
 app.route("/", createWorkspaceActionRoutes(workspaceActionsService));
 app.route("/", createTerminalRoutes(terminalManager));
 app.route("/", createPreviewRoutes(previewManager, workspaceEvents));
@@ -300,7 +301,9 @@ async function handleWorkspaceCommand(command: CommandEnvelope, socket: Bun.Serv
           subjectId: input.workspaceId,
           kind: "snapshot-required",
           metadata: {
-            snapshotUrl: `/api/workspaces/${input.workspaceId}/files?path=.`,
+            snapshotUrl: input.workspaceId === WORKSPACES_SNAPSHOT_SUBJECT
+              ? "/api/workspaces/snapshot"
+              : `/api/workspaces/${input.workspaceId}/files?path=.`,
             sequence: String(workspaceEvents.currentSequence(input.workspaceId)),
           },
         });

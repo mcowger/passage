@@ -1,10 +1,13 @@
 import {
   PROTOCOL_VERSION,
+  WORKSPACES_SNAPSHOT_SUBJECT,
   commandEnvelopeSchema,
   eventEnvelopeSchema,
   snapshotRequiredSchema,
   type EventEnvelope,
 } from "../shared/protocol/index.ts";
+
+export { WORKSPACES_SNAPSHOT_SUBJECT };
 
 const RECONNECT_DELAY_MS = 800;
 
@@ -71,6 +74,26 @@ export function unsubscribeEnvelope(workspaceId: string) {
 }
 
 export type WorkspaceSocket = { close: () => void };
+
+/** Subscribe to `workspaces-changed` list invalidations on the well-known
+ *  workspace-list subject. `onInvalidate` fires for live events (refetch
+ *  `GET /api/workspaces/snapshot`); `onReconcile` fires when the client
+ *  fell behind, reconnected, or returned from suspension. Only
+ *  `workspaces-changed` events are forwarded; other types on the shared
+ *  subject are ignored. */
+export function subscribeWorkspaces(
+  onInvalidate: (value: EventEnvelope) => void,
+  onReconcile: () => Promise<void>,
+): WorkspaceSocket {
+  return subscribeWorkspace(
+    WORKSPACES_SNAPSHOT_SUBJECT,
+    (event) => {
+      if (event.type !== "workspaces-changed") return;
+      onInvalidate(event);
+    },
+    onReconcile,
+  );
+}
 
 /** Subscribe to `files-changed` invalidations for a workspace over the shared
  *  `/ws` multiplex. `onInvalidate` fires for live events (refetch the
