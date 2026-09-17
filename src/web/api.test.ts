@@ -96,6 +96,7 @@ test("client requests worktree operations and suggestions", async () => {
       return Response.json({ ok: true });
     }
     return Response.json({
+      workspace: {
       id: "wsp_123",
       projectId: "prj_123",
       kind: "worktree",
@@ -110,6 +111,8 @@ test("client requests worktree operations and suggestions", async () => {
       markerPath: "/worktrees/test/.passage-worktree.json",
       repairDetail: null,
       archivedAt: null,
+      },
+      setup: null,
     });
   });
 
@@ -118,8 +121,8 @@ test("client requests worktree operations and suggestions", async () => {
   expect(suggestion.branch).toBe("feature/test");
 
   const created = await api.createWorktree("prj_123", { locationId: "loc_123", ref: "feature/test", label: "Test Worktree" });
-  expect(created.id).toBe("wsp_123");
-  expect(created.kind).toBe("worktree");
+  expect(created.workspace.id).toBe("wsp_123");
+  expect(created.workspace.kind).toBe("worktree");
 
   await api.removeWorktree("wsp_123", true);
   expect(calls.at(-1)?.url).toContain("/api/workspaces/wsp_123/worktree/remove");
@@ -144,4 +147,37 @@ test("client disables the timeout once a response resolves", async () => {
     { requestTimeoutMs: 25 },
   );
   expect(await api.snapshot()).toEqual(snapshot);
+});
+
+test("client starts, reads, and cancels workspace action runs", async () => {
+  const run = {
+    id: "arun_1",
+    workspaceId: "wsp_123",
+    actionId: "setup",
+    status: "running",
+    commands: ["./init.sh"],
+    results: [],
+    currentCommand: "./init.sh",
+    error: null,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+  };
+  const calls: string[] = [];
+  const api = createWorkspaceApi(async (input, init) => {
+    calls.push(`${init?.method ?? "GET"} ${String(input)}`);
+    if (String(input).includes("/actions")) {
+      return Response.json(String(input).endsWith("/actions") ? { actions: [] } : run, { status: String(input).endsWith("/run") ? 202 : 200 });
+    }
+    throw new Error(`unexpected request ${String(input)}`);
+  });
+  expect(await api.listWorkspaceActions("wsp_123")).toEqual({ actions: [] });
+  expect((await api.runWorkspaceAction("wsp_123", "setup")).id).toBe("arun_1");
+  expect((await api.getWorkspaceActionRun("wsp_123", "arun_1")).status).toBe("running");
+  expect((await api.cancelWorkspaceActionRun("wsp_123", "arun_1")).workspaceId).toBe("wsp_123");
+  expect(calls).toEqual([
+    "GET /api/workspaces/wsp_123/actions",
+    "POST /api/workspaces/wsp_123/actions/run",
+    "GET /api/workspaces/wsp_123/actions/runs/arun_1",
+    "POST /api/workspaces/wsp_123/actions/runs/arun_1/cancel",
+  ]);
 });

@@ -20,6 +20,7 @@ import { filesSearchResponseSchema, directorySuggestResponseSchema } from "../sh
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
 import type { GitDiff, GitStatus } from "../shared/domain/git.ts";
 import { webPreviewSchema, type WebPreview } from "../shared/domain/previews.ts";
+import { createWorktreeResponseSchema, workspaceActionListSchema, workspaceActionRunSchema, type CreateWorktreeResponse, type WorkspaceActionList, type WorkspaceActionRun } from "../shared/domain/workspace-actions.ts";
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 const acceptedResponseSchema = z.object({ accepted: z.literal(true) }).strict();
@@ -169,8 +170,20 @@ export function createWorkspaceApi(
     async suggestWorktree(projectId: string, purpose: string, model?: string): Promise<{ label: string; branch: string; folder: string }> {
       return await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees/suggest`, { method: "POST", body: JSON.stringify({ purpose, ...(model?.trim() ? { model: model.trim() } : {}) }) }) as { label: string; branch: string; folder: string };
     },
-    async createWorktree(projectId: string, input: { locationId: string; ref: string; label: string; folder?: string; createBranch?: boolean; baseRef?: string }): Promise<Workspace> {
-      return workspaceSchema.parse(await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees`, { method: "POST", body: JSON.stringify(input) }));
+    async createWorktree(projectId: string, input: { locationId: string; ref: string; label: string; folder?: string; createBranch?: boolean; baseRef?: string }): Promise<CreateWorktreeResponse> {
+      return createWorktreeResponseSchema.parse(await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees`, { method: "POST", body: JSON.stringify(input) }));
+    },
+    async listWorkspaceActions(workspaceId: string): Promise<WorkspaceActionList> {
+      return workspaceActionListSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/actions`));
+    },
+    async runWorkspaceAction(workspaceId: string, id: string): Promise<WorkspaceActionRun> {
+      return workspaceActionRunSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/actions/run`, { method: "POST", body: JSON.stringify({ id }) }));
+    },
+    async getWorkspaceActionRun(workspaceId: string, runId: string): Promise<WorkspaceActionRun> {
+      return workspaceActionRunSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/actions/runs/${encodeURIComponent(runId)}`));
+    },
+    async cancelWorkspaceActionRun(workspaceId: string, runId: string): Promise<WorkspaceActionRun> {
+      return workspaceActionRunSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/actions/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }));
     },
     async discoverWorktrees(projectId: string): Promise<DiscoveredWorktree[]> {
       return (await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees/discover`)) as DiscoveredWorktree[];

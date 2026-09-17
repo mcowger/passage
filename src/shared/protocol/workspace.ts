@@ -81,3 +81,12 @@ export const gitStatusChangedPayloadSchema = z.object({
   reason: gitStatusChangedReasonSchema,
 }).strict();
 export type GitStatusChangedPayload = z.infer<typeof gitStatusChangedPayloadSchema>;
+
+/** Invalidation-only payload for `actions-changed` workspace events.
+ *  Receivers refetch the authoritative action-run HTTP snapshot; run
+ *  results never ride the wire. */
+export const workspaceActionsChangedPayloadSchema = z.object({
+  workspaceId: workspaceIdSchema,
+  runId: z.string().min(1).max(128),
+}).strict();
+export type WorkspaceActionsChangedPayload = z.infer<typeof workspaceActionsChangedPayloadSchema>;

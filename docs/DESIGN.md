@@ -633,8 +633,23 @@ Creation performs these steps transactionally where Git permits:
 
 Removal requires the workspace ownership record. Dirty or unmerged worktrees
 require an explicit force-confirmation path. Removal never deletes branches
-automatically. V1 omits arbitrary repository setup/teardown scripts and auto-allocated ports; these are high-risk orchestration features
-with weak safety and little value to the core model.
+automatically.
+
+A new worktree auto-starts its workspace setup action when one is defined:
+the `worktree.setup` command list from the worktree's `paseo.json`, executed
+sequentially in the worktree directory. Setup scripts are commonly slow, so
+runs are asynchronous: starting an action returns a run snapshot immediately
+and the commands proceed in the background, with at most one active run per
+workspace. The same action can be re-run (and a running one cancelled) on
+any workspace via the workspace actions API; run start/settle is published
+as an `actions-changed` workspace invalidation and clients refetch the run
+snapshot over HTTP. Runs are live daemon memory and do not survive a daemon
+restart. Only commands from `paseo.json` ever execute — the API accepts an
+action id, never a command string — and a setup failure never fails creation
+or deletes user work; the create response carries the background run
+reference for the caller to poll. Teardown scripts and auto-allocated ports
+remain omitted as high-risk orchestration features with weak safety and
+little value to the core model.
 
 ### Files, editor, changes, and diff panels
 
