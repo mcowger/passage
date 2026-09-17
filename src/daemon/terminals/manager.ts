@@ -17,6 +17,29 @@ import { errorFields, logger } from "../logging.ts";
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 const MAX_REPLAY_BYTES = 128 * 1024; // 128 KB ring buffer per terminal
+const DEFAULT_SHELL = "/bin/bash";
+
+/**
+ * Build the argv used to launch an interactive shell on the PTY.
+ *
+ * Bun attaches the PTY slave to the child's stdio but does not make it the
+ * child's controlling terminal. Without one the shell starts with
+ * "no job control", /dev/tty is unavailable (ENXIO), Tab completion backed
+ * by /dev/tty (e.g. fzf-tab) breaks, and Ctrl+C handling misbehaves, which
+ * leaves the terminal looking frozen. On Linux, prefix with util-linux
+ * `setsid --ctty` so the shell becomes a session leader with the PTY slave
+ * as its controlling terminal (setsid execs directly when the child is not
+ * already a process-group leader, so kill()/exited semantics are unchanged).
+ * Everywhere else, or when setsid is missing, fall back to a direct spawn.
+ */
+export function resolvePtyShellArgv(shell = process.env.SHELL || DEFAULT_SHELL): string[] {
+  if (process.platform === "linux") {
+    try {
+      if (Bun.which("setsid")) return ["setsid", "--ctty", shell];
+    } catch {}
+  }
+  return [shell];
+}
 
 export type TerminalSubscriber = {
   clientId: string;
@@ -60,7 +83,7 @@ class TerminalInstance {
     this.rows = rows;
     this.createdAt = new Date().toISOString();
 
-    const shell = process.env.SHELL || "/bin/bash";
+    const shell = process.env.SHELL || DEFAULT_SHELL;
     this.terminal = new Bun.Terminal({
       name: "xterm-256color",
       cols: columns,
@@ -71,7 +94,7 @@ class TerminalInstance {
     });
 
     try {
-      this.process = Bun.spawn([shell], {
+      this.process = Bun.spawn(resolvePtyShellArgv(shell), {
         cwd,
         env: {
           ...process.env,

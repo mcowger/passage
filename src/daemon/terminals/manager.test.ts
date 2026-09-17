@@ -24,6 +24,16 @@ async function fixture() {
   return { root, store, workspaces, project, workspace, manager };
 }
 
+async function waitForOutput(chunks: Uint8Array[], predicate: (text: string) => boolean, message: string): Promise<string> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const text = new TextDecoder().decode(Buffer.concat(chunks));
+    if (predicate(text)) return text;
+    if (Date.now() > deadline) throw new Error(message);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 describe("TerminalManager", () => {
   test("creates, lists, writes input, and terminates terminals", async () => {
     const f = await fixture();
@@ -106,5 +116,41 @@ describe("TerminalManager", () => {
     expect(f.manager.terminateForWorkspace(f.workspace.id)).toEqual([]);
     f.manager.terminate(c.id);
     f.store.close();
+  });
+
+  test("shell starts with a controlling terminal (job control, /dev/tty)", async () => {
+    // Without a controlling terminal the shell reports "no job control",
+    // /dev/tty is unavailable (ENXIO), Tab completion backed by /dev/tty
+    // (e.g. fzf-tab) breaks, and Ctrl+C handling misbehaves, leaving the
+    // terminal looking frozen.
+    const f = await fixture();
+    try {
+      const summary = await f.manager.create(f.workspace.id, { title: "ctty", columns: 80, rows: 24 });
+      const chunks: Uint8Array[] = [];
+      f.manager.attach(summary.id, {
+        clientId: "client_ctty",
+        isHolder: false,
+        sendBinary: (buf) => {
+          chunks.push(decodeBinaryFrame(buf).payload);
+        },
+        sendControl: () => {},
+      });
+
+      f.manager.writeInput(summary.id, "exec 9<>/dev/tty && echo CTTY_RESULT_OK || echo CTTY_RESULT_FAIL\n");
+      // NB: the PTY echoes the typed command line, which itself contains
+      // both marker names, so match the markers as full output lines.
+      const text = await waitForOutput(
+        chunks,
+        (t) => t.includes("\r\nCTTY_RESULT_OK\r\n") || t.includes("\r\nCTTY_RESULT_FAIL\r\n"),
+        "shell did not report /dev/tty status",
+      );
+      expect(text).toContain("\r\nCTTY_RESULT_OK\r\n");
+      expect(text).not.toContain("no job control");
+      expect(text).not.toContain("cannot set terminal process group");
+
+      f.manager.terminate(summary.id);
+    } finally {
+      f.store.close();
+    }
   });
 });
