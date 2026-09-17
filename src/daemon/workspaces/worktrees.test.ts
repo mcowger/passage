@@ -32,7 +32,7 @@ async function fixture() {
   const worktreeService = new WorktreeService(repositories, gitService);
 
   const project = await workspaceService.registerProject(repo, "Test Project");
-  return { root, repo, store, repositories, workspaceService, worktreeService, project };
+  return { root, repo, store, repositories, workspaceService, worktreeService, gitService, project };
 }
 
 afterEach(async () => {
@@ -149,5 +149,87 @@ describe("WorktreeService creation", () => {
       (error: unknown) => error as { code: string },
     );
     expect(failure?.code).toBe("branch-exists");
+  });
+});
+
+describe("WorktreeService removal and reconciliation", () => {
+  test("removes an owned worktree without requiring an on-disk marker", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "branch-to-remove");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const workspace = await f.worktreeService.create(f.project.id, location.id, "branch-to-remove", "To Remove", "wt-remove");
+
+    expect(workspace.ownershipState).toBe("owned");
+    expect(workspace.markerId).toBeNull();
+    expect(workspace.markerPath).toBeNull();
+
+    // Verify git worktree is clean and no marker file was written
+    const markerExists = await Bun.file(join(workspace.cwd, ".passage-worktree.json")).exists();
+    expect(markerExists).toBe(false);
+
+    await f.worktreeService.remove(workspace.id);
+
+    expect(f.repositories.workspaces.get(workspace.id)).toBeUndefined();
+    const exists = await Bun.file(workspace.cwd).exists().catch(() => false);
+    expect(exists).toBe(false);
+  });
+
+  test("removes legacy marker file if present during removal", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "legacy-branch");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const workspace = await f.worktreeService.create(f.project.id, location.id, "legacy-branch", "Legacy", "wt-legacy");
+
+    // Simulate a legacy marker file left on disk
+    const legacyMarker = join(workspace.cwd, ".passage-worktree.json");
+    await writeFile(legacyMarker, JSON.stringify({ formatVersion: 1, workspaceId: workspace.id }));
+    expect(await Bun.file(legacyMarker).exists()).toBe(true);
+
+    await f.worktreeService.remove(workspace.id);
+    expect(f.repositories.workspaces.get(workspace.id)).toBeUndefined();
+  });
+
+  test("rejects removal of an unowned worktree", async () => {
+    const f = await fixture();
+    const wtPath = join(f.root, "wt-unowned");
+    await git(f.repo, "worktree", "add", "-b", "unowned-branch", wtPath);
+    const imported = await f.worktreeService.importWorktree(f.project.id, { path: wtPath });
+
+    await expect(f.worktreeService.remove(imported.id)).rejects.toMatchObject({
+      code: "not-owned",
+    });
+  });
+
+  test("reconciles an owned worktree without an on-disk marker", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "branch-to-reconcile");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const workspace = await f.worktreeService.create(f.project.id, location.id, "branch-to-reconcile", "Reconcile", "wt-reconcile");
+
+    const reconciled = await f.worktreeService.reconcile(workspace.id);
+    expect(reconciled.ownershipState).toBe("owned");
+    expect(reconciled.repairDetail).toBeNull();
+  });
+
+  test("handles worktree whose directory was already removed from disk", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "branch-deleted-manually");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const workspace = await f.worktreeService.create(f.project.id, location.id, "branch-deleted-manually", "Deleted", "wt-deleted");
+
+    // Delete directory manually from disk
+    await rm(workspace.cwd, { recursive: true, force: true });
+
+    // Should gracefully clean up without throwing
+    await f.worktreeService.remove(workspace.id);
+    expect(f.repositories.workspaces.get(workspace.id)).toBeUndefined();
   });
 });

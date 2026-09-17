@@ -56,7 +56,7 @@ daemon-owned work; that work continues until the owning tab is closed.
 
 - Resolve every filesystem and Git operation from a registered server-side canonical workspace root. Browser paths, labels, and displayed values are never authority; reject traversal and symlink escapes.
 - Run Git only through the centralized service with fixed argument arrays, locale control, limits, cancellation, and timeouts. Never expose arbitrary shell-string execution through an API.
-- A Passage-created worktree may be removed only when both its durable ownership record and on-disk marker exist. Dirty or unmerged removal needs explicit force confirmation; never delete branches automatically.
+- A Passage-created worktree may be removed only when its durable ownership record exists in the database. Dirty or unmerged removal needs explicit force confirmation; never delete branches automatically.
 - Project-controlled Pi extensions, skills, MCP resources, and related executable resources require an explicit persisted workspace-trust decision. Do not create an executable plugin framework.
 - Passage has no application authentication. Retain Host and WebSocket Origin validation and treat LAN deployment as trusted-network-only unless an upstream TLS/auth proxy or VPN protects it.
 

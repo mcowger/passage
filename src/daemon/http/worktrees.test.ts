@@ -61,4 +61,32 @@ describe("worktrees HTTP API", () => {
     expect(res.status).toBe(409);
     f.store.close();
   });
+
+  test("rejects remove on missing workspace with 404 not-found", async () => {
+    const f = await fixture();
+    const res = await f.app.fetch(
+      request("/api/workspaces/wsp_nonexistent/worktree/remove", {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json() as { error: string };
+    expect(json.error).toBe("not-found");
+    f.store.close();
+  });
+
+  test("rejects remove with invalid body with 400 invalid-request", async () => {
+    const f = await fixture();
+    const res = await f.app.fetch(
+      request("/api/workspaces/wsp_nonexistent/worktree/remove", {
+        method: "POST",
+        body: JSON.stringify({ unexpectedKey: 123 }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json() as { error: string };
+    expect(json.error).toBe("invalid-request");
+    f.store.close();
+  });
 });

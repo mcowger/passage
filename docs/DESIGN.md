@@ -256,8 +256,8 @@ preserve the user's intent; canonical paths enforce filesystem boundaries.
    operations. It may be below the workspace checkout root.
 3. A main-checkout workspace is never assumed from a branch name. Git is asked
    for its actual checkout and worktree roots.
-4. Only an explicit workspace record plus an ownership marker may authorize
-   Passage to delete a worktree it created.
+4. Only an explicit workspace record may authorize Passage to delete a
+   worktree it created.
 5. A terminal's ID remains valid only while its daemon-owned PTY exists.
 6. Closing a panel is never the same as archiving an agent or deleting a
    workspace.
@@ -626,15 +626,14 @@ Creation performs these steps transactionally where Git permits:
 2. Resolve the destination's canonical parent and ensure it is an enabled
    Passage worktree location.
 3. Run `git worktree add` with an explicit argument list.
-4. Record a Passage ownership marker and durable workspace record.
+4. Record a durable Passage workspace record with owned state.
 5. Refresh Git status and offer agent/terminal creation.
 6. If durable registration fails, report a repairable state and do not silently
    delete user work.
 
-Removal requires both the workspace ownership record and its marker. Dirty or
-unmerged worktrees require an explicit force-confirmation path. Removal never
-deletes branches automatically. V1 omits arbitrary repository setup/teardown
-scripts and auto-allocated ports; these are high-risk orchestration features
+Removal requires the workspace ownership record. Dirty or unmerged worktrees
+require an explicit force-confirmation path. Removal never deletes branches
+automatically. V1 omits arbitrary repository setup/teardown scripts and auto-allocated ports; these are high-risk orchestration features
 with weak safety and little value to the core model.
 
 ### Files, editor, changes, and diff panels
@@ -900,7 +899,7 @@ does not collect user telemetry to measure these externally.
 | LAN daemon is exposed to an untrusted device | Document prominently, retain origin/path/process safeguards, and recommend upstream TLS/auth/VPN. This is an accepted v1 deployment risk. |
 | Mobile browser suspends a live connection | Sequence/replay, authoritative snapshots, visibility reconciliation, and post-run Pi-history reload. |
 | One browser resizes another terminal | Single active size lease with explicit mobile takeover. |
-| Worktree cleanup deletes user work | Persist explicit ownership, write a marker, require both for deletion, reject dirty removal by default, and preserve branches. |
+| Worktree cleanup deletes user work | Persist explicit ownership in the database, require it for deletion, reject dirty removal by default, and preserve branches. |
 | Pi upgrades break rendering | Isolate RPC framing/normalization and JSONL parsing, pin the CLI version, and keep compatibility fixtures. |
 | Rich custom tools become a plugin-security problem | Use safe declarative packs and a robust generic fallback; no executable plugin API in v1. |
 | Large histories/diffs freeze the UI | Server limits/paging, lazy thinking, virtualized lists, process grouping, and oversize fallbacks. |
