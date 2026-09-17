@@ -273,6 +273,66 @@ describe("ToolRow component", () => {
     expect(html).toContain("number,");
   });
 
+  test("running edit with streaming rawInput shows pending skeleton, not raw JSON", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-pending-edit",
+      kind: "tool",
+      name: "edit",
+      input: { rawInput: "" },
+      status: "running",
+      significant: true,
+    } as any;
+
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(ToolRow, { item })
+    );
+
+    expect(html).not.toContain("rawInput");
+    expect(html).toContain("Preparing edit");
+    expect(html).toContain("tool-pending-skeleton");
+  });
+
+  test("running bash with complete input shows command plus running indicator", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-running-bash",
+      kind: "tool",
+      name: "bash",
+      input: { command: "sleep 30" },
+      status: "running",
+      significant: true,
+    };
+
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(ToolRow, { item })
+    );
+
+    expect(html).toContain("sleep 30");
+    expect(html).toContain("Running command");
+    expect(html).not.toContain("rawInput");
+  });
+
+  test("partial rawInput still surfaces path/command in the summary", () => {
+    const edit: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-partial-edit",
+      kind: "tool",
+      name: "edit",
+      input: { rawInput: '{"path":"src/a.ts","oldSt' },
+      status: "running",
+      significant: true,
+    } as any;
+    expect(getToolSummary(edit).subtitle).toBe("src/a.ts");
+
+    const bash: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-partial-bash",
+      kind: "tool",
+      name: "bash",
+      input: { rawInput: '{"command":"sleep' },
+      status: "running",
+      significant: true,
+    } as any;
+    expect(getToolSummary(bash).subtitle).toBe("sleep");
+  });
+
   test("suppresses display if result is the string [object Object]", () => {
     const item: Extract<TimelineItem, { kind: "tool" }> = {
       id: "tool-literal-obj",

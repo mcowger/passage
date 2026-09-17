@@ -6,6 +6,8 @@ import type { TimelineItem } from "../../shared/domain/agents.ts";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { HighlightedCode, getLanguageFromPath } from "./HighlightedCode.tsx";
 import { CopyButton } from "./CopyButton.tsx";
+import { Spinner } from "./ui/spinner.tsx";
+import { Skeleton } from "./ui/skeleton.tsx";
 import {
   renderTerminalOutput,
   tryParseJson,
@@ -39,8 +41,83 @@ export type ToolSummary = {
   isPath?: boolean;
 };
 
-export function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): ToolSummary {
+/** Streaming tool args arrive as `{ rawInput: "<partial JSON>" }` until
+ *  `toolcall_end` replaces them with the parsed object. Unwrap that shape so
+ *  running rows can still show a path/command instead of nothing. */
+export function getEffectiveToolInput(item: Extract<TimelineItem, { kind: "tool" }>): Record<string, unknown> {
+  if (typeof item.input === "string") {
+    const trimmed = item.input.trim();
+    if (!trimmed) return {};
+    // Bare-string inputs are almost always a shell command.
+    return item.name === "bash" ? { command: item.input } : { text: item.input };
+  }
   const input = (item.input ?? {}) as Record<string, unknown>;
+  const raw = typeof input.rawInput === "string" ? input.rawInput : undefined;
+  const rest = { ...input };
+  delete rest.rawInput;
+  const hasRealFields = Object.keys(rest).length > 0;
+  if (raw === undefined || raw.trim() === "") return hasRealFields ? rest : {};
+  const parsed = tryParseRawInput(raw);
+  if (parsed && Object.keys(parsed).length > 0) return hasRealFields ? { ...parsed, ...rest } : parsed;
+  return hasRealFields ? rest : {};
+}
+
+function tryParseRawInput(raw: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return undefined;
+  } catch {
+    // Partial JSON while streaming -- best-effort regex for the fields the
+    // summary + pending UI care about.
+    const out: Record<string, unknown> = {};
+    for (const key of ["path", "filePath", "filename", "command", "pattern", "include"]) {
+      // Closing quote is optional so a still-streaming `"key": "partial` value matches.
+      const match = new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"?`).exec(raw);
+      if (match) {
+        try {
+          out[key] = JSON.parse(`"${match[1]}"`);
+        } catch {
+          out[key] = match[1];
+        }
+      }
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  }
+}
+
+/** True when the tool's args are still streaming (only a `rawInput` fragment)
+ *  or entirely absent -- i.e. there is nothing meaningful to render yet. */
+export function isPendingToolInput(item: Extract<TimelineItem, { kind: "tool" }>): boolean {
+  return Object.keys(getEffectiveToolInput(item)).length === 0;
+}
+
+export function getPendingToolLabel(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes("edit") || n.includes("patch")) return "Preparing edit…";
+  if (n.includes("write") || n.includes("create")) return "Preparing write…";
+  if (n === "read" || n === "readfile") return "Reading file…";
+  if (n === "bash" || n === "command") return "Preparing command…";
+  if (n === "grep") return "Searching…";
+  if (n === "glob" || n === "ls" || n === "list" || n === "list_dir" || n === "find") return "Listing files…";
+  return `Running ${name}…`;
+}
+
+export function getRunningToolLabel(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes("edit") || n.includes("patch")) return "Applying edit…";
+  if (n.includes("write") || n.includes("create")) return "Writing file…";
+  if (n === "read" || n === "readfile") return "Reading file…";
+  if (n === "bash" || n === "command") return "Running command…";
+  if (n === "grep") return "Searching…";
+  if (n === "glob" || n === "ls" || n === "list" || n === "list_dir" || n === "find") return "Listing files…";
+  return `Running ${name}…`;
+}
+
+export function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): ToolSummary {
+  const input = getEffectiveToolInput(item);
   switch (item.name) {
     case "read":
     case "readFile":
@@ -440,6 +517,53 @@ function ToolOutputDisplay({
   );
 }
 
+function ToolPendingBody({ item, hint }: { item: Extract<TimelineItem, { kind: "tool" }>; hint?: string }) {
+  return (
+    <div className="tool-pending-body" role="status" aria-label={`${getToolSummary(item).title} is running`}>
+      <div className="tool-pending-status">
+        <Spinner className="size-3.5 text-muted-foreground" />
+        <span className="tool-pending-label">{getPendingToolLabel(item.name)}</span>
+        {hint ? (
+          <code className="tool-pending-hint" title={hint}>{hint}</code>
+        ) : null}
+      </div>
+      <div className="tool-pending-skeleton" aria-hidden="true">
+        <Skeleton className="h-3 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
+        <Skeleton className="h-3 w-2/3" />
+      </div>
+    </div>
+  );
+}
+
+function ToolRunningFooter({ item }: { item: Extract<TimelineItem, { kind: "tool" }> }) {
+  return (
+    <div className="tool-running-footer" role="status" aria-label={`${getToolSummary(item).title} still running`}>
+      <Spinner className="size-3.5 text-muted-foreground" />
+      <span className="tool-pending-label">{getRunningToolLabel(item.name)}</span>
+    </div>
+  );
+}
+
+function hasRenderableInput(name: string, effective: Record<string, unknown>): boolean {
+  if (Object.keys(effective).length === 0) return false;
+  const n = name.toLowerCase();
+  if (n === "bash" || n === "command") return typeof effective.command === "string" && effective.command.trim() !== "";
+  if (n === "grep") return Boolean(effective.pattern ?? effective.path ?? effective.include);
+  if (n === "glob" || n === "ls" || n === "list" || n === "list_dir" || n === "find") {
+    return Boolean(effective.pattern ?? effective.path);
+  }
+  if (n === "read" || n === "readfile") return Boolean(effective.path ?? effective.filePath ?? effective.filename);
+  if (n.includes("edit") || n.includes("patch") || n.includes("write") || n.includes("create")) {
+    return Boolean(
+      effective.path ?? effective.filePath ?? effective.filename ??
+      effective.oldString ?? effective.oldText ?? effective.newString ?? effective.newText ??
+      effective.content ?? effective.text ?? effective.patch ?? effective.edits
+    );
+  }
+  return true;
+}
+
 function ToolExpandedBodyInner({
   item,
   diff,
@@ -449,17 +573,24 @@ function ToolExpandedBodyInner({
   diff?: ToolDiff | null;
   filePath?: string;
 }) {
-  const input = (item.input ?? {}) as Record<string, unknown>;
+  const input = getEffectiveToolInput(item);
   const isBash = item.name === "bash";
   const isRead = item.name === "read" || item.name === "readFile";
   const isSearchLike = item.name === "grep" || item.name === "find" || item.name === "glob" || item.name === "ls" || item.name === "list" || item.name === "list_dir";
-  const command = isBash
-    ? typeof input.command === "string"
-      ? input.command
-      : typeof item.input === "string"
-      ? item.input
-      : ""
-    : "";
+  const isRunning = item.status === "running";
+  const command = isBash && typeof input.command === "string" ? input.command : "";
+  const renderable = hasRenderableInput(item.name, input);
+
+  // Args still streaming (e.g. `{ rawInput: "" }`) -- never show the raw
+  // fragment, show a spinner + skeleton instead.
+  if (isRunning && !renderable && !item.result && !item.error) {
+    const hint = String(input.path ?? input.filePath ?? input.filename ?? input.command ?? input.pattern ?? "");
+    return (
+      <div className="tool-expanded-body">
+        <ToolPendingBody item={item} hint={hint || undefined} />
+      </div>
+    );
+  }
 
   return (
     <div className="tool-expanded-body">
@@ -481,7 +612,7 @@ function ToolExpandedBodyInner({
           <div className="tool-section-header">
             <span className="tool-section-label">Search Query</span>
             <CopyButton
-              text={typeof item.input === "string" ? item.input : JSON.stringify(item.input, null, 2)}
+              text={JSON.stringify(input, null, 2)}
               title="Copy query"
             />
           </div>
@@ -527,17 +658,17 @@ function ToolExpandedBodyInner({
             ) : null}
           </div>
         </div>
-      ) : item.input && !isRead && !isSearchLike ? (
+      ) : renderable && !isRead && !isSearchLike && !diff && !(isBash && command) ? (
         <div className="tool-input-wrap">
           <div className="tool-section-header">
             <span className="tool-section-label">Input</span>
             <CopyButton
-              text={typeof item.input === "string" ? item.input : JSON.stringify(item.input, null, 2)}
+              text={JSON.stringify(input, null, 2)}
               title="Copy input"
             />
           </div>
           <HighlightedCode
-            code={typeof item.input === "string" ? item.input : JSON.stringify(item.input, null, 2)}
+            code={JSON.stringify(input, null, 2)}
             language="json"
             className="tool-input-pre"
           />
@@ -553,7 +684,21 @@ function ToolExpandedBodyInner({
           <pre className="tool-output-pre error"><code>{item.error}</code></pre>
         </div>
       ) : item.result && item.result !== "[object Object]" ? (
-        <ToolOutputDisplay item={item} filePath={filePath} />
+        <>
+          <ToolOutputDisplay item={item} filePath={filePath} />
+          {isRunning ? <ToolRunningFooter item={item} /> : null}
+        </>
+      ) : isRunning ? (
+        <div className="tool-running-placeholder" role="status" aria-label={`${item.name} still running`}>
+          <div className="tool-running-status">
+            <Spinner className="size-3.5 text-muted-foreground" />
+            <span className="tool-pending-label">{getRunningToolLabel(item.name)}</span>
+          </div>
+          <div className="tool-pending-skeleton" aria-hidden="true">
+            <Skeleton className="h-3 w-2/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -574,8 +719,11 @@ export interface ToolRowProps {
 
 function ToolRowInner({ item, conciseBadge, open, onOpenChange }: ToolRowProps) {
   const { icon, title, subtitle, isPath } = getToolSummary(item);
-  const diff = getToolDiff(item);
-  const filePath = subtitle || (item.input && typeof item.input === "object" ? String((item.input as Record<string, unknown>).path ?? (item.input as Record<string, unknown>).filePath ?? "") : undefined);
+  const effectiveInput = getEffectiveToolInput(item);
+  const diff = getToolDiff({ name: item.name, input: effectiveInput }) ?? getToolDiff(item);
+  const effectivePath = String(effectiveInput.path ?? effectiveInput.filePath ?? effectiveInput.filename ?? "");
+  const filePath = subtitle || effectivePath || undefined;
+  const isRunning = item.status === "running";
 
   if (conciseBadge) {
     return (
@@ -585,6 +733,7 @@ function ToolRowInner({ item, conciseBadge, open, onOpenChange }: ToolRowProps) 
         onOpenChange={onOpenChange}
       >
         <CollapsibleTrigger className="timeline-concise-badge" title={`${title}${subtitle ? ` ${subtitle}` : ""} — expand for details`}>
+          {isRunning ? <Spinner className="size-3 text-muted-foreground" /> : null}
           <span className="timeline-concise-title"><ToolIcon kind={icon} /> {title}</span>
           {subtitle && isPath ? renderPathWithIcon(subtitle) : subtitle ? <code title={subtitle}>{subtitle}</code> : null}
           {diff && (diff.additions > 0 || diff.deletions > 0) && (
@@ -611,7 +760,7 @@ function ToolRowInner({ item, conciseBadge, open, onOpenChange }: ToolRowProps) 
     >
       <CollapsibleTrigger className="tool-row-summary">
         <span className="tool-row-left">
-          <span className="tool-row-icon"><ToolIcon kind={icon} /></span>
+          <span className="tool-row-icon">{isRunning ? <Spinner className="size-3.5 text-muted-foreground" /> : <ToolIcon kind={icon} />}</span>
           <span className="tool-row-title">{title}</span>
           {subtitle && isPath ? (
             renderPathWithIcon(subtitle)

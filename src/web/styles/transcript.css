@@ -115,6 +115,49 @@ button.timeline-concise-badge {
 .tool-badge.running { background: #fef3c7; color: #d97706; }
 
 .tool-expanded-body { padding: 4px 6px 6px 25px; }
+.tool-pending-body, .tool-running-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.tool-pending-status, .tool-running-status, .tool-running-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.tool-running-footer {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: var(--surface-subtle);
+  border: 1px dashed var(--border);
+  border-radius: 5px;
+}
+.tool-pending-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  flex: none;
+}
+.tool-pending-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.tool-pending-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .tool-input-pre, .tool-output-pre {
   margin: 2px 0 0;
   padding: 6px 8px;
