@@ -1,3 +1,4 @@
+import * as React from "react"
 import {
   CircleCheckIcon,
   InfoIcon,
@@ -5,15 +6,42 @@ import {
   OctagonXIcon,
   TriangleAlertIcon,
 } from "lucide-react"
-import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
+// The app manages its own light/dark theme packs via `data-theme-mode` and the
+// `dark` class on <html> (see applyThemeTokens in main.tsx). There is no
+// next-themes provider, so `useTheme()` always fell back to "system", which
+// sonner resolves from the OS color scheme. When the OS scheme disagreed with
+// the app theme, sonner styled toast internals (e.g. a light-gray description
+// in its dark mode) for a card painted with the app's light tokens — washing
+// the text out. Follow the app theme instead.
+function useAppTheme(): "light" | "dark" {
+  const readTheme = () => {
+    const root = document.documentElement
+    return root.dataset.themeMode === "dark" || root.classList.contains("dark")
+      ? ("dark" as const)
+      : ("light" as const)
+  }
+  const [theme, setTheme] = React.useState(readTheme)
+  React.useEffect(() => {
+    const root = document.documentElement
+    const update = () => setTheme(readTheme())
+    const observer = new MutationObserver(update)
+    observer.observe(root, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme-mode"],
+    })
+    return () => observer.disconnect()
+  }, [])
+  return theme
+}
+
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+  const theme = useAppTheme()
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={theme}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,
