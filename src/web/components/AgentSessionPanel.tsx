@@ -12,6 +12,47 @@ export type AgentSessionPanelProps = {
   previewHistory?: AgentHistory;
 };
 
+export type AgentSessionLoader = {
+  agentId: string;
+  api: Pick<WorkspaceApi, "agent" | "history" | "capabilities">;
+  isCurrent: () => boolean;
+  onSummary: (summary: AgentSummary) => void;
+  onHistory: (history: AgentHistory | undefined) => void;
+  onCapabilities: (capabilities: AgentCapabilities | undefined) => void;
+  onError: (message: string) => void;
+  onSettled: () => void;
+};
+
+/**
+ * Loads one agent session view. Agent metadata and history settle the view so
+ * the transcript can render; capabilities are fetched afterwards because that
+ * RPC can block on Pi process startup. Gating the transcript on capabilities
+ * leaves a slow or hung capabilities call stuck on "Loading history…" even
+ * though history already arrived.
+ */
+export async function loadAgentSession(loader: AgentSessionLoader): Promise<void> {
+  try {
+    const [summary, result] = await Promise.all([loader.api.agent(loader.agentId), loader.api.history(loader.agentId)]);
+    if (!loader.isCurrent()) return;
+    loader.onSummary(summary);
+    loader.onHistory("unpersisted" in result ? undefined : result.history);
+    loader.onError("");
+  } catch (cause) {
+    if (loader.isCurrent()) {
+      loader.onError(cause instanceof Error ? cause.message : "Unable to load agent");
+      loader.onSettled();
+    }
+    return;
+  }
+  if (loader.isCurrent()) loader.onSettled();
+  try {
+    const capabilities = await loader.api.capabilities(loader.agentId);
+    if (loader.isCurrent()) loader.onCapabilities(capabilities);
+  } catch {
+    if (loader.isCurrent()) loader.onCapabilities(undefined);
+  }
+}
+
 export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, previewHistory }: AgentSessionPanelProps) {
   const [agent, setAgent] = useState(initialAgent);
   const [history, setHistory] = useState<AgentHistory>();
@@ -30,25 +71,16 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   const load = useCallback(async (isInitial = false) => {
     const currentGeneration = ++generation.current;
     if (isInitial) setLoading(true);
-    try {
-      const [summary, result] = await Promise.all([api.agent(initialAgent.id), api.history(initialAgent.id)]);
-      if (currentGeneration !== generation.current) return;
-      updateAgent(summary);
-      setHistory("unpersisted" in result ? undefined : result.history);
-      try {
-        const nextCapabilities = await api.capabilities(initialAgent.id);
-        if (currentGeneration === generation.current) setCapabilities(nextCapabilities);
-      } catch {
-        if (currentGeneration === generation.current) setCapabilities(undefined);
-      }
-      setError("");
-    } catch (cause) {
-      if (currentGeneration === generation.current) {
-        setError(cause instanceof Error ? cause.message : "Unable to load agent");
-      }
-    } finally {
-      if (currentGeneration === generation.current) setLoading(false);
-    }
+    await loadAgentSession({
+      agentId: initialAgent.id,
+      api,
+      isCurrent: () => currentGeneration === generation.current,
+      onSummary: updateAgent,
+      onHistory: setHistory,
+      onCapabilities: setCapabilities,
+      onError: setError,
+      onSettled: () => setLoading(false),
+    });
   }, [api, initialAgent.id, updateAgent]);
 
   useEffect(() => {
