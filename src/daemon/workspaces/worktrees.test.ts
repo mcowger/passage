@@ -106,9 +106,10 @@ describe("WorktreeService creation", () => {
     const locations = join(f.root, "locations");
     await mkdir(locations);
     const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
-    const workspace = await f.worktreeService.create(f.project.id, location.id, "existing-feature", "Feature", "wt-feature");
-    expect(workspace.branchRef).toBe("existing-feature");
-    expect(workspace.displayLabel).toBe("Feature");
+    const result = await f.worktreeService.create(f.project.id, location.id, "existing-feature", "Feature", "wt-feature");
+    expect(result.workspace.branchRef).toBe("existing-feature");
+    expect(result.workspace.displayLabel).toBe("Feature");
+    expect(result.setup).toBeNull();
   });
 
   test("rejects a missing ref with an actionable error", async () => {
@@ -129,7 +130,7 @@ describe("WorktreeService creation", () => {
     const locations = join(f.root, "locations");
     await mkdir(locations);
     const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
-    const workspace = await f.worktreeService.create(f.project.id, location.id, "feature/brand-new", "Feature", "wt-new", {
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "feature/brand-new", "Feature", "wt-new", {
       createBranch: true,
       baseRef: "main",
     });
@@ -159,7 +160,7 @@ describe("WorktreeService removal and reconciliation", () => {
     const locations = join(f.root, "locations");
     await mkdir(locations);
     const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
-    const workspace = await f.worktreeService.create(f.project.id, location.id, "branch-to-remove", "To Remove", "wt-remove");
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "branch-to-remove", "To Remove", "wt-remove");
 
     expect(workspace.ownershipState).toBe("owned");
     expect(workspace.markerId).toBeNull();
@@ -182,7 +183,7 @@ describe("WorktreeService removal and reconciliation", () => {
     const locations = join(f.root, "locations");
     await mkdir(locations);
     const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
-    const workspace = await f.worktreeService.create(f.project.id, location.id, "legacy-branch", "Legacy", "wt-legacy");
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "legacy-branch", "Legacy", "wt-legacy");
 
     // Simulate a legacy marker file left on disk
     const legacyMarker = join(workspace.cwd, ".passage-worktree.json");
@@ -215,7 +216,7 @@ describe("WorktreeService removal and reconciliation", () => {
     const locations = join(f.root, "locations");
     await mkdir(locations);
     const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
-    const workspace = await f.worktreeService.create(f.project.id, location.id, "branch-repair", "Repair State", "wt-repair");
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "branch-repair", "Repair State", "wt-repair");
 
     // Manually transition workspace into repair state
     f.repositories.workspaces.save({ ...workspace, ownershipState: "repair", repairDetail: "simulated error" });
@@ -256,7 +257,7 @@ describe("WorktreeService removal and reconciliation", () => {
     const locations = join(f.root, "locations");
     await mkdir(locations);
     const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
-    const workspace = await f.worktreeService.create(f.project.id, location.id, "branch-to-reconcile", "Reconcile", "wt-reconcile");
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "branch-to-reconcile", "Reconcile", "wt-reconcile");
 
     const reconciled = await f.worktreeService.reconcile(workspace.id);
     expect(reconciled.ownershipState).toBe("owned");
@@ -269,7 +270,7 @@ describe("WorktreeService removal and reconciliation", () => {
     const locations = join(f.root, "locations");
     await mkdir(locations);
     const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
-    const workspace = await f.worktreeService.create(f.project.id, location.id, "branch-deleted-manually", "Deleted", "wt-deleted");
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "branch-deleted-manually", "Deleted", "wt-deleted");
 
     // Delete directory manually from disk
     await rm(workspace.cwd, { recursive: true, force: true });

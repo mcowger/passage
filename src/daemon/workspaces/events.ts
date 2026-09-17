@@ -5,9 +5,11 @@ import {
   gitStatusChangedPayloadSchema,
   opaqueIdSchema,
   PROTOCOL_VERSION,
+  workspaceActionsChangedPayloadSchema,
   type EventEnvelope,
   type FilesChangedPayload,
   type GitStatusChangedPayload,
+  type WorkspaceActionsChangedPayload,
 } from "../../shared/protocol/index.ts";
 
 const DEFAULT_MAX_SUBJECTS = 256;
@@ -63,6 +65,15 @@ export class WorkspaceEventHub {
     const parsed = gitStatusChangedPayloadSchema.safeParse(payload);
     if (!parsed.success) return null;
     return this.publish(parsed.data.workspaceId, "git-status-changed", parsed.data);
+  }
+
+  /** Publish an `actions-changed` invalidation for a workspace action run.
+   *  Never throws; invalid payloads are dropped so HTTP mutations always
+   *  succeed. Receivers refetch the run snapshot over HTTP. */
+  emitActionsChanged(payload: WorkspaceActionsChangedPayload): EventEnvelope | null {
+    const parsed = workspaceActionsChangedPayloadSchema.safeParse(payload);
+    if (!parsed.success) return null;
+    return this.publish(parsed.data.workspaceId, "actions-changed", parsed.data);
   }
 
   private publish(workspaceId: string, type: string, payload: unknown): EventEnvelope | null {

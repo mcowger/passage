@@ -12,6 +12,7 @@ import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
 import { BUILTIN_THEMES, BUILTIN_FONTS } from "../shared/domain/customization.ts";
 import { createWorkspaceApi, friendlyApiError } from "./api.ts";
 import { subscribeWorkspace } from "./workspaceSocket.ts";
+import type { WorkspaceActionRun } from "../shared/domain/workspace-actions.ts";
 import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { WorkspaceDetailsModal } from "./components/WorkspaceDetailsModal.tsx";
@@ -58,6 +59,7 @@ import {
 } from "./components/ui/alert-dialog.tsx";
 import { Alert, AlertDescription } from "./components/ui/alert.tsx";
 import { Toaster } from "./components/ui/sonner.tsx";
+import { toast } from "sonner";
 import "./styles.css";
 
 function applyThemeTokens(theme?: ThemePack) {
@@ -201,6 +203,8 @@ function App() {
   const [pendingDirtyClose, setPendingDirtyClose] = useState<{ tabId: string; path: string } | null>(null);
   const [dirtySaveBusy, setDirtySaveBusy] = useState(false);
   const editorSaveHandlers = useRef(new Map<string, () => Promise<boolean>>());
+  const pendingSetupRuns = useRef(new Map<string, string>());
+  const announcedSetupRuns = useRef(new Set<string>());
 
   const agentsLoadGeneration = useRef(0);
   const terminalsLoadGeneration = useRef(0);
@@ -373,7 +377,29 @@ function App() {
     if (!selectedWorkspaceId) return;
     const sub = subscribeWorkspace(
       selectedWorkspaceId,
-      () => {},
+      (event) => {
+        if (event.type !== "actions-changed") return;
+        const payload = event.payload as { runId?: unknown };
+        const runId = typeof payload.runId === "string" ? payload.runId : undefined;
+        if (!runId || pendingSetupRuns.current.get(selectedWorkspaceId) !== runId || announcedSetupRuns.current.has(runId)) return;
+        void api.getWorkspaceActionRun(selectedWorkspaceId, runId).then((run: WorkspaceActionRun) => {
+          if (run.status === "running" || announcedSetupRuns.current.has(run.id)) return;
+          announcedSetupRuns.current.add(run.id);
+          pendingSetupRuns.current.delete(run.workspaceId);
+          if (run.status === "succeeded") {
+            toast.success("Workspace setup complete", {
+              description: `Finished ${run.results.length} setup command${run.results.length === 1 ? "" : "s"}.`,
+            });
+            return;
+          }
+          const failed = run.results.find((result) => result.exitCode !== 0);
+          toast.error("Workspace setup failed", {
+            description: failed
+              ? `${failed.command}${failed.exitCode === null ? " was cancelled or timed out." : ` exited with code ${failed.exitCode}.`}`
+              : run.error ?? "The setup action did not complete.",
+          });
+        }).catch(() => undefined);
+      },
       async () => {
         await Promise.all([
           loadAgents(selectedWorkspaceId, false),
@@ -1397,8 +1423,14 @@ function App() {
             setWorktreeModalProjectId(undefined);
           }}
           onCreated={(created) => {
+            if (created.setup) {
+              pendingSetupRuns.current.set(created.workspace.id, created.setup.id);
+              toast.message("Setting up workspace", {
+                description: "Running the worktree setup action in the background.",
+              });
+            }
             void refreshWorkspaces().then(() => {
-              setSelectedWorkspaceId(created.id);
+              setSelectedWorkspaceId(created.workspace.id);
               setActiveTab("agent");
             });
           }}

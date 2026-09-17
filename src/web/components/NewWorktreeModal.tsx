@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Project, WorktreeLocation, Workspace } from "../../shared/domain/workspaces.ts";
+import type { CreateWorktreeResponse } from "../../shared/domain/workspace-actions.ts";
 import type { DiscoveredWorktree, WorkspaceApi } from "../api.ts";
 import { Button } from "./ui/button.tsx";
 import { Input } from "./ui/input.tsx";
@@ -32,7 +33,7 @@ type Props = {
   suggestModel?: string;
   api: WorkspaceApi;
   onClose: () => void;
-  onCreated: (workspace: Workspace) => void;
+  onCreated: (result: CreateWorktreeResponse) => void;
   onLocationsChanged?: () => Promise<void>;
 };
 
@@ -202,7 +203,7 @@ export function NewWorktreeModal({
         path: targetPath.trim(),
         label: (defaultLabel ?? targetPath.split("/").pop()) || undefined,
       });
-      onCreated(imported);
+      onCreated({ workspace: imported, setup: null });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to import worktree");

@@ -17,6 +17,8 @@ import { WorkspaceEventHub } from "./workspaces/events.ts";
 import { GitService } from "./workspaces/git.ts";
 import { FileService } from "./workspaces/files.ts";
 import { WorktreeService } from "./workspaces/worktrees.ts";
+import { WorkspaceActionsService } from "./workspaces/actions.ts";
+import { createWorkspaceActionRoutes } from "./http/actions.ts";
 import { TerminalManager } from "./terminals/manager.ts";
 import { WebPreviewManager } from "./previews/manager.ts";
 import { isAllowedPreviewRequest } from "./previews/relay.ts";
@@ -74,14 +76,23 @@ const repositories = new MetadataRepositories(metadata.db);
 const workspaceService = new WorkspaceService(repositories);
 const gitService = new GitService();
 const fileService = new FileService(workspaceService);
-const worktreeService = new WorktreeService(repositories, gitService);
+const workspaceEvents = new WorkspaceEventHub();
+// Action runs are live daemon memory. Run start/settle is published as an
+// `actions-changed` workspace invalidation (never-throw); receivers refetch
+// the run snapshot over HTTP. Background completion has no HTTP request of
+// its own, so the service emits through this callback instead of a route.
+const workspaceActionsService = new WorkspaceActionsService(repositories, undefined, {
+  onRunChanged: (run) => {
+    workspaceEvents.emitActionsChanged({ workspaceId: run.workspaceId, runId: run.id });
+  },
+});
+const worktreeService = new WorktreeService(repositories, gitService, undefined, workspaceActionsService);
 const terminalManager = new TerminalManager(workspaceService);
 const previewManager = new WebPreviewManager(repositories, workspaceService);
 const agentService = new AgentService(repositories, {
   sessionsRoot: process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(metadataPath), "sessions"),
 });
 const agentEvents = new AgentEventHub(agentService);
-const workspaceEvents = new WorkspaceEventHub();
 const responses = new IdempotencyCache<{ fingerprint: string; response: string }>();
 const inflightResponses = new Map<string, { fingerprint: string; response: Promise<string> }>();
 const app = new Hono();
@@ -94,6 +105,7 @@ app.route("/", createWorkspaceRoutes(workspaceService, { onArchiveWorkspace: (wo
 app.route("/", createGitRoutes(workspaceService, gitService, workspaceEvents));
 app.route("/", createFileRoutes(fileService, workspaceEvents));
 app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (workspaceId) => previewManager.stopForWorkspace(workspaceId) }));
+app.route("/", createWorkspaceActionRoutes(workspaceActionsService));
 app.route("/", createTerminalRoutes(terminalManager));
 app.route("/", createPreviewRoutes(previewManager, workspaceEvents));
 app.route("/", createAgentRoutes(agentService));
