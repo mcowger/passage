@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentCapabilities, AgentHistory, AgentSummary } from "../../shared/domain/agents.ts";
-import { loadAgentSession, loadAgentSessionWithRetry, type AgentSessionLoadResult, type AgentSessionLoader } from "./AgentSessionPanel.tsx";
+import { loadAgentSession, loadAgentSessionWithRetry, mergeAgentHistory, type AgentSessionLoadResult, type AgentSessionLoader } from "./AgentSessionPanel.tsx";
 
 const summary = { id: "agt-1" } as unknown as AgentSummary;
 const history = { timeline: [] } as unknown as AgentHistory;
@@ -88,5 +88,78 @@ describe("loadAgentSessionWithRetry", () => {
       await loadAgentSessionWithRetry(async () => { attempts += 1; return result; }, false);
       expect(attempts).toBe(1);
     }
+  });
+});
+
+describe("mergeAgentHistory", () => {
+  test("retains a live turn when an older history snapshot arrives", () => {
+    const current = {
+      ...history,
+      revision: { mtimeMs: 2, size: 2, contentHash: "live" },
+      usage: { input: 2, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 5, cost: 0 },
+      timeline: [
+        { kind: "user", id: "u1", text: "First request" },
+        { kind: "thinking", id: "t1", text: "First thought" },
+        { kind: "assistant", id: "a1", text: "First answer" },
+        { kind: "user", id: "u2", text: "Second request" },
+        { kind: "thinking", id: "t2", text: "Second thought" },
+      ],
+    } as AgentHistory;
+    const stale = {
+      ...current,
+      revision: { mtimeMs: 1, size: 1, contentHash: "stale" },
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: 0 },
+      timeline: current.timeline.slice(0, 3),
+    } as AgentHistory;
+    const running = { ...summary, status: "running" } as AgentSummary;
+
+    expect(mergeAgentHistory(running, current, stale)).toMatchObject({
+      revision: stale.revision,
+      timeline: current.timeline,
+      usage: current.usage,
+    });
+  });
+
+  test("uses durable history once the agent has settled", () => {
+    const current = { ...history, timeline: [{ kind: "user", id: "u1", text: "Live request" }] } as AgentHistory;
+    const incoming = { ...history, timeline: [{ kind: "user", id: "u1", text: "Durable request" }] } as AgentHistory;
+    const idle = { ...summary, status: "idle" } as AgentSummary;
+
+    expect(mergeAgentHistory(idle, current, incoming)).toBe(incoming);
+  });
+
+  test("uses a longer durable snapshot while the agent is running", () => {
+    const current = { ...history, timeline: [{ kind: "user", id: "u1", text: "Live request" }] } as AgentHistory;
+    const incoming = {
+      ...history,
+      timeline: [
+        { kind: "user", id: "u1", text: "Live request" },
+        { kind: "thinking", id: "t1", text: "Durable thought" },
+      ],
+    } as AgentHistory;
+    const running = { ...summary, status: "running" } as AgentSummary;
+
+    expect(mergeAgentHistory(running, current, incoming)).toBe(incoming);
+  });
+
+  test("retains live history when the stale summary reports idle", () => {
+    const current = {
+      ...history,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
+      timeline: [
+        { kind: "user", id: "u1", text: "Durable request" },
+        { kind: "assistant", id: "a1", text: "Durable answer" },
+        { kind: "user", id: "u2", text: "Live request" },
+        { kind: "thinking", id: "t2", text: "Live thought" },
+      ],
+    } as AgentHistory;
+    const stale = {
+      ...history,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
+      timeline: current.timeline.slice(0, 2),
+    } as AgentHistory;
+    const liveStatus = { ...summary, status: "running" } as AgentSummary;
+
+    expect(mergeAgentHistory(liveStatus, current, stale)?.timeline).toBe(current.timeline);
   });
 });

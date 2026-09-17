@@ -19,7 +19,7 @@ export type AgentSessionLoader = {
   api: Pick<WorkspaceApi, "agent" | "history" | "capabilities">;
   isCurrent: () => boolean;
   onSummary: (summary: AgentSummary) => void;
-  onHistory: (history: AgentHistory | undefined) => void;
+  onHistory: (history: AgentHistory | undefined, summary: AgentSummary) => void;
   onCapabilities: (capabilities: AgentCapabilities | undefined) => void;
   onError: (message: string) => void;
   onSettled: () => void;
@@ -34,12 +34,37 @@ export type AgentSessionLoader = {
  */
 export type AgentSessionLoadResult = "loaded" | "failed" | "superseded";
 
+/**
+ * HTTP history is durable but can lag the live WebSocket projection. Retain
+ * that projection until Pi settles so a stale snapshot cannot erase the new
+ * user boundary or append subsequent deltas to an earlier turn.
+ */
+export function mergeAgentHistory(
+  summary: AgentSummary,
+  current: AgentHistory | undefined,
+  incoming: AgentHistory | undefined,
+): AgentHistory | undefined {
+  if (!incoming) return current;
+  if (
+    summary.status === "running"
+    && current
+    && current.timeline.length > incoming.timeline.length
+  ) {
+    return {
+      ...current,
+      revision: incoming.revision,
+      usage: current.usage.totalTokens > incoming.usage.totalTokens ? current.usage : incoming.usage,
+    };
+  }
+  return incoming;
+}
+
 export async function loadAgentSession(loader: AgentSessionLoader): Promise<AgentSessionLoadResult> {
   try {
     const [summary, result] = await Promise.all([loader.api.agent(loader.agentId), loader.api.history(loader.agentId)]);
     if (!loader.isCurrent()) return "superseded";
     loader.onSummary(summary);
-    loader.onHistory("unpersisted" in result ? undefined : result.history);
+    loader.onHistory("unpersisted" in result ? undefined : result.history, summary);
     loader.onError("");
     loader.onSettled();
   } catch (cause) {
@@ -76,13 +101,20 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const statusRef = useRef(initialAgent.status);
   const onAgentChangedRef = useRef(onAgentChanged);
   onAgentChangedRef.current = onAgentChanged;
 
   const updateAgent = useCallback((next: AgentSummary) => {
+    statusRef.current = next.status;
     setAgent(next);
     onAgentChangedRef.current?.(next);
   }, []);
+
+  const updateLoadedAgent = useCallback((next: AgentSummary) => {
+    const status = statusRef.current === "running" && next.status !== "running" ? "running" : next.status;
+    updateAgent({ ...next, status });
+  }, [updateAgent]);
 
   const load = useCallback(async (isInitial = false): Promise<AgentSessionLoadResult> => {
     const currentGeneration = ++generation.current;
@@ -91,13 +123,16 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       agentId: initialAgent.id,
       api,
       isCurrent: () => currentGeneration === generation.current,
-      onSummary: updateAgent,
-      onHistory: setHistory,
+      onSummary: updateLoadedAgent,
+      onHistory: (incoming, summary) => {
+        const currentSummary = statusRef.current === "running" ? { ...summary, status: "running" as const } : summary;
+        setHistory((current) => mergeAgentHistory(currentSummary, current, incoming));
+      },
       onCapabilities: setCapabilities,
       onError: setError,
       onSettled: () => setLoading(false),
     });
-  }, [api, initialAgent.id, updateAgent]);
+  }, [api, initialAgent.id, updateLoadedAgent]);
 
   // Retry once on failure so a transient mobile suspend or dropped stream
   // recovers without a manual reload, on both first load and reconcile.
@@ -106,6 +141,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   }, [load]);
 
   useEffect(() => {
+    statusRef.current = initialAgent.status;
     setAgent(initialAgent);
     setHistory(undefined);
     setCapabilities(undefined);
@@ -115,6 +151,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       initialAgent.id,
       (value, state) => {
         if (state.status) {
+          statusRef.current = state.status;
           setAgent((current) => {
             const next = { ...current, status: state.status! };
             onAgentChangedRef.current?.(next);
