@@ -244,6 +244,8 @@ export function createWorkspaceApi(
     async followUp(id: string, message: string, images?: AgentImage[], files?: AgentFile[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/follow-up`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}), ...(files?.length ? { files } : {}) }) })); },
     imageUrl(id: string, hash: string): string { return `/api/agents/${encodeURIComponent(id)}/images/${encodeURIComponent(hash)}`; },
     fileUrl(id: string, hash: string): string { return `/api/agents/${encodeURIComponent(id)}/files/${encodeURIComponent(hash)}`; },
+    /** Raw workspace image bytes (model-read preview). Path is workspace-relative. */
+    workspaceImageUrl(workspaceId: string, path: string): string { return `/api/workspaces/${encodeURIComponent(workspaceId)}/files/raw?path=${encodeURIComponent(path)}`; },
     async abort(id: string) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/abort`, { method: "POST" })); },
     async compact(id: string, customInstructions?: string) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/compact`, { method: "POST", body: JSON.stringify(customInstructions ? { customInstructions } : {}) })); },
     async searchFiles(workspaceId: string, q: string, limit = 20) {

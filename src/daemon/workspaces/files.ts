@@ -10,6 +10,21 @@ export class FileError extends Error { constructor(public readonly code: "not-fo
 
 const GIT_SEARCH_TIMEOUT_MS = 2000;
 const MAX_GIT_LS_BYTES = 5_000_000;
+/** Raw image serving cap: screenshots/photos routinely exceed the 1MB text-file cap. */
+export const MAX_IMAGE_RAW_BYTES = 10 * 1024 * 1024;
+const IMAGE_RAW_MIME_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+
+export function mimeTypeForImagePath(path: string): string | undefined {
+  const dot = path.toLowerCase().lastIndexOf(".");
+  if (dot < 0) return undefined;
+  return IMAGE_RAW_MIME_BY_EXT[path.toLowerCase().slice(dot + 1)];
+}
 const MAX_NAME_LENGTH = 255;
 function validateName(name: string): void {
   if (!name || name.length > MAX_NAME_LENGTH || name === "." || name === ".." || name.includes("/") || name.includes("\\") || name.includes("\0")) {
@@ -65,6 +80,19 @@ export class FileService {
     return { path, entries, nextCursor: hasMore ? String(start + entries.length) : null };
   }
   async read(workspaceId: string, path: string): Promise<FileRead> { const absolute = await this.resolve(workspaceId, path); const s = await this.safeStat(absolute); if (!s.isFile()) throw new FileError("not-file", "Path is not a file"); if (s.size > this.maxBytes) throw new FileError("oversize", "File is too large"); const data = await readFile(absolute); if (data.includes(0)) throw new FileError("binary", "Binary files are not supported"); return { path, content: new TextDecoder().decode(data), revision: revision(s, hash(data)) }; }
+  /** Raw bytes for workspace images (e.g. a screenshot the model read with
+   *  the `read` tool) so the browser can render a preview. Restricted to
+   *  image extensions; never follows symlinks. */
+  async readRawImage(workspaceId: string, path: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
+    const mimeType = mimeTypeForImagePath(path);
+    if (!mimeType) throw new FileError("invalid-path", "Not an image file");
+    const absolute = await this.resolve(workspaceId, path);
+    const s = await this.safeStat(absolute);
+    if (!s.isFile()) throw new FileError("not-file", "Path is not a file");
+    if (s.size > MAX_IMAGE_RAW_BYTES) throw new FileError("oversize", "Image is too large");
+    const data = await readFile(absolute);
+    return { bytes: new Uint8Array(data.buffer, data.byteOffset, data.byteLength), mimeType };
+  }
   /**
    * Bounded case-insensitive substring/prefix match from the workspace
    * canonical root. Used by the composer `@` autocomplete. Never follows

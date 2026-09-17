@@ -3,6 +3,8 @@ import { cn } from "../lib/utils.ts";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible.tsx";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group.tsx";
 import type { TimelineItem } from "../../shared/domain/agents.ts";
+import type { WorkspaceApi } from "../api.ts";
+import { GenericImageLightbox, UserImageThumb } from "./UserImages.tsx";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { HighlightedCode, getLanguageFromPath } from "./HighlightedCode.tsx";
 import { CopyButton } from "./CopyButton.tsx";
@@ -31,6 +33,25 @@ import {
 } from "lucide-react";
 
 export const MAX_INLINE_DIFF_LINES = 120;
+
+/** Workspace image extensions the model can read with the `read` tool. */
+const READ_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+
+/** Workspace-relative image path when this tool row is a model image read
+ *  (`read`/`readFile` on a `.png`/`.jpg`/`.gif`/`.webp` file), else undefined. */
+export function getReadToolImagePath(item: Extract<TimelineItem, { kind: "tool" }>): string | undefined {
+  const name = item.name.toLowerCase();
+  if (name !== "read" && name !== "readfile") return undefined;
+  const input = getEffectiveToolInput(item);
+  const raw = input.path ?? input.filePath ?? input.filename;
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  const cleaned = raw.trim().replace(/\\/g, "/");
+  const dot = cleaned.toLowerCase().lastIndexOf(".");
+  if (dot < 0 || !READ_IMAGE_EXTENSIONS.has(cleaned.toLowerCase().slice(dot))) return undefined;
+  // Reject absolute paths and traversal: the raw route resolves inside the workspace anyway.
+  if (cleaned.startsWith("/") || cleaned.split("/").includes("..")) return undefined;
+  return cleaned;
+}
 
 export type ToolIconKind = "read" | "edit" | "write" | "command" | "search" | "other";
 
@@ -566,10 +587,14 @@ function ToolExpandedBodyInner({
   item,
   diff,
   filePath,
+  workspaceId,
+  api,
 }: {
   item: Extract<TimelineItem, { kind: "tool" }>;
   diff?: ToolDiff | null;
   filePath?: string;
+  workspaceId?: string;
+  api?: Pick<WorkspaceApi, "workspaceImageUrl">;
 }) {
   const input = getEffectiveToolInput(item);
   const isBash = item.name === "bash";
@@ -578,6 +603,7 @@ function ToolExpandedBodyInner({
   const isRunning = item.status === "running";
   const command = isBash && typeof input.command === "string" ? input.command : "";
   const renderable = hasRenderableInput(item.name, input);
+  const imagePath = getReadToolImagePath(item);
 
   // Args still streaming (e.g. `{ rawInput: "" }`) -- never show the raw
   // fragment, show a spinner + skeleton instead.
@@ -592,6 +618,9 @@ function ToolExpandedBodyInner({
 
   return (
     <div className="tool-expanded-body">
+      {imagePath && workspaceId && api ? (
+        <ReadToolImagePreview workspaceId={workspaceId} api={api} path={imagePath} />
+      ) : null}
       {diff ? (
         <ToolDiffPreview diff={diff} />
       ) : isBash && command ? (
@@ -707,13 +736,54 @@ function isGlobLikeSearch(name: string): boolean {
   return name === "find" || name === "glob" || name === "ls" || name === "list" || name === "list_dir";
 }
 
+/** Thumbnail + lightbox for an image the model read from the workspace.
+ *  Same look and behavior as user-sent image strips (click to expand,
+ *  Escape/arrows/navigate, download); the bytes come from the workspace
+ *  raw-file route instead of the agent attachment cache. */
+export function ReadToolImagePreview({
+  workspaceId,
+  api,
+  path,
+}: {
+  workspaceId: string;
+  api: Pick<WorkspaceApi, "workspaceImageUrl">;
+  path: string;
+}) {
+  const [lightbox, setLightbox] = useState(false);
+  const name = path.split("/").at(-1) ?? path;
+  const src = api.workspaceImageUrl(workspaceId, path);
+  return (
+    <>
+      <div className="user-image-strip" aria-label={`Image read by the model: ${path}`}>
+        <UserImageThumb
+          src={src}
+          name={name}
+          onOpen={() => setLightbox(true)}
+          expiredText={`${name} (unavailable)`}
+        />
+      </div>
+      {lightbox && (
+        <GenericImageLightbox
+          images={[{ name, src }]}
+          index={0}
+          onClose={() => setLightbox(false)}
+          onSelect={() => undefined}
+          expiredLabel={(label) => `${label} could not be loaded.`}
+        />
+      )}
+    </>
+  );
+}
+
 export interface ToolRowProps {
   item: Extract<TimelineItem, { kind: "tool" }>;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  workspaceId?: string;
+  api?: Pick<WorkspaceApi, "workspaceImageUrl">;
 }
 
-function ToolRowInner({ item, open, onOpenChange }: ToolRowProps) {
+function ToolRowInner({ item, open, onOpenChange, workspaceId, api }: ToolRowProps) {
   const { icon, title, subtitle, isPath } = getToolSummary(item);
   const effectiveInput = getEffectiveToolInput(item);
   const diff = getToolDiff({ name: item.name, input: effectiveInput }) ?? getToolDiff(item);
@@ -750,7 +820,7 @@ function ToolRowInner({ item, open, onOpenChange }: ToolRowProps) {
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent forceMount>
-        <ToolExpandedBody item={item} diff={diff} filePath={filePath} />
+        <ToolExpandedBody item={item} diff={diff} filePath={filePath} workspaceId={workspaceId} api={api} />
       </CollapsibleContent>
     </Collapsible>
   );

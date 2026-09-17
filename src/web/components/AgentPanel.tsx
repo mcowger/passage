@@ -815,6 +815,7 @@ export function AgentPanel({
                   item={item}
                   agentId={agent.id}
                   api={api}
+                  workspaceId={agent.workspaceId}
                   expansion={sessionExpansion}
                   latestIds={latestIds}
                   manualToggles={manualToggles}
@@ -1841,6 +1842,7 @@ export interface TimelineRowProps {
   item: TimelineItem;
   agentId: string;
   api: WorkspaceApi;
+  workspaceId?: string;
   expansion?: TimelineExpansionSettings;
   latestIds?: LatestTimelineIds;
   manualToggles?: Record<string, boolean>;
@@ -1851,6 +1853,7 @@ export const TimelineRow = memo(function TimelineRow({
   item,
   agentId,
   api,
+  workspaceId,
   expansion = DEFAULT_TIMELINE_EXPANSION,
   latestIds = { latestToolIds: {} },
   manualToggles = {},
@@ -1864,6 +1867,8 @@ export const TimelineRow = memo(function TimelineRow({
         item={item}
         open={isExpanded}
         onOpenChange={(open) => onToggleManual?.(item.id, open)}
+        workspaceId={workspaceId}
+        api={api}
       />
     );
   }

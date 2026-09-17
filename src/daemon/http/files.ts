@@ -33,6 +33,22 @@ export const createFileRoutes = (files: FileService, events?: WorkspaceEventHub)
     } catch (e) { return error(e); }
   });
   app.get("/api/workspaces/:workspaceId/files/read", async (c) => { try { return ok(await files.read(id(c.req.param("workspaceId")), path.parse(c.req.query("path") ?? ""))); } catch (e) { return error(e); } });
+  // Raw image bytes for model-read previews (read-tool image path -> <img>).
+  // Restricted to image extensions inside FileService; served with a
+  // no-store policy since workspace contents can change at any time.
+  app.get("/api/workspaces/:workspaceId/files/raw", async (c) => {
+    try {
+      const workspaceId = id(c.req.param("workspaceId"));
+      const filePath = path.parse(c.req.query("path") ?? "");
+      const { bytes, mimeType } = await files.readRawImage(workspaceId, filePath);
+      return new Response(bytes as unknown as BodyInit, {
+        status: 200,
+        headers: { "Content-Type": mimeType, "Content-Length": String(bytes.byteLength), "Cache-Control": "no-store" },
+      });
+    } catch (e) {
+      return error(e);
+    }
+  });
   // Bounded host directory suggestions for the Add Project picker.
   // Read-only: emits no WS events. Unresolvable bases yield an empty list.
   app.get("/api/filesystem/directories", async (c) => {

@@ -5,7 +5,7 @@ import { createQueuedFollowUp, formatDuration, formatThinkingPreview, isComposer
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 
-const stubApi = { imageUrl: (id: string, hash: string) => `/api/agents/${id}/images/${hash}`, fileUrl: (id: string, hash: string) => `/api/agents/${id}/files/${hash}` } as unknown as WorkspaceApi;
+const stubApi = { imageUrl: (id: string, hash: string) => `/api/agents/${id}/images/${hash}`, fileUrl: (id: string, hash: string) => `/api/agents/${id}/files/${hash}`, workspaceImageUrl: (workspaceId: string, path: string) => `/api/workspaces/${workspaceId}/files/raw?path=${encodeURIComponent(path)}` } as unknown as WorkspaceApi;
 
 const modelOptions: AgentCapabilities["models"] = [
   {
@@ -253,6 +253,45 @@ describe("TimelineRow", () => {
     );
     expect(html).toContain("user-image-strip");
     expect(html).toContain("data:image/png;base64,AAA");
+  });
+
+  test("renders a model image read with a workspace preview thumbnail", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
+        workspaceId: "ws-1",
+        item: { kind: "tool", id: "tool-1", name: "read", input: { path: "shots/shot.png" }, result: "", status: "complete" },
+        expansion: {
+          thinking: "latest",
+          tools: { read: "always", write: "latest", edit: "latest", bash: "latest", find: "latest", grep: "latest", ls: "latest" },
+          otherTools: "latest",
+        },
+        latestIds: { latestToolIds: { read: "tool-1" } },
+      }),
+    );
+    expect(html).toContain("user-image-strip");
+    expect(html).toContain("/api/workspaces/ws-1/files/raw?path=shots%2Fshot.png");
+    expect(html).toContain("Image read by the model");
+  });
+
+  test("omits the preview for non-image reads", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
+        workspaceId: "ws-1",
+        item: { kind: "tool", id: "tool-2", name: "read", input: { path: "src/index.ts" }, result: "export const x = 1;", status: "complete" },
+        expansion: {
+          thinking: "latest",
+          tools: { read: "always", write: "latest", edit: "latest", bash: "latest", find: "latest", grep: "latest", ls: "latest" },
+          otherTools: "latest",
+        },
+        latestIds: { latestToolIds: { read: "tool-2" } },
+      }),
+    );
+    expect(html).not.toContain("user-image-strip");
+    expect(html).not.toContain("files/raw");
   });
 
   test("renders a daemon-level error as its own chronological alert row", () => {

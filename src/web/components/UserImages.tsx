@@ -34,12 +34,12 @@ export function userImageSrc(api: WorkspaceApi, agentId: string, image: UserImag
   return image.previewUrl ?? api.imageUrl(agentId, image.hash);
 }
 
-function UserImageThumb({ src, name, onOpen }: { src: string; name: string; onOpen: () => void }) {
+export function UserImageThumb({ src, name, onOpen, expiredText }: { src: string; name: string; onOpen: () => void; expiredText?: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
     return (
-      <span className="user-image-expired" title={`${name} is no longer in the image cache`}>
-        {name} (expired)
+      <span className="user-image-expired" title={expiredText ?? `${name} is no longer in the image cache`}>
+        {expiredText ?? `${name} (expired)`}
       </span>
     );
   }
@@ -72,7 +72,34 @@ function ImageLightbox({
   onSelect: (index: number) => void;
 }) {
   const image = images[index]!;
-  const src = userImageSrc(api, agentId, image);
+  return (
+    <GenericImageLightbox
+      images={images.map((entry) => ({ name: entry.name, src: userImageSrc(api, agentId, entry) }))}
+      index={index}
+      onClose={onClose}
+      onSelect={onSelect}
+    />
+  );
+}
+
+/** Presentation-only lightbox over pre-resolved image URLs. Shared by user
+ *  uploads (cache URLs) and model-read workspace images (raw file URLs) so
+ *  both get identical preview + keyboard/download behavior. */
+export function GenericImageLightbox({
+  images,
+  index,
+  onClose,
+  onSelect,
+  expiredLabel,
+}: {
+  images: Array<{ name: string; src: string }>;
+  index: number;
+  onClose: () => void;
+  onSelect: (index: number) => void;
+  expiredLabel?: (name: string) => string;
+}) {
+  const image = images[index]!;
+  const src = image.src;
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -119,7 +146,7 @@ function ImageLightbox({
           </span>
         </div>
         {failed
-          ? <p className="image-lightbox-expired">{image.name} is no longer in the image cache.</p>
+          ? <p className="image-lightbox-expired">{expiredLabel ? expiredLabel(image.name) : `${image.name} is no longer in the image cache.`}</p>
           : <img src={src} alt={image.name} className="image-lightbox-img" onError={() => setFailed(true)} />}
       </div>
     </div>

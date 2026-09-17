@@ -208,4 +208,27 @@ describe("files HTTP API", () => {
 
     f.store.close();
   });
+
+  test("serves raw image bytes for model-read previews and rejects non-images", async () => {
+    const f = await fixture();
+    const pngBytes = Buffer.from("fake-png-bytes");
+    await writeFile(join(f.root, "shot.png"), pngBytes);
+    await writeFile(join(f.root, "notes.txt"), "hello");
+
+    const imageRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files/raw?path=shot.png`));
+    expect(imageRes.status).toBe(200);
+    expect(imageRes.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await imageRes.arrayBuffer())).toEqual(new Uint8Array(pngBytes));
+
+    const textRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files/raw?path=notes.txt`));
+    expect(textRes.status).toBe(400);
+
+    const missingRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files/raw?path=missing.png`));
+    expect(missingRes.status).toBe(400);
+
+    const traversalRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files/raw?path=${encodeURIComponent("../escape.png")}`));
+    expect(traversalRes.status).toBe(400);
+
+    f.store.close();
+  });
 });
