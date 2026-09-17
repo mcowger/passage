@@ -90,14 +90,14 @@ Run focused checks first, then the relevant integration gate. `bun run test:gate
 
 The dev server (bun run dev) restarts on its own when code changes, and performs an automated reload in the browser.  You do not need to manually restart a dev server.  If one is already running, there is no need to kill it  yourself.
 
-**CRITICAL: NEVER assume a port number for the dev server.** The port is assigned per-worktree by `scripts/dev-port.ts` (a stable hash of the worktree root in the 3000-3999 range), so it differs between checkouts. Before connecting to the dev server — for `agent-browser` verification, curl, or any other tooling — you MUST determine the port by running:
+**CRITICAL: Every worktree runs its own dev server on its own dedicated port. NEVER assume a port number.** The port is assigned per-worktree by `scripts/dev-port.ts` (a stable hash of the worktree root in the 3000-3999 range), so it differs between checkouts. A port you saw in another session, another worktree, or a tunnel URL belongs to that checkout, not yours. Your shell will often carry `PORT`/`PASEO_PORT` inherited from a different checkout — treat those values as stale for your worktree: never trust, export, or connect to them directly. Before connecting to the dev server — for `agent-browser` verification, curl, or any other tooling — you MUST determine the port by running:
 
 ```sh
 bun scripts/dev-port.ts
 ```
 
+- If this worktree's dev server is already running, the script prints its actual port (recorded in `.data/dev.port` next to `.data/dev.pid` at boot, falling back to the pidfile process's live listener). This answer is authoritative even when your shell's `PORT`/`PASEO_PORT` says otherwise.
 - If free, the script prints the intended port.
-- If already occupied by this worktree's running dev server (matched against the live PID in `.data/dev.pid` or `PASSAGE_PID_FILE`), it prints the dev server's port.
 - If occupied by any other process, it outputs a `CRITICAL` error and exits non-zero. It will **never** blindly bump to another port. If this happens, you MUST stop and ask the user for help resolving the port conflict.
 
 Do not hardcode, guess, or reuse a port (e.g. 3000) from prior sessions, other worktrees, or examples.

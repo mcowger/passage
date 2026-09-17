@@ -31,11 +31,14 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-The daemon picks a stable per-worktree port in `3000`–`3999` via
-`scripts/dev-port.ts` (hashed from the worktree path).
+The daemon binds a stable per-worktree port in `3000`–`3999` via
+`scripts/dev-port.ts` (hashed from the worktree path) and records the
+actual port in `.data/dev.port` next to `.data/dev.pid`.
 Generic `PORT` is ignored so an inherited value cannot leak another
 worktree's port; the hash is authoritative (Paseo sets `PASEO_PORT` when it
-routes traffic).
+routes traffic). Always resolve the port with `bun scripts/dev-port.ts` —
+never reuse a port seen in another checkout, since every worktree has its
+own dedicated port.
 
 Useful checks:
 

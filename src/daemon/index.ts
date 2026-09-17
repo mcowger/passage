@@ -70,6 +70,10 @@ mkdirSync(dirname(metadataPath), { recursive: true });
 
 const defaultPidPath = process.env.PASSAGE_DB_PATH ? null : join(defaultDataRoot, "dev.pid");
 const pidPath = process.env.PASSAGE_PID_FILE ?? defaultPidPath;
+// Records the port this server actually bound, so tooling in any shell can
+// discover this worktree's dedicated port without trusting PORT/PASEO_PORT
+// inherited from a different checkout. Written after Bun.serve binds.
+const portPath = pidPath ? join(dirname(pidPath), "dev.port") : null;
 if (pidPath) {
   mkdirSync(dirname(pidPath), { recursive: true });
   writeFileSync(pidPath, `${process.pid}\n`, "utf8");
@@ -567,8 +571,14 @@ export const server = Bun.serve<SocketData>({
   },
 });
 
+if (portPath) {
+  try {
+    writeFileSync(portPath, `${server.port}\n`, "utf8");
+  } catch {}
+}
+
 log.warn("Passage has no application authentication; expose it only on a trusted network or behind an authenticated proxy/VPN.", { event: "daemon.authentication_disabled" });
-log.info("Passage listening", { event: "daemon.started", port });
+log.info("Passage listening", { event: "daemon.started", port: server.port });
 
 let shuttingDown = false;
 async function shutdown(): Promise<void> {
@@ -579,6 +589,9 @@ async function shutdown(): Promise<void> {
     try {
       if (readFileSync(pidPath, "utf8").trim() === String(process.pid)) {
         unlinkSync(pidPath);
+        if (portPath) {
+          try { unlinkSync(portPath); } catch {}
+        }
       }
     } catch {}
   }

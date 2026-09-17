@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isProcessAlive, resolvePidFile, stopDevServer } from "./dev-stop.ts";
+import { isProcessAlive, portFileForPidFile, removePidArtifacts, resolvePidFile, stopDevServer } from "./dev-stop.ts";
 
 describe("dev-stop", () => {
   it("resolves default pidfile or honors PASSAGE_PID_FILE", () => {
@@ -40,6 +40,40 @@ describe("dev-stop", () => {
     expect(result.stopped).toBe(false);
     expect(result.message).toContain("cleaned up stale pidfile");
     expect(existsSync(tempPidFile)).toBe(false);
+  });
+
+  it("removes the sibling recorded-port file alongside the pidfile", async () => {
+    const testDir = join(tmpdir(), `dev-stop-port-${Date.now()}`);
+    mkdirSync(testDir, { recursive: true });
+    try {
+      const pidFile = join(testDir, "dev.pid");
+      writeFileSync(pidFile, "9999999\n", "utf8");
+      writeFileSync(portFileForPidFile(pidFile), "3641\n", "utf8");
+      expect(portFileForPidFile(pidFile)).toBe(join(testDir, "dev.port"));
+
+      const result = await stopDevServer(pidFile);
+      expect(result.stopped).toBe(false);
+      expect(existsSync(pidFile)).toBe(false);
+      expect(existsSync(portFileForPidFile(pidFile))).toBe(false);
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it("removePidArtifacts clears both files without throwing", () => {
+    const testDir = join(tmpdir(), `dev-stop-artifacts-${Date.now()}`);
+    mkdirSync(testDir, { recursive: true });
+    try {
+      const pidFile = join(testDir, "dev.pid");
+      writeFileSync(pidFile, "123\n", "utf8");
+      writeFileSync(portFileForPidFile(pidFile), "3641\n", "utf8");
+      removePidArtifacts(pidFile);
+      expect(existsSync(pidFile)).toBe(false);
+      expect(existsSync(portFileForPidFile(pidFile))).toBe(false);
+      removePidArtifacts(pidFile);
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
   });
 
   it("gracefully stops a running process and unlinks pidfile", async () => {

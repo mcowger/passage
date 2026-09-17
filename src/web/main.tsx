@@ -1124,16 +1124,44 @@ function App() {
                 </button>
               </div>
               <div className="nav-tabs shrink-0">
-                <button
-                  type="button"
-                  className={`nav-tab ${activeTab === "agent" ? "active" : ""}`}
-                  aria-label="Create new agent session"
-                  title="Create new agent session"
-                  onClick={() => void createAgent()}
-                >
-                  ◈ Agent <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                  {openAgentCount > 0 && <span className="tab-badge">{openAgentCount}</span>}
-                </button>
+                {isMobile ? (
+                  <>
+                    <button
+                      type="button"
+                      className={`nav-tab ${activeTab === "agent" ? "active" : ""}`}
+                      aria-label="Go to agent session"
+                      title="Go to agent session"
+                      onClick={() => {
+                        const target = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
+                        if (target) handleSelectAgent(target.id);
+                        else void createAgent();
+                      }}
+                    >
+                      ◈ Agent
+                      {openAgentCount > 0 && <span className="tab-badge">{openAgentCount}</span>}
+                    </button>
+                    <button
+                      type="button"
+                      className="nav-tab"
+                      aria-label="Create new agent session"
+                      title="Create new agent session"
+                      onClick={() => void createAgent()}
+                    >
+                      <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className={`nav-tab ${activeTab === "agent" ? "active" : ""}`}
+                    aria-label="Create new agent session"
+                    title="Create new agent session"
+                    onClick={() => void createAgent()}
+                  >
+                    ◈ Agent <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    {openAgentCount > 0 && <span className="tab-badge">{openAgentCount}</span>}
+                  </button>
+                )}
                 <button
                   className={`nav-tab ${activeTab === "terminal" ? "active" : ""}`}
                   onClick={() => {

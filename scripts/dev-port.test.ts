@@ -5,8 +5,12 @@ import { tmpdir } from "node:os";
 import {
   fnv1a32,
   parseListeningInodes,
+  parseListeningPorts,
+  pidListeningPorts,
+  portFileForPidFile,
   portScriptWorktreePath,
   readLivePid,
+  readRecordedPort,
   resolveStart,
   stableBasePort,
 } from "./dev-port.ts";
@@ -98,19 +102,77 @@ describe("dev-port", () => {
     }
   });
 
-  test("main outputs CRITICAL to both stdout and stderr on foreign port conflict", async () => {
+  test("portFileForPidFile is a sibling dev.port record", () => {
+    expect(portFileForPidFile("/wt/.data/dev.pid")).toBe("/wt/.data/dev.port");
+    expect(portFileForPidFile("/tmp/custom.pid")).toBe("/tmp/dev.port");
+  });
+
+  test("readRecordedPort honors the record only for a living pid", () => {
+    const testDir = join(tmpdir(), `dev-port-recorded-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(testDir, { recursive: true });
+    try {
+      const pidFile = join(testDir, "dev.pid");
+      const portFile = join(testDir, "dev.port");
+      // No pidfile at all
+      expect(readRecordedPort(pidFile)).toBeNull();
+
+      // Living pid with a valid record
+      writeFileSync(pidFile, `${process.pid}\n`, "utf8");
+      expect(readRecordedPort(pidFile)).toBeNull(); // no port file yet
+      writeFileSync(portFile, "3641\n", "utf8");
+      expect(readRecordedPort(pidFile)).toBe(3641);
+
+      // Invalid record content
+      writeFileSync(portFile, "not-a-port\n", "utf8");
+      expect(readRecordedPort(pidFile)).toBeNull();
+
+      // Stale pidfile: record must not be trusted
+      writeFileSync(pidFile, "4194300\n", "utf8");
+      writeFileSync(portFile, "3641\n", "utf8");
+      expect(readRecordedPort(pidFile)).toBeNull();
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  test("parseListeningPorts maps LISTEN inodes to ports", () => {
+    // 3333 = 0x0D05
+    const fixture = [
+      "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+      "   0: 00000000:0D05 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 111111 1 0000000000000000 100 0 0 10 0",
+      "   1: 00000000:0D05 00000000:0000 01 00000000:00000000 00:00000000 00000000  1000        0 333333 1 0000000000000000 100 0 0 10 0",
+    ].join("\n");
+    expect(parseListeningPorts(fixture)).toEqual(new Map([["111111", 3333]]));
+  });
+
+  test("pidListeningPorts finds a socket this process holds", () => {
     const server = Bun.listen({
       hostname: "127.0.0.1",
       port: 0,
       socket: { data() {} },
     });
     try {
+      expect(pidListeningPorts(process.pid)).toContain(server.port);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("main outputs CRITICAL to both stdout and stderr on foreign port conflict", async () => {
+    const server = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: { data() {} },
+    });
+    const testDir = join(tmpdir(), `dev-port-critical-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(testDir, { recursive: true });
+    try {
       const port = server.port;
       const proc = Bun.spawn(["bun", "scripts/dev-port.ts"], {
         env: {
           ...process.env,
           PASEO_PORT: String(port),
-          PASSAGE_PID_FILE: `/tmp/dev-port-test-nonexistent-${Date.now()}.pid`,
+          PASSAGE_PID_FILE: join(testDir, "dev.pid"),
         },
         stdout: "pipe",
         stderr: "pipe",
@@ -120,10 +182,37 @@ describe("dev-port", () => {
       const stderr = await new Response(proc.stderr).text();
 
       expect(exitCode).toBe(1);
-      expect(stdout).toContain(`CRITICAL: dev-port: intended port ${port} for this worktree is occupied`);
-      expect(stderr).toContain(`CRITICAL: dev-port: intended port ${port} for this worktree is occupied`);
+      expect(stdout).toContain(`CRITICAL: dev-port: port ${port} is occupied`);
+      expect(stderr).toContain(`CRITICAL: dev-port: port ${port} is occupied`);
+      expect(stdout).toContain("Each worktree has its own dedicated port");
+      expect(stderr).toContain("differs from this worktree's stable port");
     } finally {
       server.stop();
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  test("main prefers the recorded port over a stale PASEO_PORT", async () => {
+    const testDir = join(tmpdir(), `dev-port-recorded-main-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(testDir, { recursive: true });
+    try {
+      writeFileSync(join(testDir, "dev.pid"), `${process.pid}\n`, "utf8");
+      writeFileSync(join(testDir, "dev.port"), "3456\n", "utf8");
+      const proc = Bun.spawn(["bun", "scripts/dev-port.ts"], {
+        env: {
+          ...process.env,
+          PASEO_PORT: "3700",
+          PASSAGE_PID_FILE: join(testDir, "dev.pid"),
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const exitCode = await proc.exited;
+      const stdout = await new Response(proc.stdout).text();
+      expect(exitCode).toBe(0);
+      expect(stdout.trim()).toBe("3456");
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
     }
   });
 });
