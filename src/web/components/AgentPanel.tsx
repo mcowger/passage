@@ -34,7 +34,7 @@ import {
 import { QuestionCard, type QuestionRequest, type QuestionOption } from "./QuestionCard.tsx";
 import { getToolDiff } from "../lib/tool-diff.ts";
 import { formatCompactTokens } from "../lib/utils.ts";
-import { estimateUpdatedTokens, getStreamingTokenText, type TokenEstimateCacheEntry } from "../lib/streaming-tokens.ts";
+import { RECEIVING_ACTIVITY_WINDOW_MS, STREAM_PHASE_LABELS, type StreamActivity, type StreamPhase } from "../lib/stream-activity.ts";
 import {
   Clock,
   CircleAlert,
@@ -42,6 +42,7 @@ import {
   ArrowUp,
   Plus,
   Pencil,
+  Zap,
 } from "lucide-react";
 
 const STREAMING_STATS_INTERVAL_MS = 300;
@@ -70,6 +71,8 @@ export type AgentPanelProps = {
   loadingMoreHistory?: boolean;
   /** Fetches and prepends the previous page of history. */
   onLoadMoreHistory?: () => void;
+  /** Live activity holder written by the socket owner; sampled on the pill's interval. */
+  streamActivityRef?: { current: StreamActivity };
 };
 
 export function resolveActiveQuestionRequest(agent: AgentSummary): QuestionRequest | null {
@@ -251,6 +254,7 @@ export function AgentPanel({
   hasMoreHistory,
   loadingMoreHistory,
   onLoadMoreHistory,
+  streamActivityRef,
 }: AgentPanelProps) {
   const effectiveHistory = previewHistory ?? history;
   const conciseKey = `passage:agent:${agent.id}:concise`;
@@ -284,35 +288,39 @@ export function AgentPanel({
   const stopping = isComposerLocked(agent.status);
   const timeline = effectiveHistory?.timeline ?? [];
   const streamActive = resolveStreamActive(agent.status);
-  const streamingTokenText = useMemo(() => getStreamingTokenText(timeline), [timeline]);
-  const streamingTokenTextRef = useRef(streamingTokenText);
-  const streamingTokenCacheRef = useRef<TokenEstimateCacheEntry | undefined>(undefined);
+  const fallbackStreamActivityRef = useRef<StreamActivity>({ lastFrameAt: 0, phase: null });
+  const activityRef = streamActivityRef ?? fallbackStreamActivityRef;
   const streamingStartedAtRef = useRef<number | null>(null);
-  const [streamingTokens, setStreamingTokens] = useState(0);
-  const [streamingTokensPerSecond, setStreamingTokensPerSecond] = useState<number | null>(null);
+  const [streamPhase, setStreamPhase] = useState<StreamPhase | null>(null);
+  const [receiving, setReceiving] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  streamingTokenTextRef.current = streamingTokenText;
 
+  // The interval is the pill's only render driver, so the elapsed timer keeps
+  // advancing while Pi is silent (waiting for the first token after a prompt
+  // or a long tool run). Frame activity lands in a ref, not state, so a frame
+  // burst never triggers an extra render -- it is sampled here instead.
   useEffect(() => {
     if (!streamActive) {
       streamingStartedAtRef.current = null;
-      streamingTokenCacheRef.current = undefined;
-      setStreamingTokens(0);
-      setStreamingTokensPerSecond(null);
+      setStreamPhase(null);
+      setReceiving(false);
       setElapsedSeconds(0);
       return;
     }
 
-    if (streamingStartedAtRef.current === null) streamingStartedAtRef.current = Date.now();
+    if (streamingStartedAtRef.current === null) {
+      streamingStartedAtRef.current = Date.now();
+      // Drop the previous run's final phase so a new run does not briefly show
+      // it before its first content frame lands.
+      activityRef.current = { lastFrameAt: 0, phase: null };
+    }
     const startedAt = resolveStreamStartMs(agent.runStartedAt, streamingStartedAtRef.current);
     const tick = () => {
-      const text = streamingTokenTextRef.current;
-      const tokens = estimateUpdatedTokens(streamingTokenCacheRef.current, text);
-      streamingTokenCacheRef.current = { text, tokens };
-      setStreamingTokens(tokens);
-      const elapsed = Math.max(0, (Date.now() - startedAt) / 1000);
-      setElapsedSeconds(elapsed);
-      setStreamingTokensPerSecond(elapsed > 0.5 && tokens > 0 ? tokens / elapsed : null);
+      const now = Date.now();
+      setElapsedSeconds(Math.max(0, (now - startedAt) / 1000));
+      const activity = activityRef.current;
+      setStreamPhase(activity.phase);
+      setReceiving(activity.lastFrameAt > 0 && now - activity.lastFrameAt < RECEIVING_ACTIVITY_WINDOW_MS);
     };
     tick();
     const interval = setInterval(tick, STREAMING_STATS_INTERVAL_MS);
@@ -497,8 +505,8 @@ export function AgentPanel({
         running={running}
         stopping={stopping}
         streamActive={streamActive}
-        streamingTokens={streamingTokens}
-        streamingTokensPerSecond={streamingTokensPerSecond}
+        streamPhase={streamPhase}
+        receiving={receiving}
         elapsedSeconds={elapsedSeconds}
         capabilities={capabilities}
         api={api}
@@ -549,23 +557,22 @@ export function formatThinkingPreview(text: string, maxLength = 70): string {
     .slice(0, maxLength);
 }
 
-const LiveStreamingStats = memo(function LiveStreamingStats({
-  tokens,
-  tokensPerSecond,
+const LiveStreamPhase = memo(function LiveStreamPhase({
+  phase,
+  receiving,
 }: {
-  tokens: number;
-  tokensPerSecond: number | null;
+  phase: StreamPhase | null;
+  receiving: boolean;
 }) {
-  if (tokens <= 0) return null;
+  if (!phase) return null;
   return (
-    <div className="live-streaming-stats" role="status" aria-live="polite">
-      <span className="live-streaming-token-count" title="Estimated streamed tokens">
-        ↓ {Math.round(tokens).toLocaleString()}
-      </span>
-      {tokensPerSecond !== null && (
-        <span className="live-streaming-rate">{tokensPerSecond.toFixed(1)} t/s</span>
-      )}
-    </div>
+    <span
+      className={`live-stream-phase${receiving ? " is-receiving" : ""}`}
+      title={receiving ? "Receiving data from Pi" : "Waiting for Pi"}
+    >
+      <Zap size={11} aria-hidden="true" />
+      {STREAM_PHASE_LABELS[phase]}
+    </span>
   );
 });
 
@@ -575,8 +582,8 @@ type AgentComposerProps = {
   running: boolean;
   stopping: boolean;
   streamActive: boolean;
-  streamingTokens: number;
-  streamingTokensPerSecond: number | null;
+  streamPhase: StreamPhase | null;
+  receiving: boolean;
   elapsedSeconds: number;
   capabilities?: AgentCapabilities;
   api: WorkspaceApi;
@@ -646,8 +653,8 @@ function AgentComposerInner({
   running,
   stopping,
   streamActive,
-  streamingTokens,
-  streamingTokensPerSecond,
+  streamPhase,
+  receiving,
   elapsedSeconds,
   capabilities,
   api,
@@ -908,7 +915,7 @@ function AgentComposerInner({
           <div className="composer-status-pill">
             <span className="pulse-dot" />
             <span className="composer-status-duration">{formatDuration(elapsedSeconds)}</span>
-            <LiveStreamingStats tokens={streamingTokens} tokensPerSecond={streamingTokensPerSecond} />
+            <LiveStreamPhase phase={streamPhase} receiving={receiving} />
           </div>
         )}
       </div>
