@@ -50,12 +50,19 @@ function number(value: unknown): number {
 
 function contentText(value: unknown): string {
   if (typeof value === "string") return value;
-  if (!Array.isArray(value)) return "";
-  return value.map((item) => {
-    const block = object(item);
-    if (block?.type === "text") return string(block.text) ?? "";
-    return block?.content !== undefined ? contentText(block.content) : "";
-  }).filter(Boolean).join("\n");
+  if (value && typeof value === "object") {
+    if (Array.isArray(value)) {
+      return value.map((item) => {
+        const block = object(item);
+        if (block?.type === "text") return string(block.text) ?? "";
+        return block?.content !== undefined ? contentText(block.content) : "";
+      }).filter(Boolean).join("\n");
+    }
+    const rec = object(value);
+    if (rec?.type === "text" && typeof rec.text === "string") return rec.text;
+    if (rec?.content !== undefined) return contentText(rec.content);
+  }
+  return "";
 }
 
 function safeJson(value: unknown): JsonValue {

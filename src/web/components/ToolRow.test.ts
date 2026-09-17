@@ -209,4 +209,46 @@ describe("ToolRow component", () => {
     expect(html).toContain("Raw");
     expect(html).toContain("language-json");
   });
+
+  test("does not render [object Object] when result is a Pi RPC result object", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-obj",
+      kind: "tool",
+      name: "bash",
+      input: { command: "grep -rn 'port' src/" },
+      // Simulating if an unextracted object is passed as result
+      result: {
+        content: [{ type: "text", text: "src/server.ts:47: port: number," }],
+      } as any,
+      status: "complete",
+      significant: true,
+    };
+
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(ToolRow, { item })
+    );
+
+    expect(html).not.toContain("[object Object]");
+    expect(html).toContain("src/server.ts:47:");
+    expect(html).toContain("port:");
+    expect(html).toContain("number,");
+  });
+
+  test("suppresses display if result is the string [object Object]", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-literal-obj",
+      kind: "tool",
+      name: "bash",
+      input: { command: "echo test" },
+      result: "[object Object]",
+      status: "complete",
+      significant: true,
+    };
+
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(ToolRow, { item })
+    );
+
+    expect(html).not.toContain("[object Object]");
+  });
 });

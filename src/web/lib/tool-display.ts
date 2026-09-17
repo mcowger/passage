@@ -183,6 +183,78 @@ export function formatJsonPretty(data: unknown): string {
   }
 }
 
+function extractBlockText(block: unknown): string | undefined {
+  if (block === null || block === undefined) return undefined;
+  if (typeof block === "string") return block;
+  if (typeof block === "object") {
+    const b = block as Record<string, unknown>;
+    if (typeof b.text === "string") return b.text;
+    if (b.content !== undefined) return extractToolResultText(b.content);
+  }
+  return undefined;
+}
+
+export function extractToolResultText(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => extractBlockText(item))
+      .filter((t): t is string => t !== undefined && t !== "");
+    return parts.join("\n");
+  }
+
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+
+    // Pi standard tool result: { content: [...] } or { content: "..." }
+    if (obj.content !== undefined) {
+      if (typeof obj.content === "string") return obj.content;
+      if (Array.isArray(obj.content)) {
+        const parts = obj.content
+          .map((item) => extractBlockText(item))
+          .filter((t): t is string => t !== undefined && t !== "");
+        return parts.join("\n");
+      }
+    }
+
+    // Direct text property: { text: "..." }
+    if (typeof obj.text === "string") {
+      return obj.text;
+    }
+
+    // Process output: { stdout: "...", stderr: "..." }
+    if (typeof obj.stdout === "string" || typeof obj.stderr === "string") {
+      const stdout = typeof obj.stdout === "string" ? obj.stdout : "";
+      const stderr = typeof obj.stderr === "string" ? obj.stderr : "";
+      if (stdout && stderr) return `${stdout}\n${stderr}`;
+      return stdout || stderr;
+    }
+
+    // Error message: { error: "..." }
+    if (typeof obj.error === "string") {
+      return obj.error;
+    }
+
+    // General message: { message: "..." }
+    if (typeof obj.message === "string") {
+      return obj.message;
+    }
+
+    // Fallback for generic JSON objects: serialize as formatted JSON instead of "[object Object]"
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
+  return String(value);
+}
+
+
 export type GrepMatchItem = {
   lineNum?: string;
   content: string;

@@ -13,6 +13,7 @@ import {
   parseGrepOutput,
   parseGlobOutput,
   parseReadToolOutput,
+  extractToolResultText,
   type GrepParsedResult,
   type GlobParsedResult,
 } from "../lib/tool-display.ts";
@@ -309,7 +310,13 @@ function ToolOutputDisplay({
   item: Extract<TimelineItem, { kind: "tool" }>;
   filePath?: string;
 }) {
-  const result = item.result ?? "";
+  const rawResult = item.result ?? "";
+  const result =
+    typeof rawResult === "string"
+      ? rawResult === "[object Object]"
+        ? ""
+        : rawResult
+      : extractToolResultText(rawResult) ?? "";
   const isBash = item.name === "bash";
   const isRead = item.name === "read" || item.name === "readFile";
   const isGlobLike = item.name === "glob" || item.name === "ls" || item.name === "list" || item.name === "list_dir";
@@ -544,7 +551,7 @@ function ToolExpandedBodyInner({
           </div>
           <pre className="tool-output-pre error"><code>{item.error}</code></pre>
         </div>
-      ) : item.result ? (
+      ) : item.result && item.result !== "[object Object]" ? (
         <ToolOutputDisplay item={item} filePath={filePath} />
       ) : null}
     </div>
