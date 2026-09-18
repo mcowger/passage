@@ -285,6 +285,15 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
           }
           if (type === "settled" || type === "agent_settled") void load();
           if (type === "transcript_reset") void load();
+          if (type === "title" && payload && typeof payload.title === "string" && payload.title.trim()) {
+            const title = payload.title.trim().slice(0, 256);
+            setAgent((current) => {
+              if (current.title === title) return current;
+              const next = { ...current, title };
+              onAgentChangedRef.current?.(next);
+              return next;
+            });
+          }
           if (type === "row_upsert" && payload) {
             const parsed = timelineItemPayloadSchema.safeParse(payload.row);
             if (parsed.success) setHistory((current) => applyRowUpsert(current, parsed.data));

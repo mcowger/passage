@@ -38,7 +38,7 @@ export class MetadataGenerator {
 
   constructor(private readonly timeoutMs = 10_000, private readonly pi: MetadataGeneratorPiOptions = {}) {}
 
-  async suggest(purpose: string, cwd?: string, model?: string): Promise<WorktreeSuggestion> {
+  async suggest(purpose: string, cwd?: string, model?: string, thinkingLevel?: string): Promise<WorktreeSuggestion> {
     const fallback = deterministicSlugSuggestion(purpose);
     if (!purpose.trim()) return fallback;
 
@@ -64,6 +64,11 @@ export class MetadataGenerator {
         disableTools: true,
         ...this.pi,
       });
+      // Best-effort: an unsupported level only costs this suggestion,
+      // never the caller's flow (callers fall back to deterministic slugs).
+      if (thinkingLevel?.trim()) {
+        await piProcess.request({ type: "set_thinking_level", level: thinkingLevel.trim() }, this.timeoutMs).catch(() => undefined);
+      }
 
       const result = await this.readSuggestion(piProcess, prompt);
 

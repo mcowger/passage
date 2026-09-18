@@ -208,8 +208,8 @@ export function createWorkspaceApi(
     async setLocationEnabled(locationId: string, enabled: boolean): Promise<WorktreeLocation> {
       return locationSchema.parse(await request(`/api/worktree-locations/${encodeURIComponent(locationId)}`, { method: "PATCH", body: JSON.stringify({ enabled }) }));
     },
-    async suggestWorktree(projectId: string, purpose: string, model?: string): Promise<{ label: string; branch: string; folder: string }> {
-      return await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees/suggest`, { method: "POST", body: JSON.stringify({ purpose, ...(model?.trim() ? { model: model.trim() } : {}) }) }) as { label: string; branch: string; folder: string };
+    async suggestWorktree(projectId: string, purpose: string, model?: string, thinkingLevel?: string): Promise<{ label: string; branch: string; folder: string }> {
+      return await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees/suggest`, { method: "POST", body: JSON.stringify({ purpose, ...(model?.trim() ? { model: model.trim() } : {}), ...(thinkingLevel?.trim() ? { thinkingLevel: thinkingLevel.trim() } : {}) }) }) as { label: string; branch: string; folder: string };
     },
     async createWorktree(projectId: string, input: { locationId: string; ref: string; label: string; folder?: string; createBranch?: boolean; baseRef?: string }): Promise<CreateWorktreeResponse> {
       return createWorktreeResponseSchema.parse(await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees`, { method: "POST", body: JSON.stringify(input) }));

@@ -51,3 +51,25 @@ describe("OutputExpansionSection", () => {
     expect(html).toContain("settings-tool-ask");
   });
 });
+
+describe("suggestThinkingOptions", () => {
+  test("lists only the chosen model's supported levels", async () => {
+    const { suggestThinkingOptions } = await import("./SettingsModal.tsx");
+    const models = [
+      { provider: "p", id: "a", name: "A", api: "t", input: ["text"], authenticated: true, supportedThinkingLevels: ["low", "high"] },
+      { provider: "p", id: "b", name: "B", api: "t", input: ["text"], authenticated: true, supportedThinkingLevels: ["medium", "high", "xhigh"] },
+    ];
+    expect(suggestThinkingOptions(models, "p/a")).toEqual(["low", "high"]);
+    expect(suggestThinkingOptions(models, "p/b")).toEqual(["medium", "high", "xhigh"]);
+    expect(suggestThinkingOptions(models, "p/unknown")).toEqual([]);
+  });
+
+  test("unions every known level when pi default is selected", async () => {
+    const { suggestThinkingOptions } = await import("./SettingsModal.tsx");
+    const models = [
+      { provider: "p", id: "a", name: "A", api: "t", input: ["text"], authenticated: true, supportedThinkingLevels: ["low", "high"] },
+      { provider: "p", id: "b", name: "B", api: "t", input: ["text"], authenticated: true, supportedThinkingLevels: ["medium", "high"] },
+    ];
+    expect(suggestThinkingOptions(models, "")).toEqual(["low", "high", "medium"]);
+  });
+});

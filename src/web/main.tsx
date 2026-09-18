@@ -1152,7 +1152,19 @@ function App() {
             api={api}
             settings={settings}
             onAgentChanged={(updatedAgent) => {
+              const previous = agents.find((agent) => agent.id === updatedAgent.id);
               setAgents((current) => current.map((agent) => agent.id === updatedAgent.id ? updatedAgent : agent));
+              // Auto-titles (and any later rename) arrive over the agent
+              // socket; keep the open pane tab label in sync so it stops
+              // reading "Agent" too. Guarded to the title change so
+              // ordinary status traffic never rewrites the layout.
+              if (previous && previous.title !== updatedAgent.title && layout) {
+                const tabId = `agent-${updatedAgent.id}`;
+                handleLayoutChange({
+                  ...layout,
+                  root: updateTabInTree(layout.root, tabId, { id: tabId, kind: "agent", title: updatedAgent.title, targetId: updatedAgent.id }),
+                });
+              }
             }}
             previewHistory={previewEnabled ? previewHistory ?? undefined : undefined}
             onWorkspaceDeleted={handleWorkspaceRemoved}
@@ -1795,6 +1807,7 @@ function App() {
           lockedProjectId={worktreeModalProjectId}
           initialTab={worktreeModalTab}
           suggestModel={settings.suggestModel}
+          suggestThinkingLevel={settings.suggestThinkingLevel}
           api={api}
           onClose={() => {
             setForm(undefined);

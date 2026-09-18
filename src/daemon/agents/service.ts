@@ -17,6 +17,7 @@ import {
   type PiRpcOptions,
 } from "./rpc/index.ts";
 import { MetadataRepositories, type Agent } from "../metadata/repositories.ts";
+import { AgentTitleSuggester, DEFAULT_AGENT_TITLE, TITLE_SUGGEST_AFTER_USER_MESSAGES } from "./title-suggester.ts";
 import { normalizeAvailableModels } from "../models/catalog.ts";
 import { parsePiExtensionUiDialog } from "./ui.ts";
 import { errorFields, logger } from "../logging.ts";
@@ -180,6 +181,15 @@ export class AgentService {
    *  Defaults to always-open so tests/tools that never wire a
    *  `DaemonLifecycle` see no behavior change. */
   private readonly admissionGate: () => boolean;
+  /** Agents with an auto-title suggestion currently in flight. Guards the
+   *  fire-and-forget `maybeAutoTitle` so rapid consecutive user messages
+   *  cannot spawn duplicate suggestion runs for the same agent. */
+  private readonly titleSuggestions = new Set<string>();
+  private readonly titleSuggester: Pick<AgentTitleSuggester, "suggestTitle">;
+  /** Resolves the workspace's configured suggestion model + thinking level
+   *  (Settings). Empty/undefined fields mean the suggestion backend's
+   *  defaults. */
+  private readonly getSuggestConfig?: (workspaceId: string) => { model?: string; thinkingLevel?: string } | undefined;
 
   constructor(
     private readonly repositories: MetadataRepositories,
@@ -202,6 +212,12 @@ export class AgentService {
        *  point and before any lazy Pi spawn; already-admitted work is never
        *  affected by a later `false`. */
       admissionGate?: () => boolean;
+      /** Override for the auto-title suggestion backend (tests). */
+      titleSuggester?: Pick<AgentTitleSuggester, "suggestTitle">;
+      /** Resolves the workspace's configured suggestion model + thinking
+       *  level (Settings). Empty/undefined fields mean the suggestion
+       *  backend's defaults. */
+      getSuggestConfig?: (workspaceId: string) => { model?: string; thinkingLevel?: string } | undefined;
     },
   ) {
     if (!options.sessionsRoot) throw new AgentError("invalid-input", "sessionsRoot is required");
@@ -225,6 +241,8 @@ export class AgentService {
     this.abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_ABORT_TIMEOUT_MS;
     this.onWorkspaceGitChanged = options.onWorkspaceGitChanged;
     this.admissionGate = options.admissionGate ?? (() => true);
+    this.titleSuggester = options.titleSuggester ?? new AgentTitleSuggester();
+    this.getSuggestConfig = options.getSuggestConfig;
   }
 
   /** Refuses new agent work while the daemon is draining/ready/stopping.
@@ -893,6 +911,7 @@ export class AgentService {
     this.leaves.clear();
     this.diagnostics.clear();
     this.compacting.clear();
+    this.titleSuggestions.clear();
     this.runStartedAt.clear();
     this.eventChains.clear();
     this.transcripts.clear();
@@ -1274,6 +1293,48 @@ export class AgentService {
   private async appendUserRow(agentId: string, text: string, images?: UserImageRef[], files?: UserFileRef[]): Promise<void> {
     const state = await this.getTranscript(agentId);
     this.emitRowUpsert(agentId, state.addUserMessage(text, images, files));
+    const userTexts = state.snapshot().timeline
+      .filter((row): row is Extract<TimelineItem, { kind: "user" }> => row.kind === "user")
+      .map((row) => row.text);
+    this.maybeAutoTitle(agentId, userTexts);
+  }
+
+  /** Fire-and-forget auto-title: once the transcript holds the first two
+   *  user messages, asks the workspace's suggestion model for a 3-4 word
+   *  title and persists it. Only agents still carrying the create()
+   *  placeholder are eligible (a custom create-time title or an already
+   *  applied suggestion opts out). Never throws and never blocks the
+   *  message path -- failures simply leave the placeholder in place and
+   *  retry on the next user message. */
+  private maybeAutoTitle(agentId: string, userTexts: string[]): void {
+    if (userTexts.length < TITLE_SUGGEST_AFTER_USER_MESSAGES) return;
+    const agent = this.repositories.agents.get(agentId);
+    if (!agent || agent.archivedAt) return;
+    if (agent.titleOverridden || agent.title !== DEFAULT_AGENT_TITLE) return;
+    if (this.titleSuggestions.has(agentId)) return;
+    this.titleSuggestions.add(agentId);
+    void (async () => {
+      try {
+        let model: string | undefined;
+        let thinkingLevel: string | undefined;
+        try {
+          const config = this.getSuggestConfig?.(agent.workspaceId);
+          model = config?.model?.trim() || undefined;
+          thinkingLevel = config?.thinkingLevel?.trim() || undefined;
+        } catch { model = undefined; thinkingLevel = undefined; }
+        let cwd: string | undefined;
+        try { cwd = this.repositories.workspaces.get(agent.workspaceId)?.cwd; } catch { cwd = undefined; }
+        const title = await this.titleSuggester.suggestTitle(userTexts, cwd, model, thinkingLevel);
+        if (!title) return;
+        const current = this.repositories.agents.get(agentId);
+        if (!current || current.archivedAt || current.titleOverridden || current.title !== DEFAULT_AGENT_TITLE) return;
+        this.repositories.agents.updateTitle(agentId, title);
+        const status = (this.repositories.agents.get(agentId)?.lastKnownStatus as AgentStatus) ?? "idle";
+        this.emit({ agentId, type: "title", status, payload: { title } });
+      } catch {} finally {
+        this.titleSuggestions.delete(agentId);
+      }
+    })();
   }
 
   /** Validates and writes file uploads into the shared attachment cache. */

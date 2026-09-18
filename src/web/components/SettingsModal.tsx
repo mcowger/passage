@@ -31,6 +31,26 @@ import { toast } from "sonner";
 
 /** Sentinel Select value for "use pi default" (stored as an empty suggestModel). Radix requires non-empty item values. */
 const DEFAULT_SUGGEST_MODEL_VALUE = "__pi_default";
+/** Sentinel Select value for "use pi default" thinking (stored as an empty suggestThinkingLevel). */
+const DEFAULT_SUGGEST_THINKING_VALUE = "__pi_default_thinking";
+
+/** Valid thinking levels for the chosen suggestion model: that model's own
+ *  supported list, or the union across known models when pi default is
+ *  selected (order of first appearance, deduplicated). */
+export function suggestThinkingOptions(models: AgentCapabilities["models"], suggestModel: string): string[] {
+  const selected = suggestModel.trim();
+  if (selected) {
+    const entry = models.find((m) => `${m.provider}/${m.id}` === selected);
+    return [...(entry?.supportedThinkingLevels ?? [])];
+  }
+  const union: string[] = [];
+  for (const model of models) {
+    for (const level of model.supportedThinkingLevels) {
+      if (!union.includes(level)) union.push(level);
+    }
+  }
+  return union;
+}
 
 const BASELINE_TOOL_LABELS: Record<BaselineTool, string> = {
   read: "Read (read, readFile)",
@@ -510,9 +530,17 @@ export function SettingsModal({
             <Select
               value={(currentSettings.suggestModel?.trim() || DEFAULT_SUGGEST_MODEL_VALUE)}
               onValueChange={(value) =>
-                setCurrentSettings({
-                  ...currentSettings,
-                  suggestModel: value === DEFAULT_SUGGEST_MODEL_VALUE ? "" : value,
+                setCurrentSettings((prev) => {
+                  const suggestModel = value === DEFAULT_SUGGEST_MODEL_VALUE ? "" : value;
+                  const levels = suggestThinkingOptions(suggestModels, suggestModel);
+                  const thinking = prev.suggestThinkingLevel?.trim() ?? "";
+                  // A model change can invalidate the stored level: only
+                  // keep it when the new model actually supports it.
+                  return {
+                    ...prev,
+                    suggestModel,
+                    suggestThinkingLevel: thinking && levels.includes(thinking) ? thinking : "",
+                  };
                 })
               }
               disabled={suggestModelsLoading || !api}
@@ -540,7 +568,40 @@ export function SettingsModal({
               </SelectContent>
             </Select>
             <small className="text-xs font-normal text-muted-foreground">
-              Model passed as <code className="font-mono">pi --model</code> when generating worktree label/branch/folder suggestions.
+              Model passed as <code className="font-mono">pi --model</code> when generating worktree label/branch/folder suggestions and agent titles.
+            </small>
+            <Label htmlFor="settings-suggest-thinking">Suggestion Thinking Level</Label>
+            <Select
+              value={(currentSettings.suggestThinkingLevel?.trim() || DEFAULT_SUGGEST_THINKING_VALUE)}
+              onValueChange={(value) =>
+                setCurrentSettings({
+                  ...currentSettings,
+                  suggestThinkingLevel: value === DEFAULT_SUGGEST_THINKING_VALUE ? "" : value,
+                })
+              }
+              disabled={suggestModelsLoading || !api}
+            >
+              <SelectTrigger id="settings-suggest-thinking" className="w-full">
+                <SelectValue placeholder={suggestModelsLoading ? "Loading levels\u2026" : "Select a thinking level"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_SUGGEST_THINKING_VALUE}>Use pi default</SelectItem>
+                {suggestThinkingOptions(suggestModels, currentSettings.suggestModel?.trim() ?? "").map((level) => (
+                  <SelectItem key={level} value={level}>
+                    {level}
+                  </SelectItem>
+                ))}
+                {(() => {
+                  const stored = currentSettings.suggestThinkingLevel?.trim() ?? "";
+                  const known = new Set(suggestThinkingOptions(suggestModels, currentSettings.suggestModel?.trim() ?? ""));
+                  return stored && !known.has(stored) ? (
+                    <SelectItem value={stored}>{stored} (saved)</SelectItem>
+                  ) : null;
+                })()}
+              </SelectContent>
+            </Select>
+            <small className="text-xs font-normal text-muted-foreground">
+              Only levels the chosen model supports are listed.{(currentSettings.suggestModel?.trim() || "") === "" ? " With pi default, every known level is listed." : ""}
             </small>
             {suggestModelsError && (
               <small className="text-xs font-normal text-muted-foreground">

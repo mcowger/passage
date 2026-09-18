@@ -159,6 +159,16 @@ const agentService = new AgentService(repositories, {
   // drain begins. Defaults to open before the lifecycle below exists
   // (construction order), never after.
   admissionGate: () => lifecycleRef?.isAdmissionOpen() ?? true,
+  // Auto-titles use the workspace's configured suggestion model + thinking
+  // level (Settings); empty fields mean the suggestion backend's defaults.
+  getSuggestConfig: (workspaceId) => {
+    try {
+      const settings = workspaceService.getSettings(workspaceId);
+      return { model: settings.suggestModel, thinkingLevel: settings.suggestThinkingLevel };
+    } catch {
+      return undefined;
+    }
+  },
 });
 // Boot-time restart recovery, before serving agent commands: any agent
 // still persisted as running/stopping/initializing/needs-attention belonged

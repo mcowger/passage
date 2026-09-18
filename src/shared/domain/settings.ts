@@ -77,6 +77,11 @@ export const workspaceSettingsSchema = appearanceSettingsSchema.extend({
   editorTabSize: z.number().int().min(1).max(8).default(2),
   terminalFontSize: z.number().int().min(9).max(32).default(13),
   suggestModel: z.string().trim().max(256).default(""),
+  /** Thinking level for suggestion-model runs (agent auto-titles,
+   *  worktree metadata). Empty means the pi default. Constrained to the
+   *  chosen model's supported levels in the UI; the daemon passes it
+   *  through verbatim. */
+  suggestThinkingLevel: z.string().trim().max(256).default(""),
   timelineExpansion: timelineExpansionSchema.default(DEFAULT_TIMELINE_EXPANSION),
 });
 export type WorkspaceSettings = z.infer<typeof workspaceSettingsSchema>;
@@ -90,5 +95,6 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   editorTabSize: 2,
   terminalFontSize: 13,
   suggestModel: "",
+  suggestThinkingLevel: "",
   timelineExpansion: DEFAULT_TIMELINE_EXPANSION,
 };

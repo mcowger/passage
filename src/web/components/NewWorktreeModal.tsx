@@ -31,6 +31,7 @@ type Props = {
   lockedProjectId?: string;
   initialTab?: "create" | "discover";
   suggestModel?: string;
+  suggestThinkingLevel?: string;
   api: WorkspaceApi;
   onClose: () => void;
   onCreated: (result: CreateWorktreeResponse) => void;
@@ -44,6 +45,7 @@ export function NewWorktreeModal({
   lockedProjectId,
   initialTab = "create",
   suggestModel,
+  suggestThinkingLevel,
   api,
   onClose,
   onCreated,
@@ -116,7 +118,7 @@ export function NewWorktreeModal({
     setSuggesting(true);
     setError("");
     try {
-      const suggestion = await api.suggestWorktree(projectId, purpose.trim(), suggestModel);
+      const suggestion = await api.suggestWorktree(projectId, purpose.trim(), suggestModel, suggestThinkingLevel);
       setLabel(suggestion.label);
       setBranch(suggestion.branch);
       setFolder(suggestion.folder);
@@ -377,7 +379,7 @@ export function NewWorktreeModal({
                   </Button>
                 </div>
               </label>
-              <p className="text-[11px] text-muted-foreground">Type your goal and click Suggest to auto-fill metadata.{suggestModel?.trim() ? ` Uses model ${suggestModel.trim()} (Settings).` : " Uses the default model (change in Settings)."}</p>
+              <p className="text-[11px] text-muted-foreground">Type your goal and click Suggest to auto-fill metadata.{suggestModel?.trim() ? ` Uses model ${suggestModel.trim()}${suggestThinkingLevel?.trim() ? ` (${suggestThinkingLevel.trim()})` : ""} (Settings).` : " Uses the default model (change in Settings)."}</p>
             </div>
 
             <label className="flex flex-col gap-1 text-xs font-medium">

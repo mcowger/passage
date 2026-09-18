@@ -42,7 +42,7 @@ describe("worktrees HTTP API", () => {
     const res = await f.app.fetch(
       request(`/api/projects/${project.id}/worktrees/suggest`, {
         method: "POST",
-        body: JSON.stringify({ purpose: "Add retry queue to stripe webhooks" }),
+        body: JSON.stringify({ purpose: "Add retry queue to stripe webhooks", model: "test/model", thinkingLevel: "high" }),
       }),
     );
     expect(res.status).toBe(200);

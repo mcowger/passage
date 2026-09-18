@@ -13,7 +13,7 @@ const make = async (limit = 10, executableArgs?: string[]) => {
   const store = new MetadataStore(join(root, "meta.sqlite")); const repos = new MetadataRepositories(store.db);
   repos.projects.save({ id: "p", configuredRootPath: root, canonicalRootPath: root, displayLabel: "p", archivedAt: null });
   const workspace: Workspace = { id: "w", projectId: "p", kind: "directory", cwd: root, checkoutRoot: root, mainRepositoryRoot: root, branchRef: null, displayLabel: "w", locationId: null, ownershipState: "not-owned", archivedAt: null }; repos.workspaces.save(workspace);
-  const manager = new PiRpcManager(4); const service = new AgentService(repos, { sessionsRoot: join(root, "sessions"), manager, listLimit: limit, pi: { executable: process.execPath, executableArgs: executableArgs ?? ["-e", script] } });
+  const manager = new PiRpcManager(4); const service = new AgentService(repos, { sessionsRoot: join(root, "sessions"), manager, listLimit: limit, pi: { executable: process.execPath, executableArgs: executableArgs ?? ["-e", script] }, titleSuggester: { suggestTitle: async () => null } });
   return { root, store, repos, manager, service };
 };
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -735,6 +735,112 @@ describe("drain admission gate (docs/BACKTOSQUAREONE.md step 5)", () => {
     await Bun.sleep(20);
     expect(f.service.listQuickBlockers()).toEqual([]);
     expect(await f.service.listBlockers()).toContainEqual({ agentId: agent.id, reason: "unknown" });
+    await f.service.shutdown();
+    f.store.close();
+  });
+});
+
+describe("agent auto-titles (after the first two user messages)", () => {
+  const makeWithTitles = async (suggestTitle: (messages: string[], cwd?: string, model?: string, thinkingLevel?: string) => Promise<string | null>, suggestModel = "test/model", suggestThinkingLevel = "high") => {
+    const root = await mkdtemp(join("/tmp", "passage-agent-"));
+    roots.push(root);
+    const store = new MetadataStore(join(root, "meta.sqlite"));
+    const repos = new MetadataRepositories(store.db);
+    repos.projects.save({ id: "p", configuredRootPath: root, canonicalRootPath: root, displayLabel: "p", archivedAt: null });
+    const workspace: Workspace = { id: "w", projectId: "p", kind: "directory", cwd: root, checkoutRoot: root, mainRepositoryRoot: root, branchRef: null, displayLabel: "w", locationId: null, ownershipState: "not-owned", archivedAt: null };
+    repos.workspaces.save(workspace);
+    const calls: { messages: string[]; cwd?: string; model?: string; thinkingLevel?: string }[] = [];
+    const service = new AgentService(repos, {
+      sessionsRoot: join(root, "sessions"),
+      manager: new PiRpcManager(4),
+      pi: { executable: process.execPath, executableArgs: ["-e", script] },
+      titleSuggester: {
+        suggestTitle: async (messages, cwd, model, thinkingLevel) => {
+          calls.push({ messages, cwd, model, thinkingLevel });
+          return suggestTitle(messages, cwd, model, thinkingLevel);
+        },
+      },
+      getSuggestConfig: () => ({ model: suggestModel, thinkingLevel: suggestThinkingLevel }),
+    });
+    return { root, store, repos, service, calls };
+  };
+  const waitForTitle = async (repos: MetadataRepositories, agentId: string, timeoutMs = 2000) => {
+    const start = Date.now();
+    for (;;) {
+      const title = repos.agents.get(agentId)?.title;
+      if (title && title !== "Agent") return title;
+      if (Date.now() - start > timeoutMs) throw new Error("timed out waiting for auto-title");
+      await Bun.sleep(10);
+    }
+  };
+  const settlePrompt = async (service: AgentService, agentId: string, text: string) => {
+    await service.prompt(agentId, text);
+    const start = Date.now();
+    for (;;) {
+      if (service.snapshot(agentId).lastKnownStatus === "idle") return;
+      if (Date.now() - start > 2000) throw new Error("timed out waiting for idle");
+      await Bun.sleep(10);
+    }
+  };
+
+  test("titles the agent after the second user message and emits a title event", async () => {
+    const f = await makeWithTitles(async () => "Fix login retry bug");
+    const seen: { type: string; title?: string }[] = [];
+    f.service.subscribe((event) => {
+      if (event.type === "title") seen.push({ type: event.type, title: (event.payload as { title?: string } | undefined)?.title });
+    });
+    const agent = await f.service.create("w");
+    await settlePrompt(f.service, agent.id, "the login retry is broken");
+    expect(f.calls).toHaveLength(0);
+    await settlePrompt(f.service, agent.id, "it fails after three attempts");
+    expect(await waitForTitle(f.repos, agent.id)).toBe("Fix login retry bug");
+    expect(f.calls).toHaveLength(1);
+    expect(f.calls[0]?.messages).toEqual(["the login retry is broken", "it fails after three attempts"]);
+    expect(f.calls[0]?.model).toBe("test/model");
+    expect(f.calls[0]?.thinkingLevel).toBe("high");
+    expect(seen).toEqual([{ type: "title", title: "Fix login retry bug" }]);
+    // A third message does not retitle.
+    await settlePrompt(f.service, agent.id, "one more thing");
+    await Bun.sleep(30);
+    expect(f.calls).toHaveLength(1);
+    expect(f.repos.agents.get(agent.id)?.title).toBe("Fix login retry bug");
+    await f.service.shutdown();
+    f.store.close();
+  });
+
+  test("steer and follow-up count as user messages", async () => {
+    const f = await makeWithTitles(async () => "Steered session title");
+    const agent = await f.service.create("w");
+    await settlePrompt(f.service, agent.id, "first");
+    await f.service.steer(agent.id, "second via steer");
+    expect(await waitForTitle(f.repos, agent.id)).toBe("Steered session title");
+    await f.service.shutdown();
+    f.store.close();
+  });
+
+  test("skips agents with a custom create-time title", async () => {
+    const f = await makeWithTitles(async () => "Should never apply");
+    const agent = await f.service.create("w", "My Title");
+    await settlePrompt(f.service, agent.id, "first");
+    await settlePrompt(f.service, agent.id, "second");
+    await Bun.sleep(50);
+    expect(f.calls).toHaveLength(0);
+    expect(f.repos.agents.get(agent.id)?.title).toBe("My Title");
+    await f.service.shutdown();
+    f.store.close();
+  });
+
+  test("a null suggestion keeps the placeholder and retries on the next message", async () => {
+    let attempts = 0;
+    const f = await makeWithTitles(async () => (++attempts === 1 ? null : "Second try title"));
+    const agent = await f.service.create("w");
+    await settlePrompt(f.service, agent.id, "first");
+    await settlePrompt(f.service, agent.id, "second");
+    await Bun.sleep(50);
+    expect(f.repos.agents.get(agent.id)?.title).toBe("Agent");
+    await settlePrompt(f.service, agent.id, "third");
+    expect(await waitForTitle(f.repos, agent.id)).toBe("Second try title");
+    expect(attempts).toBe(2);
     await f.service.shutdown();
     f.store.close();
   });

@@ -43,3 +43,18 @@ describe("MetadataGenerator", () => {
     expect(worktreeSuggestionSchema.safeParse(result).success).toBe(true);
   });
 });
+
+describe("MetadataGenerator thinking level", () => {
+  it("sends set_thinking_level before prompting", async () => {
+    const piScriptWithThinking = `let buffer = ""; let level = "none"; process.stdin.on("data", (chunk) => { buffer += chunk; const lines = buffer.split("\\n"); buffer = lines.pop() ?? ""; for (const line of lines) { if (!line) continue; const request = JSON.parse(line); if (request.type === "get_state") { process.stdout.write(JSON.stringify({ type: "response", id: request.id, command: "get_state", success: true }) + "\\n"); continue; } if (request.type === "set_thinking_level") { level = request.level; process.stdout.write(JSON.stringify({ type: "response", id: request.id, command: "set_thinking_level", success: true }) + "\\n"); continue; } if (request.type !== "prompt") continue; process.stdout.write(JSON.stringify({ type: "response", id: request.id, command: "prompt", success: true }) + "\\n"); process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "{\\"label\\":\\"Webhook retries\\",\\"branch\\":\\"fix/webhook-retries\\",\\"folder\\":\\"webhook-retries-" + level + "--wk_abcd\\"}" }] } }) + "\\n"); process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n"); } });`;
+    const generator = new MetadataGenerator(1_000, { executable: process.execPath, executableArgs: ["-e", piScriptWithThinking] });
+    const result = await generator.suggest("Refactor websocket client reconnect loop", "/tmp", "test/model", "high");
+    expect(result.folder).toBe("webhook-retries-high--wk_abcd");
+  });
+
+  it("skips set_thinking_level when no level is configured", async () => {
+    const generator = new MetadataGenerator(1_000, { executable: process.execPath, executableArgs: ["-e", piScript] });
+    const result = await generator.suggest("Refactor websocket client reconnect loop", "/tmp", "test/model");
+    expect(result.folder).toBe("webhook-retries--wk_abcd");
+  });
+});

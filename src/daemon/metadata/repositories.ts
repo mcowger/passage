@@ -62,6 +62,7 @@ export class AgentRepository {
    * honestly -- see reconcileAfterRestart). */
   listActiveRuntime(limit: number): Agent[] { return this.db.query<AgentRow, [number]>("SELECT * FROM agents WHERE archived_at IS NULL AND last_known_status IN ('initializing','running','stopping','needs-attention') ORDER BY id LIMIT ?").all(limit).map((row) => agentFromRow(row)!); }
   updateStatus(id: string, status: string): void { this.db.query("UPDATE agents SET last_known_status=? WHERE id=?").run(status, id); }
+  updateTitle(id: string, title: string): void { this.db.query("UPDATE agents SET title=? WHERE id=?").run(title, id); }
   updateSessionPath(id: string, path: string): void { this.db.query("UPDATE agents SET pi_session_path=? WHERE id=?").run(path, id); }
   updateModelPreference(id: string, model: string): void { this.db.query("UPDATE agents SET model_preference=? WHERE id=?").run(model, id); }
   updateThinkingPreference(id: string, thinking: string): void { this.db.query("UPDATE agents SET thinking_preference=? WHERE id=?").run(thinking, id); }
