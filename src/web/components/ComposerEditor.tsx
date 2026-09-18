@@ -221,66 +221,144 @@ function isMention(node: Node): node is HTMLElement {
   return node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).dataset.composerRaw !== undefined;
 }
 
-function rawLength(node: Node): number {
-  if (isMention(node)) return node.dataset.composerRaw!.length;
-  if (node.nodeType === Node.TEXT_NODE) return node.nodeValue?.length ?? 0;
-  if (node.nodeName === "BR") return 1;
-  let length = 0;
-  node.childNodes.forEach((child) => {
-    length += rawLength(child);
-  });
-  return length;
-}
-
 function isBlock(node: Node): node is HTMLElement {
   return node instanceof HTMLElement && BLOCK_ELEMENTS.has(node.tagName);
 }
 
-function readNode(node: Node): string {
-  if (isMention(node)) return node.dataset.composerRaw!;
-  if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? "";
-  if (node.nodeName === "BR") return "\n";
-  let value = "";
-  node.childNodes.forEach((child) => { value += readNode(child); });
-  return value;
+/**
+ * Block-level children (real editor lines) versus inline content. Mentions
+ * are inline atomic chips even though they are elements; any other
+ * element-shaped node that is not a known block tag is treated as an
+ * inline wrapper and read through transparently.
+ */
+function isBlockLevel(node: Node): boolean {
+  return !isMention(node) && isBlock(node);
 }
 
-export function readComposerDraft(editor: HTMLElement): string {
+/**
+ * Whether reading `prev` then `next` as siblings crosses a line boundary. A
+ * block opens a new line after anything, and anything after a block is on a
+ * new (anonymous-block) line -- `<div>a</div>b` renders `b` below `a`.
+ */
+function childBoundaryBefore(prev: Node | null, next: Node): boolean {
+  if (prev === null) return false;
+  return isBlockLevel(prev) || isBlockLevel(next);
+}
+
+/**
+ * contentEditable marks an otherwise-empty line with a lone `<br>`
+ * (`<div><br></div>`); the surrounding block boundary already accounts for
+ * that line, so the `<br>` itself contributes nothing. Any other `<br>` is
+ * a genuine line break. The same rule covers a lone top-level `<br>`, which
+ * is the empty-editor state.
+ */
+function isPlaceholderBreak(node: Node, parent: Node): boolean {
+  return node.nodeName === "BR" && parent.childNodes.length === 1;
+}
+
+function readChildNode(node: Node, parent: Node): string {
+  if (isMention(node)) return node.dataset.composerRaw!;
+  if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? "";
+  if (node.nodeName === "BR") return isPlaceholderBreak(node, parent) ? "" : "\n";
+  if (node instanceof HTMLElement) return readChildList(node);
+  return "";
+}
+
+function readChildList(parent: Node): string {
   let value = "";
-  editor.childNodes.forEach((child, index) => {
-    if (index > 0 && isBlock(child)) {
-      value += "\n";
-    }
-    value += readNode(child);
+  let prev: Node | null = null;
+  parent.childNodes.forEach((child) => {
+    if (childBoundaryBefore(prev, child)) value += "\n";
+    value += readChildNode(child, parent);
+    prev = child;
   });
   return value;
 }
 
-function offsetFromPoint(root: HTMLElement, node: Node, offset: number): number | null {
+/**
+ * Reads the editor's plain text back out of the contentEditable DOM.
+ * Boundaries are recognized at every depth -- not just between top-level
+ * children -- because Shift+Enter/paste inside an existing line nests new
+ * blocks (`<div><div>a</div><div>b</div></div>`) instead of splitting the
+ * top level. The old top-level-only reader silently fused those lines, so
+ * the composer displayed line breaks that never reached the sent message.
+ */
+export function readComposerDraft(editor: HTMLElement): string {
+  return readChildList(editor);
+}
+
+/**
+ * Raw-draft length of one child, mirroring `readChildNode` exactly: caret
+ * math and readers must agree, or selections drift from the text they
+ * describe. `parent` is required so lone-`<br>` placeholders measure zero.
+ */
+function childLength(node: Node, parent: Node): number {
+  if (isMention(node)) return node.dataset.composerRaw!.length;
+  if (node.nodeType === Node.TEXT_NODE) return node.nodeValue?.length ?? 0;
+  if (node.nodeName === "BR") return isPlaceholderBreak(node, parent) ? 0 : 1;
+  if (node instanceof HTMLElement) {
+    let length = 0;
+    let prev: Node | null = null;
+    node.childNodes.forEach((child) => {
+      if (childBoundaryBefore(prev, child)) length += 1;
+      length += childLength(child, node);
+      prev = child;
+    });
+    return length;
+  }
+  return 0;
+}
+
+/**
+ * Maps a DOM selection point to a raw-draft offset. Element anchors carry a
+ * child index (not a character offset), so they are measured directly;
+ * text anchors carry the character offset. Block boundaries crossed while
+ * walking up to the root each contribute one newline, matching
+ * `readComposerDraft`.
+ */
+export function offsetFromPoint(root: HTMLElement, node: Node, offset: number): number | null {
   if (!root.contains(node) && node !== root) return null;
-  if (isMention(node)) return offset <= 0 ? rawOffsetBefore(root, node) : rawOffsetBefore(root, node) + rawLength(node);
+  if (isMention(node)) {
+    const start = rawOffsetBefore(root, node);
+    return offset <= 0 ? start : start + childLength(node, node.parentNode ?? root);
+  }
+
+  let base: number;
+  if (node.nodeType === Node.TEXT_NODE) {
+    base = Math.max(0, Math.min(offset, node.nodeValue?.length ?? 0));
+  } else {
+    const children = Array.from(node.childNodes);
+    const upto = Math.max(0, Math.min(offset, children.length));
+    base = 0;
+    let prev: Node | null = null;
+    for (let index = 0; index < upto; index += 1) {
+      const child = children[index]!;
+      if (childBoundaryBefore(prev, child)) base += 1;
+      base += childLength(child, node);
+      prev = child;
+    }
+  }
 
   let current: Node = node;
-  let result = Math.max(0, offset);
+  let result = base;
   while (current !== root) {
     const parent = current.parentNode;
     if (!parent) return null;
-    let prefix = 0;
-    for (const sibling of Array.from(parent.childNodes)) {
-      if (sibling === current) break;
-      prefix += rawLength(sibling);
+    const siblings = Array.from(parent.childNodes);
+    const index = siblings.indexOf(current as ChildNode);
+    if (index < 0) return null;
+    let prev: Node | null = null;
+    for (let siblingIndex = 0; siblingIndex < index; siblingIndex += 1) {
+      const sibling = siblings[siblingIndex]!;
+      if (childBoundaryBefore(prev, sibling)) result += 1;
+      result += childLength(sibling, parent);
+      prev = sibling;
     }
-    result += prefix;
+    if (childBoundaryBefore(prev, current)) result += 1;
     current = parent;
     if (isMention(current)) {
       const start = rawOffsetBefore(root, current);
-      return offset <= 0 ? start : start + rawLength(current);
-    }
-  }
-  if (node === root) {
-    result = 0;
-    for (const child of Array.from(root.childNodes).slice(0, offset)) {
-      result += rawLength(child);
+      return offset <= 0 ? start : start + childLength(current, current.parentNode ?? root);
     }
   }
   return result;
@@ -292,10 +370,17 @@ function rawOffsetBefore(root: HTMLElement, target: Node): number {
   while (current !== root) {
     const parent = current.parentNode;
     if (!parent) return result;
-    for (const sibling of Array.from(parent.childNodes)) {
-      if (sibling === current) break;
-      result += rawLength(sibling);
+    const siblings = Array.from(parent.childNodes);
+    const index = siblings.indexOf(current as ChildNode);
+    if (index < 0) return result;
+    let prev: Node | null = null;
+    for (let siblingIndex = 0; siblingIndex < index; siblingIndex += 1) {
+      const sibling = siblings[siblingIndex]!;
+      if (childBoundaryBefore(prev, sibling)) result += 1;
+      result += childLength(sibling, parent);
+      prev = sibling;
     }
+    if (childBoundaryBefore(prev, current)) result += 1;
     current = parent;
   }
   return result;
@@ -314,38 +399,53 @@ function selectionOffsets(root: HTMLElement): { start: number; end: number } | n
   };
 }
 
-function pointAtOffset(root: HTMLElement, target: number): { node: Node; offset: number } {
+/**
+ * Inverse of `offsetFromPoint`: maps a raw-draft offset to a DOM caret
+ * point. Block boundaries consume one offset each (again matching the
+ * reader); a caret landing exactly on a boundary anchors between the two
+ * lines, otherwise it resolves inside the surrounding text or past a chip.
+ */
+export function pointAtOffset(root: HTMLElement, target: number): { node: Node; offset: number } {
   let remaining = Math.max(0, target);
 
   const visit = (parent: Node): { node: Node; offset: number } => {
     const children = Array.from(parent.childNodes);
+    let prev: Node | null = null;
     for (let index = 0; index < children.length; index += 1) {
       const child = children[index]!;
-      const length = rawLength(child);
+      if (childBoundaryBefore(prev, child)) {
+        if (remaining <= 0) return { node: parent, offset: index };
+        remaining -= 1;
+      }
+      prev = child;
       if (isMention(child)) {
+        const length = childLength(child, parent);
         if (remaining <= 0) return { node: parent, offset: index };
         if (remaining <= length) return { node: parent, offset: index + 1 };
         remaining -= length;
         continue;
       }
       if (child.nodeType === Node.TEXT_NODE) {
+        const length = childLength(child, parent);
         if (remaining <= length) return { node: child, offset: remaining };
         remaining -= length;
         continue;
       }
       if (child.nodeName === "BR") {
+        if (childLength(child, parent) === 0) continue;
         if (remaining <= 0) return { node: parent, offset: index };
         if (remaining === 1) return { node: parent, offset: index + 1 };
         remaining -= 1;
         continue;
       }
+      const length = childLength(child, parent);
       if (remaining <= length) return visit(child);
       remaining -= length;
     }
     return { node: parent, offset: children.length };
   };
 
-  return visit(root) ?? { node: root, offset: root.childNodes.length };
+  return visit(root);
 }
 
 function clampPointOffset(point: { node: Node; offset: number }): number {
