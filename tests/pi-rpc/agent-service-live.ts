@@ -141,3 +141,98 @@ export async function runAgentServiceAbortAcceptance(): Promise<void> {
     await rm(root, { recursive: true, force: true });
   }
 }
+
+/** Backing docs/BACKTOSQUAREONE.md step 4: a daemon restart no longer
+ *  leaves an agent's persisted status claiming still-active work a fresh
+ *  process cannot see, and a follow-up prompt against the recovered agent
+ *  starts clean rather than resending anything. */
+export async function runAgentServiceRestartRecoveryAcceptance(): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), "passage-agent-service-restart-live-"));
+  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const repositories = new MetadataRepositories(store.db);
+  repositories.projects.save({
+    id: "project-live",
+    configuredRootPath: root,
+    canonicalRootPath: root,
+    displayLabel: "Live Pi project",
+    archivedAt: null,
+  });
+  repositories.workspaces.save({
+    id: "workspace-live",
+    projectId: "project-live",
+    kind: "directory",
+    cwd: root,
+    checkoutRoot: root,
+    mainRepositoryRoot: null,
+    branchRef: null,
+    displayLabel: "Live Pi workspace",
+    locationId: null,
+    ownershipState: "not-owned",
+    archivedAt: null,
+  });
+  const sessionsRoot = join(root, "sessions");
+  const before = new AgentService(repositories, { sessionsRoot });
+
+  try {
+    const agent = await before.create("workspace-live", "Restart recovery agent");
+    await before.prompt(agent.id, "Give a detailed explanation of distributed systems and include many examples.");
+    const runningDeadline = Date.now() + SETTLEMENT_TIMEOUT_MS;
+    while (Date.now() < runningDeadline && before.snapshot(agent.id).lastKnownStatus !== "running") {
+      await Bun.sleep(POLL_INTERVAL_MS);
+    }
+    if (before.snapshot(agent.id).lastKnownStatus !== "running") {
+      throw new Error("Pi agent did not begin streaming before the simulated restart");
+    }
+    // Simulate the daemon process exiting mid-run: shutdown() detaches this
+    // service's listeners before it stops the Pi child, exactly like a real
+    // process exit leaves nothing to update the persisted status -- it stays
+    // `running` with no live process behind it, same as a real crash.
+    await before.shutdown();
+    if (repositories.agents.get(agent.id)?.lastKnownStatus !== "running") {
+      throw new Error("Test setup did not leave a stale running status behind");
+    }
+
+    // Fresh AgentService against the same DB/session root: a new daemon
+    // process after restart, with none of `before`'s in-memory run state.
+    const after = new AgentService(repositories, { sessionsRoot });
+    try {
+      const restart = await after.reconcileAfterRestart();
+      if (!restart.interrupted.includes(agent.id)) {
+        throw new Error("Restart reconciliation did not report the interrupted agent");
+      }
+      const recovered = after.snapshot(agent.id);
+      if (recovered.lastKnownStatus !== "error") {
+        throw new Error(`Interrupted agent reported ${recovered.lastKnownStatus}, not the error/attention presentation`);
+      }
+      if (recovered.live) {
+        throw new Error("Recovered agent falsely reports a live Pi process");
+      }
+      // A fresh prompt on the recovered agent must succeed (status is not
+      // `running`, so it is not treated as still-active) and must not resend
+      // or duplicate the interrupted turn. Whether Pi itself had flushed the
+      // interrupted turn to JSONL before the forced stop is Pi's call, not
+      // Passage's to fabricate or repair -- assert only what step 4 actually
+      // owns: no duplication, and the recovery turn is honestly persisted.
+      const recoveryText = "Reply with exactly: PASSAGE_AGENT_RESTARTED";
+      await after.prompt(agent.id, recoveryText);
+      await waitForSettled(after, agent.id);
+      const history = await after.history(agent.id);
+      if ("unpersisted" in history) {
+        throw new Error("Pi session history was not persisted after restart recovery");
+      }
+      const userTurns = history.history.timeline.filter((item) => item.kind === "user");
+      const recoveryTurns = userTurns.filter((item) => "text" in item && item.text === recoveryText);
+      if (recoveryTurns.length !== 1) {
+        throw new Error(`Expected the recovery prompt exactly once, found ${recoveryTurns.length} of ${userTurns.length} total user turns`);
+      }
+      if (userTurns.length > 2) {
+        throw new Error(`Restart recovery duplicated user turns: found ${userTurns.length}`);
+      }
+    } finally {
+      await after.shutdown();
+    }
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}

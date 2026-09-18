@@ -26,6 +26,10 @@ const MAX_TRANSCRIPTS = 256;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_SHORT_VALUE_LENGTH = 256;
 const MAX_RUNTIME_DIAGNOSTICS = 100;
+/** Bound on the one-time boot sweep for agents left in a live-looking
+ *  status by a prior daemon exit. Not a pagination limit -- generous on
+ *  purpose so a large install still gets fully normalized on restart. */
+const MAX_RESTART_RECONCILE = 10_000;
 const DEFAULT_ABORT_TIMEOUT_MS = 30_000;
 /** Summarizing a large session is a single LLM call that can run for
  *  minutes; the default 10s RPC admission timeout would false-fail it. */
@@ -207,19 +211,21 @@ export class AgentService {
   snapshot(agentId: string): AgentSnapshot {
     const agent = this.requireAgent(agentId);
     const process = this.manager.get(agentId);
-    const diagnostic = this.diagnostics.get(agentId);
-    // A persisted `running`/`stopping` status with no live Pi process and
-    // no boot in flight is stale: the in-memory run state (runStartedAt,
-    // subscriptions, event chains) is gone after a daemon restart, and no
-    // further socket event will ever correct it. Report (and persist) idle
-    // so the UI stops showing "generation in flight" and the composer
-    // sends `prompt` instead of a no-op `steer`. While a boot is pending
-    // the status is genuinely unknown, so leave it alone.
+    // A persisted `running`/`stopping`/`initializing`/`needs-attention`
+    // status with no live Pi process and no boot in flight is stale: the
+    // in-memory run state (runStartedAt, subscriptions, event chains,
+    // pending questions) is gone after a daemon restart, and no further
+    // socket event will ever correct it. Whatever the agent was doing was
+    // interrupted, not completed, so report (and persist) it through the
+    // existing error/attention presentation rather than inventing an idle
+    // or still-active state. While a boot is pending the status is
+    // genuinely unknown, so leave it alone.
     let baseStatus = agent.lastKnownStatus;
-    if ((baseStatus === "running" || baseStatus === "stopping") && !process && !this.pendingStarts.has(agentId)) {
-      baseStatus = "idle";
-      try { this.repositories.agents.updateStatus(agentId, baseStatus); } catch {}
+    if (!process && !this.pendingStarts.has(agentId) && this.isStaleActiveStatus(baseStatus)) {
+      this.markInterrupted(agentId, baseStatus);
+      baseStatus = "error";
     }
+    const diagnostic = this.diagnostics.get(agentId);
     const pendingUiRequest = baseStatus === "stopping"
       ? undefined
       : (() => {
@@ -246,23 +252,69 @@ export class AgentService {
     this.requireWorkspace(workspaceId);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > this.listLimit) throw new AgentError("invalid-input", "invalid list limit");
     return this.repositories.agents.listForWorkspace(workspaceId, limit).map((agent) => {
-      // Same stale-status correction as snapshot(): no live process and no
-      // boot in flight means a persisted `running`/`stopping` can never
-      // settle via the event stream, so surface idle instead of a stuck
-      // spinner in the sidebar/agent tabs.
+      // Same stale-status correction as snapshot().
       let lastKnownStatus = agent.lastKnownStatus;
-      if ((lastKnownStatus === "running" || lastKnownStatus === "stopping") && this.manager.get(agent.id) === undefined && !this.pendingStarts.has(agent.id)) {
-        lastKnownStatus = "idle";
-        try { this.repositories.agents.updateStatus(agent.id, lastKnownStatus); } catch {}
+      const process = this.manager.get(agent.id);
+      if (!process && !this.pendingStarts.has(agent.id) && this.isStaleActiveStatus(lastKnownStatus)) {
+        this.markInterrupted(agent.id, lastKnownStatus);
+        lastKnownStatus = "error";
       }
       return {
         ...agent,
         lastKnownStatus,
-        live: this.manager.get(agent.id) !== undefined,
+        live: process !== undefined,
         persisted: agent.piSessionPath !== null,
         ...(this.runStartedAt.has(agent.id) ? { runStartedAt: this.runStartedAt.get(agent.id)! } : {}),
       };
     });
+  }
+
+  /** True for a persisted status that only makes sense while a run/boot/
+   *  question is actually in flight -- i.e. one a daemon restart can leave
+   *  behind with nothing left to ever settle it. */
+  private isStaleActiveStatus(status: string): boolean {
+    return status === "running" || status === "stopping" || status === "initializing" || status === "needs-attention";
+  }
+
+  /** Persists `error` for a status a daemon restart interrupted (no live
+   *  process, no boot in flight) and records why, without touching the Pi
+   *  transcript: nothing this honest can say Pi itself produced that row.
+   *  Never overwrites an already-recorded diagnostic (e.g. a real crash
+   *  reported by onLifecycle earlier in this daemon's life). */
+  private markInterrupted(agentId: string, previousStatus: string): void {
+    if (!this.diagnostics.has(agentId)) {
+      this.diagnostics.set(agentId, { generation: 0, exitStatus: `interrupted (${previousStatus})`, stderr: [], stderrTruncated: false });
+      while (this.diagnostics.size > MAX_RUNTIME_DIAGNOSTICS) this.diagnostics.delete(this.diagnostics.keys().next().value!);
+    }
+    try { this.repositories.agents.updateStatus(agentId, "error"); } catch {}
+  }
+
+  /** One-time boot sweep, before serving agent commands: every agent still
+   *  persisted as running/stopping/initializing/needs-attention belonged to
+   *  a Pi process this fresh daemon does not own -- normalize it to the
+   *  existing error/attention presentation instead of leaving a stale
+   *  spinner or an unanswerable pending question. Never throws. */
+  async reconcileAfterRestart(): Promise<{ interrupted: string[] }> {
+    const interrupted: string[] = [];
+    let agents: Agent[];
+    try {
+      agents = this.repositories.agents.listActiveRuntime(MAX_RESTART_RECONCILE);
+    } catch (error) {
+      logger("agent").warn("Restart reconciliation lookup failed", { event: "agent.restart_reconcile_lookup_failed", ...errorFields(error) });
+      return { interrupted };
+    }
+    for (const agent of agents) {
+      try {
+        this.markInterrupted(agent.id, agent.lastKnownStatus);
+        interrupted.push(agent.id);
+      } catch (error) {
+        logger("agent").warn("Restart reconciliation failed for agent", { event: "agent.restart_reconcile_failed", agentId: agent.id, ...errorFields(error) });
+      }
+    }
+    if (interrupted.length > 0) {
+      logger("agent").warn("Normalized agent runtime state interrupted by daemon restart", { event: "agent.restart_interrupted", count: interrupted.length });
+    }
+    return { interrupted };
   }
 
   async create(workspaceId: string, title = "Agent"): Promise<AgentSnapshot> {

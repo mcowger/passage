@@ -116,6 +116,18 @@ const agentService = new AgentService(repositories, {
     workspaceEvents.emitGitStatus({ workspaceId, reason: "commit" });
   },
 });
+// Boot-time restart recovery, before serving agent commands: any agent
+// still persisted as running/stopping/initializing/needs-attention belonged
+// to a Pi process this fresh daemon does not own (see
+// docs/BACKTOSQUAREONE.md step 4). Normalize it to the existing
+// error/attention presentation instead of a stale spinner or an
+// unanswerable pending question.
+try {
+  const restart = await agentService.reconcileAfterRestart();
+  if (restart.interrupted.length > 0) {
+    log.warn("Interrupted agent runtime state normalized on boot", { event: "agent.restart_swept", count: restart.interrupted.length });
+  }
+} catch {}
 const agentEvents = new AgentEventHub(agentService);
 const responses = new IdempotencyCache<{ fingerprint: string; response: string }>();
 const inflightResponses = new Map<string, { fingerprint: string; response: Promise<string> }>();

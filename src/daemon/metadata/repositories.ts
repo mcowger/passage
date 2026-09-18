@@ -57,6 +57,10 @@ export class AgentRepository {
   save(value: Agent): void { this.db.query("INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET workspace_id=excluded.workspace_id, pi_session_id=excluded.pi_session_id, pi_session_path=excluded.pi_session_path, title=excluded.title, title_overridden=excluded.title_overridden, model_preference=excluded.model_preference, thinking_preference=excluded.thinking_preference, last_known_status=excluded.last_known_status, archived_at=excluded.archived_at").run(value.id, value.workspaceId, value.piSessionId, value.piSessionPath, value.title, integer(value.titleOverridden), value.modelPreference, value.thinkingPreference, value.lastKnownStatus, value.archivedAt); }
   get(id: string): Agent | undefined { return agentFromRow(this.db.query<AgentRow, [string]>("SELECT * FROM agents WHERE id=?").get(id)); }
   listForWorkspace(workspaceId: string, limit: number, archived = false): Agent[] { return this.db.query<AgentRow, [string, number]>(`SELECT * FROM agents WHERE workspace_id=? AND archived_at IS ${archived ? "NOT NULL" : "NULL"} ORDER BY id LIMIT ?`).all(workspaceId, limit).map((row) => agentFromRow(row)!); }
+  /** Non-archived agents whose persisted status implies live work (used once
+   * at daemon boot to find runtime state a restart could not have settled
+   * honestly -- see reconcileAfterRestart). */
+  listActiveRuntime(limit: number): Agent[] { return this.db.query<AgentRow, [number]>("SELECT * FROM agents WHERE archived_at IS NULL AND last_known_status IN ('initializing','running','stopping','needs-attention') ORDER BY id LIMIT ?").all(limit).map((row) => agentFromRow(row)!); }
   updateStatus(id: string, status: string): void { this.db.query("UPDATE agents SET last_known_status=? WHERE id=?").run(status, id); }
   updateSessionPath(id: string, path: string): void { this.db.query("UPDATE agents SET pi_session_path=? WHERE id=?").run(path, id); }
   updateModelPreference(id: string, model: string): void { this.db.query("UPDATE agents SET model_preference=? WHERE id=?").run(model, id); }

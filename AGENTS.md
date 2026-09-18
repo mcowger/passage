@@ -12,7 +12,7 @@ Authority: `docs/DESIGN.md` (architecture/security/scope), `docs/UI.md` (UI/a11y
 
 - Follow [docs/BACKTOSQUAREONE.md](docs/BACKTOSQUAREONE.md) for the staged rollback to daemon-owned CLI RPC processes, ending with safe draining shutdown. Crash interruption is accepted; never automatically resend an uncertain prompt.
 - [docs/ORHPANS.md](docs/ORHPANS.md) is deprecated historical reference for what was reversed, not implementation authority. Retain it until explicitly asked to delete it; do not reintroduce the holder architecture.
-- Steps 1-3 are implemented: `PiRpcManager` spawns and owns each Pi child directly (no holder process, socket, or reattachment path); `pi-holder`, `shutdown-holders`, and `pi-status` are retired and fail clearly. A daemon restart now stops every agent's Pi child, interrupting active work. Restart recovery, cancellable drain mode, and safe shutdown/deploy (steps 4-6) are still planned, not implemented.
+- Steps 1-4 are implemented: `PiRpcManager` spawns and owns each Pi child directly (no holder process, socket, or reattachment path); `pi-holder`, `shutdown-holders`, and `pi-status` are retired. A daemon restart stops every agent's Pi child, interrupting active work, and normalizes any agent left `initializing`/`running`/`stopping`/`needs-attention` to the existing error/attention presentation on boot (`AgentService.reconcileAfterRestart`) — never a fabricated Pi transcript row. Cancellable drain mode and safe shutdown/deploy (steps 5-6) are still planned, not implemented.
 
 ## Pi invariants
 

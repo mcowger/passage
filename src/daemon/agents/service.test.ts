@@ -97,16 +97,61 @@ test("recovers a stale running status left behind by a daemon restart", async ()
   await f.service.capabilities(agent.id);
   await f.service.stop(agent.id);
   f.repos.agents.updateStatus(agent.id, "running");
-  // Reads report (and persist) idle so the UI stops showing generation in
-  // flight on reload/new systems.
-  expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
-  expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("idle");
+  // Reads report (and persist) the existing error/attention presentation --
+  // interrupted work must not look idle (invented completion) or still
+  // active (stale spinner) -- so the UI stops showing "generation in
+  // flight" on reload/new systems.
+  expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("error");
+  expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("error");
   // A stale `running` with no live process must not force the client onto
   // `steer` (a silent no-op when idle); `prompt` starts a fresh run.
   f.repos.agents.updateStatus(agent.id, "running");
   await f.service.prompt(agent.id, "hello after restart");
   await Bun.sleep(20);
   expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  await f.service.shutdown();
+  f.store.close();
+});
+
+test("normalizes every stale-active status left behind by a daemon restart, not just running", async () => {
+  const f = await make();
+  const agent = await f.service.create("w");
+  await f.service.capabilities(agent.id);
+  await f.service.stop(agent.id);
+  for (const status of ["initializing", "stopping", "needs-attention"] as const) {
+    f.repos.agents.updateStatus(agent.id, status);
+    expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("error");
+    expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("error");
+  }
+  // list() applies the same correction as snapshot().
+  f.repos.agents.updateStatus(agent.id, "running");
+  expect(f.service.list("w").find((row) => row.id === agent.id)?.lastKnownStatus).toBe("error");
+  await f.service.shutdown();
+  f.store.close();
+});
+
+test("reconcileAfterRestart normalizes stale-active agents on boot without touching idle/archived ones", async () => {
+  const f = await make();
+  const active = await f.service.create("w");
+  const idle = await f.service.create("w");
+  const archived = await f.service.create("w");
+  await f.service.capabilities(active.id);
+  await f.service.capabilities(idle.id);
+  await f.service.capabilities(archived.id);
+  await f.service.stop(active.id);
+  await f.service.stop(idle.id);
+  await f.service.archive(archived.id);
+  f.repos.agents.updateStatus(active.id, "running");
+  f.repos.agents.updateStatus(idle.id, "idle");
+  // Fresh service instance: same DB, no in-memory runtime state -- this is
+  // what a real daemon restart looks like.
+  const restarted = new AgentService(f.repos, { sessionsRoot: join(f.root, "sessions"), manager: new PiRpcManager(4), pi: { executable: process.execPath, executableArgs: ["-e", script] } });
+  const result = await restarted.reconcileAfterRestart();
+  expect(result.interrupted).toEqual([active.id]);
+  expect(f.repos.agents.get(active.id)?.lastKnownStatus).toBe("error");
+  expect(f.repos.agents.get(idle.id)?.lastKnownStatus).toBe("idle");
+  expect(f.repos.agents.get(archived.id)?.lastKnownStatus).toBe("archived");
+  await restarted.shutdown();
   await f.service.shutdown();
   f.store.close();
 });

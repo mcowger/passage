@@ -52,4 +52,39 @@ describe("agent socket protocol", () => {
     }, gap, "agent-1");
     expect(snapshot).toMatchObject({ sequence: 9, snapshotRequired: true });
   });
+
+  // Once a reconcile clears snapshotRequired at sequence 9 (see
+  // subscribeAgent), the very next contiguous event must resume normal
+  // delivery -- a daemon restart mid-session must not leave the client
+  // stuck re-requesting snapshots forever.
+  test("resumes ordered delivery immediately after a snapshot clears at a fresh sequence", () => {
+    const reconciled: AgentSocketState = { sequence: 9, connected: true, snapshotRequired: false };
+    const next = parseAgentMessage({
+      version: PROTOCOL_VERSION,
+      stream: "pi",
+      subjectId: "agent-1",
+      sequence: 10,
+      type: "status",
+      payload: { status: "running" },
+    }, reconciled, "agent-1");
+    expect(next).toMatchObject({ sequence: 10, snapshotRequired: false, status: "running" });
+  });
+
+  // An event that arrived and was dropped while a reconcile was already in
+  // flight (subscribeAgent ignores messages while `reconciling` is true)
+  // leaves a gap right after the reconcile clears. That gap must still be
+  // detected so the client re-requests a snapshot instead of silently
+  // resuming with a hole in its timeline.
+  test("a gap immediately after a snapshot clears still forces another snapshot", () => {
+    const reconciled: AgentSocketState = { sequence: 9, connected: true, snapshotRequired: false };
+    const next = parseAgentMessage({
+      version: PROTOCOL_VERSION,
+      stream: "pi",
+      subjectId: "agent-1",
+      sequence: 11,
+      type: "status",
+      payload: { status: "running" },
+    }, reconciled, "agent-1");
+    expect(next).toMatchObject({ sequence: 11, snapshotRequired: true });
+  });
 });
