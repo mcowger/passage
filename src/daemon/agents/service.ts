@@ -689,6 +689,12 @@ export class AgentService {
       unsubscribeEvents: process.subscribe((event) => this.enqueueEvent(agentId, event)),
       unsubscribeLifecycle: process.subscribeLifecycle((event) => this.enqueueLifecycle(agentId, event)),
     });
+    logger("agent").info("Agent process subscribed", {
+      event: "agent.process_subscribed",
+      agentId,
+      generation: process.generation,
+      transport: process.transport,
+    });
   }
 
   private detach(agentId: string): void {
@@ -1162,13 +1168,24 @@ export class AgentService {
       try {
         await this.manager.attach(agentId, { sessionDir: this.sessionDirectory(agentId) });
         process = this.manager.get(agentId);
-      } catch {}
+      } catch (error) {
+        logger("agent").info("No surviving holder to attach", { event: "holder.attach_unavailable", agentId, ...errorFields(error) });
+      }
       if (!process) {
         await this.start(agentId);
         process = this.manager.get(agentId);
       }
     }
     if (!process) throw new AgentError("not-running", "agent process could not be started");
+    const subscription = this.subscriptions.get(agentId);
+    if (subscription?.generation !== process.generation) {
+      logger("agent").warn("Agent process has no event subscription", {
+        event: "agent.process_unsubscribed",
+        agentId,
+        generation: process.generation,
+        transport: process.transport,
+      });
+    }
     return process;
   }
 

@@ -9,7 +9,7 @@
  * SQLite, or logging modules here — the holder runs detached with only
  * what it was started with.
  */
-import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,7 @@ import { LfJsonlParser } from "../../../shared/jsonl/parser.ts";
 import {
   HOLDER_VERSION,
   isHolderControlFrame,
+  logPathFor,
   metaPathFor,
   pidPathFor,
   type HolderHelloAck,
@@ -25,6 +26,8 @@ import {
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const MAX_LOG_BYTES = 512 * 1024;
+const OUTPUT_LOG_INTERVAL_MS = 10_000;
 
 export type HolderServerOptions = {
   agentId: string;
@@ -54,9 +57,16 @@ function piAgentDirectory(): string {
   return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
 }
 
-function log(agentId: string, event: string, extra?: Record<string, unknown>): void {
+function log(sessionDir: string, agentId: string, event: string, extra?: Record<string, unknown>): void {
+  const line = `${JSON.stringify({ timestamp: new Date().toISOString(), holder: agentId, event, ...extra })}\n`;
   try {
-    process.stderr.write(`${JSON.stringify({ holder: agentId, event, ...extra })}\n`);
+    process.stderr.write(line);
+  } catch {}
+  try {
+    const path = logPathFor(sessionDir);
+    const existing = statSync(path, { throwIfNoEntry: false });
+    if (existing && existing.size >= MAX_LOG_BYTES) writeFileSync(path, line, { mode: 0o600 });
+    else appendFileSync(path, line, { mode: 0o600 });
   } catch {}
 }
 
@@ -67,6 +77,7 @@ export class HolderServer {
   private server = createServer();
   private readonly daemons = new Set<Socket>();
   private readonly buffers = new Map<Socket, string>();
+  private readonly connectionIds = new Map<Socket, string>();
   private readonly lines: BufferedLine[] = [];
   private bufferBytes = 0;
   private latestSeq = 0;
@@ -78,6 +89,11 @@ export class HolderServer {
   private readonly startedAt = Date.now();
   private lastDaemonActivity = Date.now();
   private lastPiOutput = Date.now();
+  private lastOutputLogAt = 0;
+  private outputFrames = 0;
+  private outputBytes = 0;
+  private readonly outputTypes = new Set<string>();
+  private nextConnectionId = 0;
   private stopping = false;
   private exited = false;
   private idleTimer?: ReturnType<typeof setInterval>;
@@ -121,7 +137,7 @@ export class HolderServer {
       chmodSync(socketPath, 0o600);
     } catch {}
     this.server.on("connection", (socket) => this.onConnection(socket));
-    this.server.on("error", (error) => log(agentId, "holder.socket_error", { error: String(error) }));
+    this.server.on("error", (error) => this.log("holder.socket_error", { error: String(error) }));
 
     const meta: HolderMeta = {
       agentId,
@@ -148,7 +164,11 @@ export class HolderServer {
     } else {
       this.idleTimer = setInterval(() => {}, 60_000);
     }
-    log(agentId, "holder.started", { generation, socketPath, pid: process.pid });
+    this.log("holder.started", { generation, socketPath, pid: process.pid });
+  }
+
+  private log(event: string, extra?: Record<string, unknown>): void {
+    log(this.options.sessionDir, this.options.agentId, event, extra);
   }
 
   private spawnPi(): void {
@@ -171,7 +191,7 @@ export class HolderServer {
       stdout: "pipe",
       stderr: "pipe",
     });
-    log(this.options.agentId, "pi.process_started", { generation: this.options.generation });
+    this.log("pi.process_started", { generation: this.options.generation, pid: this.child.pid });
     const maxRecordBytes = this.options.maxRecordBytes ?? 8 * 1024 * 1024;
     const parser = new LfJsonlParser<unknown>(
       () => {},
@@ -212,7 +232,7 @@ export class HolderServer {
       carry += decoder.decode();
       if (carry.length > 0) this.onPiLine(`${carry}\n`);
     } catch (error) {
-      log(this.options.agentId, "holder.stdout_error", { error: String(error) });
+      this.log("holder.stdout_error", { error: String(error) });
     } finally {
       reader.releaseLock();
     }
@@ -235,6 +255,27 @@ export class HolderServer {
   private onPiLine(rawLine: string): void {
     this.lastPiOutput = Date.now();
     const bytes = encoder.encode(rawLine).byteLength;
+    this.outputFrames += 1;
+    this.outputBytes += bytes;
+    try {
+      const type = JSON.parse(rawLine) as { type?: unknown };
+      if (typeof type.type === "string") this.outputTypes.add(type.type);
+    } catch {}
+    const now = Date.now();
+    if (now - this.lastOutputLogAt >= OUTPUT_LOG_INTERVAL_MS) {
+      this.log("pi.stdout_activity", {
+        generation: this.options.generation,
+        frames: this.outputFrames,
+        bytes: this.outputBytes,
+        types: [...this.outputTypes].slice(0, 16),
+        latestSeq: this.latestSeq + 1,
+        daemons: this.daemons.size,
+      });
+      this.lastOutputLogAt = now;
+      this.outputFrames = 0;
+      this.outputBytes = 0;
+      this.outputTypes.clear();
+    }
     this.latestSeq += 1;
     this.lines.push({ seq: this.latestSeq, line: rawLine, bytes });
     this.bufferBytes += bytes;
@@ -260,15 +301,18 @@ export class HolderServer {
   }
 
   private onConnection(socket: Socket): void {
+    const connectionId = `holder-${process.pid}-${++this.nextConnectionId}`;
     this.daemons.add(socket);
     this.buffers.set(socket, "");
+    this.connectionIds.set(socket, connectionId);
     this.lastDaemonActivity = Date.now();
-    log(this.options.agentId, "holder.attached", { daemons: this.daemons.size });
+    this.log("holder.socket_connected", { connectionId, daemons: this.daemons.size });
     socket.on("data", (chunk) => this.onDaemonData(socket, chunk));
     socket.on("close", () => {
       this.daemons.delete(socket);
       this.buffers.delete(socket);
-      log(this.options.agentId, "holder.detached", { daemons: this.daemons.size });
+      this.connectionIds.delete(socket);
+      this.log("holder.socket_closed", { connectionId, daemons: this.daemons.size });
     });
     socket.on("error", () => {
       try {
@@ -298,6 +342,11 @@ export class HolderServer {
         if (this.piAlive && this.child.exitCode === null) {
           try {
             this.child.stdin.write(`${line}\n`);
+            this.log("pi.stdin_forwarded", {
+              connectionId: this.connectionIds.get(socket),
+              generation: this.options.generation,
+              command: typeof (record as { type?: unknown }).type === "string" ? (record as { type: string }).type : "unknown",
+            });
           } catch {}
         }
       }
@@ -308,6 +357,7 @@ export class HolderServer {
       } catch {}
       this.daemons.delete(socket);
       this.buffers.delete(socket);
+      this.connectionIds.delete(socket);
     }
   }
 
@@ -320,6 +370,8 @@ export class HolderServer {
     switch (record.type) {
       case "passage_hello": {
         const after = typeof record.after === "number" ? record.after : 0;
+        const connectionId = typeof record.connectionId === "string" ? record.connectionId : this.connectionIds.get(socket);
+        if (connectionId) this.connectionIds.set(socket, connectionId);
         const ack: HolderHelloAck = {
           type: "passage_hello_ack",
           agentId: this.options.agentId,
@@ -330,14 +382,25 @@ export class HolderServer {
           latestSeq: this.latestSeq,
         };
         send(ack);
+        let replayed = 0;
         for (const buffered of this.lines) {
           if (buffered.seq > after) {
             try {
               socket.write(buffered.line.endsWith("\n") ? buffered.line : `${buffered.line}\n`);
+              replayed += 1;
             } catch {}
           }
         }
         send({ type: "passage_stderr", stderr: [...this.stderrParts], stderrTruncated: this.stderrTruncated });
+        this.log("holder.hello", {
+          connectionId,
+          generation: this.options.generation,
+          after,
+          latestSeq: this.latestSeq,
+          replayed,
+          buffered: this.lines.length,
+          piAlive: this.piAlive,
+        });
         break;
       }
       case "passage_replay": {
@@ -380,7 +443,7 @@ export class HolderServer {
     this.piExitCode = code;
     const tail = decoder.decode();
     if (tail) this.captureStderr(encoder.encode(tail));
-    log(this.options.agentId, code === 0 ? "pi.process_stopped" : "pi.process_crashed", {
+    this.log(code === 0 ? "pi.process_stopped" : "pi.process_crashed", {
       generation: this.options.generation,
       exitCode: code,
     });
@@ -399,7 +462,7 @@ export class HolderServer {
     // Never while streaming: in-flight pi output keeps lastPiOutput fresh,
     // so a busy run cannot trip this even with no daemon attached.
     if (noDaemons && idleFor >= idleMs) {
-      log(this.options.agentId, "holder.idle_timeout", { idleMs });
+      this.log("holder.idle_timeout", { idleMs });
       void this.gracefulStop();
     }
   }
@@ -450,7 +513,7 @@ export class HolderServer {
         unlinkSync(path);
       } catch {}
     }
-    log(this.options.agentId, "holder.stopped", { code });
+    this.log("holder.stopped", { code });
     if (this.options.onExit) this.options.onExit(code);
     else process.exit(code);
   }

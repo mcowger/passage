@@ -32,6 +32,7 @@ const MAX_PI_COMMAND_BYTES =
   MAX_AGENT_FILES * MAX_AGENT_FILE_DATA_CHARACTERS +
   MAX_AGENT_MESSAGE_BYTES +
   65536;
+const OUTPUT_LOG_INTERVAL_MS = 10_000;
 
 const CUSTOM_ANSWER_ROW = /^(?:\d+\.\s*)?(?:Type something\.?|Other\b.*)$/i;
 const asError = (value: unknown): Error => (value instanceof Error ? value : new Error(String(value)));
@@ -91,6 +92,13 @@ export class HolderPiProcess {
   private helloTimer?: ReturnType<typeof setTimeout>;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private reconnectAttempts = 0;
+  private connectionAttempt = 0;
+  private readonly connectionPrefix = crypto.randomUUID();
+  private connectionId: string | undefined;
+  private lastOutputLogAt = 0;
+  private outputFrames = 0;
+  private outputBytes = 0;
+  private readonly outputTypes = new Set<string>();
   private closed = false;
   private after = 0;
   private readonly stderrDecoder = new TextDecoder();
@@ -145,6 +153,15 @@ export class HolderPiProcess {
   }
 
   private openSocket(): void {
+    const connectionId = `${this.connectionPrefix}-${++this.connectionAttempt}`;
+    this.connectionId = connectionId;
+    logger("pi-holder").info("Connecting to holder", {
+      event: "holder.connecting",
+      agentId: this.agentId,
+      generation: this.generation,
+      connectionId,
+      attempt: this.connectionAttempt,
+    });
     let socket: Socket;
     try {
       socket = connect(this.socketPath);
@@ -157,7 +174,14 @@ export class HolderPiProcess {
     socket.on("connect", () => {
       this.reconnectAttempts = 0;
       try {
-        socket.write(`${JSON.stringify({ type: "passage_hello", agentId: this.agentId, after: this.after })}\n`);
+        socket.write(`${JSON.stringify({ type: "passage_hello", agentId: this.agentId, after: this.after, connectionId })}\n`);
+        logger("pi-holder").info("Holder socket connected", {
+          event: "holder.connected",
+          agentId: this.agentId,
+          generation: this.generation,
+          connectionId,
+          after: this.after,
+        });
       } catch (error) {
         this.onSocketError(asError(error));
       }
@@ -189,6 +213,7 @@ export class HolderPiProcess {
         this.onControl(record);
         continue;
       }
+      this.logOutputActivity(record as PiRecord, encoder.encode(line).byteLength);
       try {
         this.parser.push(`${line}\n`);
       } catch (error) {
@@ -203,6 +228,27 @@ export class HolderPiProcess {
       this.captureStderr(encoder.encode(`${this.buffer}\n`));
       this.buffer = "";
     }
+  }
+
+  private logOutputActivity(record: PiRecord, bytes: number): void {
+    this.outputFrames += 1;
+    this.outputBytes += bytes;
+    if (typeof record.type === "string") this.outputTypes.add(record.type);
+    const now = Date.now();
+    if (now - this.lastOutputLogAt < OUTPUT_LOG_INTERVAL_MS) return;
+    logger("pi-holder").info("Received Pi output from holder", {
+      event: "holder.output_received",
+      agentId: this.agentId,
+      generation: this.generation,
+      connectionId: this.connectionId,
+      frames: this.outputFrames,
+      bytes: this.outputBytes,
+      types: [...this.outputTypes].slice(0, 16),
+    });
+    this.lastOutputLogAt = now;
+    this.outputFrames = 0;
+    this.outputBytes = 0;
+    this.outputTypes.clear();
   }
 
   private onControl(record: { type: string } & Record<string, unknown>): void {
@@ -223,6 +269,15 @@ export class HolderPiProcess {
           this.helloAck = ack;
           this.after = Math.max(this.after, ack.latestSeq);
         }
+        logger("pi-holder").info("Holder hello received", {
+          event: "holder.hello_received",
+          agentId: this.agentId,
+          generation: this.generation,
+          connectionId: this.connectionId,
+          latestSeq: ack.latestSeq,
+          piAlive: ack.piAlive,
+          ...(ack.piExitCode === undefined ? {} : { piExitCode: ack.piExitCode }),
+        });
         if (typeof record.generation === "number" && record.generation !== this.generation) {
           logger("pi-rpc").warn("Holder generation mismatch", {
             event: "pi.holder_generation_mismatch",
@@ -313,7 +368,13 @@ export class HolderPiProcess {
       return;
     }
     if (this.closed || this.lifecycle !== "running") return;
-    logger("pi-rpc").warn("Holder socket error", { event: "pi.holder_socket_error", agentId: this.agentId, ...errorFields(error) });
+    logger("pi-rpc").warn("Holder socket error", {
+      event: "pi.holder_socket_error",
+      agentId: this.agentId,
+      generation: this.generation,
+      connectionId: this.connectionId,
+      ...errorFields(error),
+    });
   }
 
   private onSocketClose(): void {
@@ -335,6 +396,8 @@ export class HolderPiProcess {
     logger("pi-holder").info("Holder connection lost, reconnecting", {
       event: "holder.detached",
       agentId: this.agentId,
+      generation: this.generation,
+      connectionId: this.connectionId,
     });
     const delay = Math.min(5_000, 200 * 2 ** Math.min(this.reconnectAttempts++, 4));
     this.reconnectTimer = setTimeout(() => {
@@ -409,6 +472,14 @@ export class HolderPiProcess {
       this.pending.set(id, { resolve, reject, timer });
       try {
         this.socket!.write(line);
+        logger("pi-holder").info("Forwarded command to holder", {
+          event: "holder.command_forwarded",
+          agentId: this.agentId,
+          generation: this.generation,
+          connectionId: this.connectionId,
+          command: command.type,
+          pending: this.pending.size,
+        });
       } catch (error) {
         clearTimeout(timer);
         this.pending.delete(id);

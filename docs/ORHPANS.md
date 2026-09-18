@@ -158,6 +158,7 @@ daemon <--(Unix socket, LF-JSONL responses/events + control frames)-- holder <--
   rpc.sock          Unix socket (0700 dir, 0600 socket)
   holder.pid        holder PID for liveness checks
   holder.json       { agentId, sessionId, socketPath, holderVersion, startedAt }
+  holder.log        capped structured holder/Pi connection telemetry (0600)
   <existing pi session files…>   (untouched; holder spawns pi with the same
                                   --session-dir/--session-id as today)
 ```
@@ -286,12 +287,13 @@ today).
 
 ## Observability
 
-- Holder logs to stderr → captured by `systemd-run` into the journal with
-  `SYSLOG_IDENTIFIER=passage-pi-<agentId>`; keep the existing structured
-  event names (`pi.process_started`, `pi.process_stopped`,
-  `pi.process_crashed`) emitted by whoever owns the child (now the holder),
-  plus new `holder.attached` / `holder.detached` / `holder.swept` events
-  daemon-side.
+- Every holder also writes capped, structured connection telemetry to
+  `<sessionsRoot>/<agentId>/holder.log` so its history survives daemon
+  restarts and `systemd-run` stderr collection. The file records socket
+  connects/hello/replay/close, Pi stdin forwarding, and rate-limited Pi
+  stdout activity without prompt or frame contents. The daemon journal logs
+  its matching connect/hello/output-received events and service subscription
+  state, correlated by `connectionId`.
 - `passage pi-status [agentId]` (or `GET /api/agents/:id` `live`/`generation`
   fields, already present) shows holder-vs-direct transport, holder
   version, and reconnect count for debugging the mixed-version window.

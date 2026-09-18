@@ -418,6 +418,7 @@ export class PiRpcManager {
     const sessionDir = options?.sessionDir ?? `${root}/${agentId}`;
     const generation = Math.max(readGeneration(sessionDir), this.generations.get(agentId) ?? 0);
     if (generation < 1) throw new Error("no holder generation recorded");
+    logger("pi-holder").info("Attaching to surviving holder", { event: "holder.attach_attempt", agentId, generation });
     const process = new HolderPiProcess({
       agentId,
       socketPath: socketPathFor(sessionDir),
@@ -431,6 +432,7 @@ export class PiRpcManager {
       await process.connect();
       this.generations.set(agentId, generation); this.processes.set(agentId, process);
       await process.request({ type: "get_state" });
+      logger("pi-holder").info("Attached to surviving holder", { event: "holder.attach_completed", agentId, generation });
       return process;
     })().finally(() => this.starts.delete(agentId));
     this.starts.set(agentId, attach);

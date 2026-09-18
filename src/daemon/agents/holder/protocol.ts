@@ -17,6 +17,7 @@ export const HOLDER_ARGV = "pi-holder";
 export const HOLDER_SOCKET_NAME = "rpc.sock";
 export const HOLDER_PID_NAME = "holder.pid";
 export const HOLDER_META_NAME = "holder.json";
+export const HOLDER_LOG_NAME = "holder.log";
 
 /** Validated agent IDs only — also used for systemd scope names. */
 export const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -37,6 +38,8 @@ export type HolderHello = {
   holderVersion: number;
   /** Highest holderSeq the daemon has already seen (resume offset). */
   after?: number;
+  /** Opaque daemon-side ID used only to correlate connection diagnostics. */
+  connectionId?: string;
 };
 
 export type HolderHelloAck = {
@@ -110,6 +113,10 @@ export function pidPathFor(sessionDir: string): string {
 
 export function metaPathFor(sessionDir: string): string {
   return `${sessionDir}/${HOLDER_META_NAME}`;
+}
+
+export function logPathFor(sessionDir: string): string {
+  return `${sessionDir}/${HOLDER_LOG_NAME}`;
 }
 
 export function scopeUnitFor(agentId: string): string {

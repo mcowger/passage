@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { connect, type Socket } from "node:net";
 import { HolderServer } from "./server.ts";
 import { HolderPiProcess } from "../rpc/holder-transport.ts";
-import { metaPathFor, parseHolderMeta, pidPathFor, socketPathFor } from "./protocol.ts";
+import { logPathFor, metaPathFor, parseHolderMeta, pidPathFor, socketPathFor } from "./protocol.ts";
 import { decideSweep, pingHolder, readGeneration, stopHolder, sweepHolders, tryHello } from "./spawn.ts";
 
 /** Fake pi: echoes commands as responses, emits a pid marker + events. */
@@ -105,6 +105,9 @@ test("handshake proxies pi records verbatim in both directions", async () => {
     const received = await frames;
     const response = received.find((frame) => (frame as { type?: string }).type === "response");
     expect((response as { id?: string }).id).toBe("probe-1");
+    const log = readFileSync(logPathFor(started.sessionDir), "utf8");
+    expect(log).toContain('"event":"holder.hello"');
+    expect(log).toContain('"event":"pi.stdin_forwarded"');
     socket.destroy();
   } finally {
     await started.server.gracefulStop();

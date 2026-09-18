@@ -5,6 +5,7 @@ import {
 } from "./spawn.ts";
 import {
   HOLDER_VERSION,
+  logPathFor,
   metaPathFor,
   parseHolderMeta,
   pidPathFor,
@@ -27,6 +28,7 @@ test("per-agent file layout stays under the sessions root", () => {
   expect(socketPathFor("/data/sessions/agt_1")).toBe("/data/sessions/agt_1/rpc.sock");
   expect(pidPathFor("/data/sessions/agt_1")).toBe("/data/sessions/agt_1/holder.pid");
   expect(metaPathFor("/data/sessions/agt_1")).toBe("/data/sessions/agt_1/holder.json");
+  expect(logPathFor("/data/sessions/agt_1")).toBe("/data/sessions/agt_1/holder.log");
   expect(HOLDER_VERSION).toBe(1);
 });
 
