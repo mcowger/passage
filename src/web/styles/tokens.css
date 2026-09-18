@@ -54,6 +54,7 @@
   --radius: 6px;
   --status-running: #d97706;
   --status-idle: #2563eb;
+  --status-empty: #a3a3a3;
   --status-active: #d97706;
   --status-attention: #dc2626;
   --status-error: #b91c1c;
@@ -103,6 +104,7 @@
   --danger-subtle: rgba(239, 68, 68, 0.15);
   --status-running: var(--status-active);
   --status-idle: #60a5fa;
+  --status-empty: #8e8e8e;
   --status-active: #dd9455;
   --status-attention: #f87171;
   --status-error: #f87171;

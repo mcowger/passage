@@ -54,6 +54,7 @@
   line-height: 0;
 }
 .canvas-tab-dot.idle { background-color: var(--status-idle); }
+.canvas-tab-dot.empty { background-color: var(--status-empty, var(--muted)); }
 .canvas-tab-dot.active { background-color: var(--status-active, var(--status-running)); animation: status-pulse-slow 2.6s ease-in-out infinite; }
 .canvas-tab-dot.attention { background-color: var(--status-attention, var(--status-error)); animation: status-pulse-fast 1.1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {

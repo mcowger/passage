@@ -2,7 +2,7 @@ import type { AgentSummary } from "../../shared/domain/agents.ts";
 import type { TerminalSummary } from "../../shared/domain/terminals.ts";
 import type { WebPreview } from "../../shared/domain/previews.ts";
 import type { ConnectionHealth } from "../socketLifecycle.ts";
-import { AGENT_STATUS_LABEL, getAgentStatusKind } from "./agentStatus.ts";
+import { AGENT_STATUS_LABEL, getAgentStatusKind, type AgentStatusKind } from "./agentStatus.ts";
 import { WsHealthIndicator } from "./WsHealthIndicator.tsx";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog.tsx";
 import {
@@ -48,7 +48,7 @@ export function mobileDestGlyph(kind: MobileDestinationKind): string {
   return DEST_GLYPH[kind];
 }
 
-function statusDotClass(kind: "idle" | "active" | "attention"): string {
+function statusDotClass(kind: AgentStatusKind): string {
   return `status-dot shrink-0 ${kind}`;
 }
 

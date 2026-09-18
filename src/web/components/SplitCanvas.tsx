@@ -531,8 +531,8 @@ function TabGroupRenderer({
   const renderTabLeading = (tab: PaneTab) => {
     if (tab.kind === "agent" && tab.targetId) {
       const agent = agentsById.get(tab.targetId);
-      const kind = agent ? getAgentStatusKind(agent) : "idle";
-      const label = agent ? AGENT_STATUS_LABEL[kind] : "Ready";
+      const kind = agent ? getAgentStatusKind(agent) : "empty";
+      const label = agent ? AGENT_STATUS_LABEL[kind] : AGENT_STATUS_LABEL.empty;
       return (
         <span
           className={`canvas-tab-dot ${kind}`}

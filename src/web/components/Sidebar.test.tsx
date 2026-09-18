@@ -235,7 +235,7 @@ describe("Sidebar", () => {
     // Selection shading applies...
     expect(html).toContain("workspace-row");
     expect(html).toContain("selected");
-    // ...but the dot stays purely agent-state driven (idle/gray, not green)...
+    // ...but the dot stays purely agent-state driven (idle/blue, not green)...
     expect(html).toContain("status-dot shrink-0 idle");
     expect(html).not.toContain("status-dot shrink-0 active");
     // ...and the worktree icon carries no green/state tint.
@@ -268,5 +268,90 @@ describe("Sidebar", () => {
     );
 
     expect(html).toContain("status-dot shrink-0 active");
+  });
+
+  test("empty workspace with no agents shows gray empty dot, not blue", () => {
+    const html = ReactDOMServer.renderToString(
+      React.createElement(Sidebar, {
+        data: snapshot,
+        selected: "wsp-1",
+        open: false,
+        onClose: () => {},
+        onSelect: () => {},
+        onNewProject: () => {},
+        agents: [],
+      })
+    );
+
+    expect(html).toContain("status-dot shrink-0 empty");
+    expect(html).toContain('title="Empty"');
+    expect(html).not.toContain("status-dot shrink-0 idle");
+  });
+
+  test("initializing agent shows gray empty dot, not pulsing orange", () => {
+    const agents = [
+      {
+        id: "agt-1",
+        workspaceId: "wsp-1",
+        title: "Starting agent",
+        status: "initializing" as const,
+        modelPreference: null,
+        thinkingPreference: null,
+        live: false,
+        persisted: true,
+      },
+    ];
+    const html = ReactDOMServer.renderToString(
+      React.createElement(Sidebar, {
+        data: snapshot,
+        selected: "wsp-1",
+        open: false,
+        onClose: () => {},
+        onSelect: () => {},
+        onNewProject: () => {},
+        agents,
+      })
+    );
+
+    expect(html).toContain("status-dot shrink-0 empty");
+    expect(html).not.toContain("status-dot shrink-0 active");
+  });
+
+  test("workspace with initializing and idle agents still shows blue idle dot", () => {
+    const agents = [
+      {
+        id: "agt-1",
+        workspaceId: "wsp-1",
+        title: "Starting agent",
+        status: "initializing" as const,
+        modelPreference: null,
+        thinkingPreference: null,
+        live: false,
+        persisted: true,
+      },
+      {
+        id: "agt-2",
+        workspaceId: "wsp-1",
+        title: "Idle agent",
+        status: "idle" as const,
+        modelPreference: null,
+        thinkingPreference: null,
+        live: false,
+        persisted: true,
+      },
+    ];
+    const html = ReactDOMServer.renderToString(
+      React.createElement(Sidebar, {
+        data: snapshot,
+        selected: "wsp-1",
+        open: false,
+        onClose: () => {},
+        onSelect: () => {},
+        onNewProject: () => {},
+        agents,
+      })
+    );
+
+    expect(html).toContain("status-dot shrink-0 idle");
   });
 });

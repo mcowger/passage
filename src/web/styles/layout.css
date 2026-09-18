@@ -101,6 +101,9 @@
 .status-dot.idle {
   background-color: var(--status-idle);
 }
+.status-dot.empty {
+  background-color: var(--status-empty, var(--muted));
+}
 .status-dot.running,
 .status-dot.active {
   background-color: var(--status-active, var(--status-running));
