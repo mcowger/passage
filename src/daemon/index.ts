@@ -2,8 +2,10 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { Hono } from "hono";
 import { honoLogger } from "@logtape/hono";
-import { AgentService } from "./agents/service.ts";
+import { AgentError, AgentService } from "./agents/service.ts";
 import { AgentEventHub } from "./agents/events/index.ts";
+import { DaemonLifecycle } from "./lifecycle/index.ts";
+import { DaemonEventHub } from "./lifecycle/events.ts";
 import { createAgentRoutes } from "./http/agents.ts";
 import { createModelRoutes } from "./http/models.ts";
 import { createWorkspaceRoutes } from "./http/workspaces.ts";
@@ -41,6 +43,8 @@ import {
   agentUiResponsePayloadSchema,
   clientTerminalMessageSchema,
   commandEnvelopeSchema,
+  DAEMON_SNAPSHOT_SUBJECT,
+  daemonSubscriptionPayloadSchema,
   decodeBinaryFrame,
   opaqueIdSchema,
   WORKSPACES_SNAPSHOT_SUBJECT,
@@ -105,6 +109,11 @@ const worktreeService = new WorktreeService(repositories, gitService, undefined,
 const terminalManager = new TerminalManager(workspaceService);
 const previewManager = new WebPreviewManager(repositories, workspaceService);
 const sessionsRoot = process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(metadataPath), "sessions");
+// DaemonLifecycle needs AgentService's blocker methods; AgentService needs
+// the lifecycle's admission gate. Bridge the cycle with a forward
+// reference the gate closure resolves lazily -- it is only ever called
+// after both are fully constructed below.
+let lifecycleRef: DaemonLifecycle | undefined;
 const agentService = new AgentService(repositories, {
   sessionsRoot,
   ...(process.env.PASSAGE_MAX_ACTIVE_AGENTS ? { maxActiveAgents: Number(process.env.PASSAGE_MAX_ACTIVE_AGENTS) } : {}),
@@ -115,6 +124,10 @@ const agentService = new AgentService(repositories, {
   onWorkspaceGitChanged: (workspaceId) => {
     workspaceEvents.emitGitStatus({ workspaceId, reason: "commit" });
   },
+  // docs/BACKTOSQUAREONE.md step 5: closed synchronously the instant a
+  // drain begins. Defaults to open before the lifecycle below exists
+  // (construction order), never after.
+  admissionGate: () => lifecycleRef?.isAdmissionOpen() ?? true,
 });
 // Boot-time restart recovery, before serving agent commands: any agent
 // still persisted as running/stopping/initializing/needs-attention belonged
@@ -129,6 +142,24 @@ try {
   }
 } catch {}
 const agentEvents = new AgentEventHub(agentService);
+// docs/BACKTOSQUAREONE.md step 5: one lifecycle controller, admission
+// closed synchronously on beginDrain(); readiness is recomputed from live
+// agent state only -- see AgentService.listQuickBlockers/listBlockers.
+// Only agents block drain readiness; terminals, previews, and workspace
+// Git/file/worktree operations do not (explicit product decision).
+const daemonEvents = new DaemonEventHub();
+const lifecycle = new DaemonLifecycle({
+  listQuickBlockers: () => agentService.listQuickBlockers(),
+  listBlockers: () => agentService.listBlockers(),
+  onPhaseChanged: (phase) => {
+    log.info("Daemon lifecycle phase changed", { event: "daemon.phase_changed", phase });
+    daemonEvents.emit({ reason: phase === "draining" ? "drain-begin" : phase === "running" ? "drain-cancel" : "readiness-changed" });
+  },
+});
+lifecycleRef = lifecycle;
+// Cheap, synchronous: only ever revokes an already-reached `ready`, and
+// (while draining) kicks off the coalesced authoritative recompute.
+agentService.subscribe(() => lifecycle.onActivity());
 const responses = new IdempotencyCache<{ fingerprint: string; response: string }>();
 const inflightResponses = new Map<string, { fingerprint: string; response: Promise<string> }>();
 const app = new Hono();
@@ -161,11 +192,26 @@ app.onError((error, context) => {
   return context.json({ error: "internal-error" }, 500);
 });
 app.get("/api/health", (context) => context.json({ ok: true, build: getBuildInfo() }));
-app.get("/api/daemon/snapshot", (context) => context.json({
+app.get("/api/daemon/snapshot", async (context) => context.json({
   protocolVersion: PROTOCOL_VERSION,
   metadataSchemaVersion: metadata.schemaVersion,
   build: getBuildInfo(),
+  ...await lifecycle.snapshot(),
 }));
+// docs/BACKTOSQUAREONE.md step 5: begin/cancel drain. Both return the fresh
+// snapshot inline (HTTP = snapshots) and the phase-change callback above
+// publishes a `daemon-changed` WS invalidation for every other window
+// (WS = invalidations only). Draining itself stops nothing and closes no
+// agent tabs; it only closes new-work admission (step 6 adds the actual
+// stop/commit path).
+app.post("/api/daemon/drain", async (context) => {
+  lifecycle.beginDrain();
+  return context.json(await lifecycle.snapshot());
+});
+app.delete("/api/daemon/drain", async (context) => {
+  lifecycle.cancelDrain();
+  return context.json(await lifecycle.snapshot());
+});
 app.post("/api/daemon/shutdown", async (context) => {
   // Respond before tearing down: shutdown() stops the server.
   const payload = { ok: true as const };
@@ -214,7 +260,7 @@ function protocolError(requestId: string, code: string, message: string): Protoc
 }
 
 type SocketData =
-  | { kind: "agent"; subscriptions: Map<string, () => boolean>; workspaceSubscriptions: Map<string, () => boolean> }
+  | { kind: "agent"; subscriptions: Map<string, () => boolean>; workspaceSubscriptions: Map<string, () => boolean>; daemonUnsubscribe?: () => boolean }
   | { kind: "terminal"; terminalId: string; clientId: string }
   | { kind: "preview"; previewId: string; clientId: string };
 
@@ -374,10 +420,57 @@ async function handleWorkspaceCommand(command: CommandEnvelope, socket: Bun.Serv
   } satisfies Acknowledgement;
 }
 
+/** `subscribe`/`unsubscribe` to daemon lifecycle invalidations. There is
+ *  only ever one subject (`DAEMON_SNAPSHOT_SUBJECT`), so unlike `pi`/
+ *  `workspace` this needs no per-subject map -- one optional unsubscribe
+ *  per socket is enough. */
+async function handleDaemonCommand(command: CommandEnvelope, socket: Bun.ServerWebSocket<SocketData>): Promise<ProtocolResponse> {
+  if (socket.data.kind !== "agent") return protocolError(command.requestId, "invalid-channel", "Terminal/preview sockets do not accept daemon commands");
+  try {
+    if (command.type === "subscribe") {
+      const input = daemonSubscriptionPayloadSchema.parse(command.payload);
+      socket.data.daemonUnsubscribe?.();
+      const subscription = daemonEvents.subscribe(input.afterSequence, (event) => sendSocketJson(socket, event));
+      socket.data.daemonUnsubscribe = subscription.unsubscribe;
+      if (subscription.replay.kind === "replay") {
+        for (const event of subscription.replay.events) sendSocketJson(socket, event);
+      } else {
+        sendSocketJson(socket, {
+          version: PROTOCOL_VERSION,
+          stream: "daemon",
+          subjectId: DAEMON_SNAPSHOT_SUBJECT,
+          kind: "snapshot-required",
+          metadata: {
+            snapshotUrl: "/api/daemon/snapshot",
+            sequence: String(daemonEvents.currentSequence()),
+          },
+        });
+      }
+      subscription.activate();
+    } else if (command.type === "unsubscribe") {
+      socket.data.daemonUnsubscribe?.();
+      socket.data.daemonUnsubscribe = undefined;
+    } else {
+      return protocolError(command.requestId, "unsupported-command", "Command is not implemented");
+    }
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message.slice(0, 512) : "Daemon command failed";
+    return protocolError(command.requestId, "daemon-command-failed", message);
+  }
+  return {
+    version: PROTOCOL_VERSION,
+    requestId: command.requestId,
+    ok: true,
+  } satisfies Acknowledgement;
+}
+
 async function handleCommand(command: CommandEnvelope, socket: Bun.ServerWebSocket<SocketData>): Promise<ProtocolResponse> {
   if (socket.data.kind !== "agent") return protocolError(command.requestId, "invalid-channel", "Only /ws sockets accept agent commands");
   if (command.channel === "daemon" && command.type === "ping") {
     return { version: PROTOCOL_VERSION, requestId: command.requestId, ok: true } satisfies Acknowledgement;
+  }
+  if (command.channel === "daemon") {
+    return handleDaemonCommand(command, socket);
   }
   if (command.channel === "workspace") {
     return handleWorkspaceCommand(command, socket);
@@ -441,7 +534,11 @@ async function handleCommand(command: CommandEnvelope, socket: Bun.ServerWebSock
     }
   } catch (cause) {
     const message = cause instanceof Error ? cause.message.slice(0, 512) : "Agent command failed";
-    return protocolError(command.requestId, "agent-command-failed", message);
+    // Preserve AgentError's stable code (in particular "draining", so a
+    // drained daemon refuses new agent work identically over HTTP and WS)
+    // instead of collapsing every failure into one generic code.
+    const code = cause instanceof AgentError ? `agent-${cause.code}` : "agent-command-failed";
+    return protocolError(command.requestId, code, message);
   }
   return {
     version: PROTOCOL_VERSION,
@@ -629,6 +726,8 @@ export const server = Bun.serve<SocketData>({
         socket.data.subscriptions.clear();
         for (const unsubscribe of socket.data.workspaceSubscriptions.values()) unsubscribe();
         socket.data.workspaceSubscriptions.clear();
+        socket.data.daemonUnsubscribe?.();
+        socket.data.daemonUnsubscribe = undefined;
       }
     },
   },
@@ -660,6 +759,7 @@ async function shutdown(): Promise<void> {
   }
   agentEvents.dispose();
   workspaceEvents.dispose();
+  daemonEvents.dispose();
   await previewManager.shutdown();
   await agentService.shutdown();
   await server.stop(true);

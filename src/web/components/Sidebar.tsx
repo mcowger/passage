@@ -12,10 +12,12 @@ import {
   MoreHorizontal,
   Trash2,
   Plus,
+  PauseCircle,
 } from "lucide-react";
 import { cn } from "../lib/utils.ts";
 import type { BuildInfo } from "../../shared/build-info.ts";
 import { formatBuildDetail, formatBuildLabel } from "../../shared/build-info.ts";
+import type { DaemonLifecycleSnapshot } from "../api.ts";
 import { AGENT_STATUS_LABEL, getWorkspaceStatusKind } from "./agentStatus.ts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
 import {
@@ -43,7 +45,67 @@ export type SidebarProps = {
   onDiscoverWorktrees?: (projectId?: string) => void;
   onArchiveProject?: (id: string) => void;
   build?: BuildInfo | null;
+  /** docs/BACKTOSQUAREONE.md step 5. Absent/null hides the drain control
+   *  entirely rather than showing a misleading default phase. */
+  daemon?: DaemonLifecycleSnapshot | null;
+  daemonBusy?: boolean;
+  onBeginDrain?: () => void;
+  onCancelDrain?: () => void;
 };
+
+const DAEMON_PHASE_LABEL: Record<DaemonLifecycleSnapshot["phase"], string> = {
+  running: "Running",
+  draining: "Draining\u2026",
+  ready: "Ready to stop",
+  stopping: "Stopping\u2026",
+};
+
+/** Maintenance-mode control (docs/BACKTOSQUAREONE.md step 5): begin/cancel
+ *  drain and a truthful, bounded view of what is still blocking readiness.
+ *  Draining itself stops nothing -- it only closes new-work admission --
+ *  so this is deliberately understated next to the build/version footer,
+ *  not a full-screen takeover. Distinguishes "daemon draining" from "Pi
+ *  failed": blockers are agent activity, not errors. */
+function DaemonDrainControl({ daemon, busy, onBeginDrain, onCancelDrain }: {
+  daemon: DaemonLifecycleSnapshot;
+  busy?: boolean;
+  onBeginDrain?: () => void;
+  onCancelDrain?: () => void;
+}) {
+  const draining = daemon.phase === "draining" || daemon.phase === "ready";
+  if (!draining) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon-xs" onClick={onBeginDrain} disabled={busy || daemon.phase === "stopping"} aria-label="Begin daemon drain for maintenance">
+            <PauseCircle aria-hidden="true" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">Begin drain (stop accepting new agent work)</TooltipContent>
+      </Tooltip>
+    );
+  }
+  const blockerSummary = daemon.blockers.length > 0
+    ? `Waiting on ${daemon.blockedCount} agent${daemon.blockedCount === 1 ? "" : "s"}: ${daemon.blockers.slice(0, 5).map((blocker) => `${blocker.agentId} (${blocker.reason})`).join(", ")}${daemon.blockersTruncated ? "\u2026" : ""}`
+    : "No agent work is blocking readiness.";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="footer-status daemon-drain-status"
+          onClick={onCancelDrain}
+          disabled={busy}
+          aria-label={`${DAEMON_PHASE_LABEL[daemon.phase]}. ${blockerSummary} Activate to cancel drain.`}
+        >
+          <span className={cn("connected-dot", daemon.phase === "ready" ? "idle" : "active")} aria-hidden="true" />
+          {DAEMON_PHASE_LABEL[daemon.phase]}{daemon.blockedCount > 0 ? ` (${daemon.blockedCount})` : ""}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top">{blockerSummary} Click to cancel drain.</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function Sidebar({
   data,
@@ -58,6 +120,10 @@ export function Sidebar({
   onDiscoverWorktrees,
   onArchiveProject,
   build,
+  daemon,
+  daemonBusy,
+  onBeginDrain,
+  onCancelDrain,
 }: SidebarProps) {
   const activeProjects = data.projects.filter((project) => !project.archivedAt);
   const [pendingRemove, setPendingRemove] = useState<Project | null>(null);
@@ -88,6 +154,7 @@ export function Sidebar({
       {activeProjects.length === 0 && <p className="muted side-empty">No active projects registered yet.</p>}
       <footer>
         <span className="footer-status"><span className="connected-dot" aria-hidden="true" /> Connected</span>
+        {daemon && <DaemonDrainControl daemon={daemon} busy={daemonBusy} onBeginDrain={onBeginDrain} onCancelDrain={onCancelDrain} />}
         <span className="flex items-center gap-1">
           <span
             className="muted"

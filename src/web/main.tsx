@@ -13,6 +13,8 @@ import { BUILTIN_THEMES, AVAILABLE_FONTS, resolveFontFamilies } from "../shared/
 import { createWorkspaceApi, friendlyApiError } from "./api.ts";
 import type { BuildInfo } from "../shared/build-info.ts";
 import { subscribeWorkspace, subscribeWorkspaces } from "./workspaceSocket.ts";
+import { subscribeDaemon } from "./daemonSocket.ts";
+import type { DaemonLifecycleSnapshot } from "./api.ts";
 import type { WorkspaceActionRun } from "../shared/domain/workspace-actions.ts";
 import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
@@ -181,6 +183,8 @@ function App() {
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
   const [snapshotError, setSnapshotError] = useState("");
   const [build, setBuild] = useState<BuildInfo | null>(null);
+  const [daemonLifecycle, setDaemonLifecycle] = useState<DaemonLifecycleSnapshot | null>(null);
+  const [drainBusy, setDrainBusy] = useState(false);
   const [formError, setFormError] = useState("");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>();
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
@@ -359,14 +363,69 @@ function App() {
 
   useEffect(() => { void refreshWorkspaces(); }, [refreshWorkspaces]);
 
-  // Daemon build identity for the sidebar footer + deploy verification.
-  // Best-effort: the sidebar falls back to the static version when unknown.
+  // Daemon build identity for the sidebar footer + deploy verification,
+  // plus lifecycle phase/blockers (docs/BACKTOSQUAREONE.md step 5).
+  // Best-effort: the sidebar falls back to the static version when unknown
+  // and hides the drain control entirely when the phase is unknown.
+  const refreshDaemon = useCallback(async () => {
+    try {
+      const daemon = await api.daemonSnapshot();
+      setBuild(daemon.build);
+      setDaemonLifecycle(daemon);
+    } catch {
+      setBuild(null);
+      setDaemonLifecycle(null);
+    }
+  }, [api]);
+
+  useEffect(() => { void refreshDaemon(); }, [refreshDaemon]);
+
+  // Live daemon lifecycle invalidation: begin/cancel drain and readiness
+  // changes made here or in another window/tab. Reconnects, missed
+  // sequences, and mobile suspension reconcile immediately -- a stale
+  // drain phase must never linger silently.
+  const refreshDaemonRef = useRef(refreshDaemon);
+  refreshDaemonRef.current = refreshDaemon;
   useEffect(() => {
-    let cancelled = false;
-    void api.daemonSnapshot()
-      .then((daemon) => { if (!cancelled) setBuild(daemon.build); })
-      .catch(() => { if (!cancelled) setBuild(null); });
-    return () => { cancelled = true; };
+    let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
+    const subscription = subscribeDaemon(
+      () => {
+        if (invalidateTimer) clearTimeout(invalidateTimer);
+        invalidateTimer = setTimeout(() => {
+          invalidateTimer = undefined;
+          void refreshDaemonRef.current();
+        }, 300);
+      },
+      async () => { void refreshDaemonRef.current(); },
+    );
+    return () => {
+      if (invalidateTimer) clearTimeout(invalidateTimer);
+      subscription.close();
+    };
+  }, []);
+
+  const handleBeginDrain = useCallback(async () => {
+    setDrainBusy(true);
+    try {
+      const daemon = await api.beginDrain();
+      setDaemonLifecycle((current) => current ? { ...current, ...daemon } : null);
+    } catch {
+      // The live subscription/reconcile above will still catch up if this
+      // request actually landed despite a dropped response.
+    } finally {
+      setDrainBusy(false);
+    }
+  }, [api]);
+
+  const handleCancelDrain = useCallback(async () => {
+    setDrainBusy(true);
+    try {
+      const daemon = await api.cancelDrain();
+      setDaemonLifecycle((current) => current ? { ...current, ...daemon } : null);
+    } catch {
+    } finally {
+      setDrainBusy(false);
+    }
   }, [api]);
 
   // Live workspace-list invalidation from other windows/tabs: the mutating
@@ -1213,6 +1272,10 @@ function App() {
           }}
           agents={agents}
           build={build}
+          daemon={daemonLifecycle}
+          daemonBusy={drainBusy}
+          onBeginDrain={handleBeginDrain}
+          onCancelDrain={handleCancelDrain}
           onDiscoverWorktrees={(projId) => {
             setFormError("");
             setWorktreeModalTab("discover");

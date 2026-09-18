@@ -47,7 +47,8 @@ function errorResponse(error: unknown): Response {
     const status = error.code === "not-found" ? 404
       : error.code === "archived" || error.code === "not-running" ? 409
         : error.code === "limit" ? 429
-          : 400;
+          : error.code === "draining" ? 503
+            : 400;
     return success({ error: error.code }, status);
   }
   return success({ error: "agent-operation-failed" }, 502);

@@ -18,6 +18,7 @@ import type { AgentFile, AgentImage } from "../shared/protocol/agents.ts";
 import { z } from "zod";
 import { filesSearchResponseSchema, directorySuggestResponseSchema } from "../shared/protocol/workspace.ts";
 import { buildInfoSchema, type BuildInfo } from "../shared/build-info.ts";
+import { daemonBlockerSchema, daemonPhaseSchema, daemonLifecycleSnapshotSchema, type DaemonLifecycleSnapshot } from "../shared/protocol/daemon.ts";
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
 import type { GitDiff, GitStatus } from "../shared/domain/git.ts";
 import { webPreviewSchema, type WebPreview } from "../shared/domain/previews.ts";
@@ -62,6 +63,7 @@ const FRIENDLY_API_ERRORS: Record<string, string> = {
   "git-failed": "The git operation failed. Check the repository state and try again.",
   "preview-not-running": "The preview is not running. Start it and try again.",
   "timeout": "Request timed out. Check your connection and try again.",
+  "draining": "Passage is draining for maintenance and is not accepting new agent work right now.",
 };
 
 /** Convert API/validation failures into human-readable UI messages. Raw
@@ -81,11 +83,19 @@ const daemonSnapshotSchema = z.object({
   protocolVersion: z.number(),
   metadataSchemaVersion: z.number(),
   build: buildInfoSchema,
+  phase: daemonPhaseSchema,
+  instanceId: z.string(),
+  drainId: z.string().nullable(),
+  readinessRevision: z.number(),
+  blockedCount: z.number(),
+  blockers: z.array(daemonBlockerSchema),
+  blockersTruncated: z.boolean(),
 }).strict();
 const healthSchema = z.object({ ok: z.literal(true), build: buildInfoSchema }).strict();
 
 export type DaemonSnapshot = z.infer<typeof daemonSnapshotSchema>;
 export type HealthResponse = z.infer<typeof healthSchema>;
+export type { DaemonLifecycleSnapshot };
 
 export type DiscoveredWorktree = {
   path: string;
@@ -144,6 +154,16 @@ export function createWorkspaceApi(
   return {
     async daemonSnapshot(): Promise<DaemonSnapshot> {
       return daemonSnapshotSchema.parse(await request("/api/daemon/snapshot"));
+    },
+    /** docs/BACKTOSQUAREONE.md step 5: begin/cancel drain. Both return the
+     *  fresh lifecycle snapshot inline; other windows learn about the
+     *  change through the `daemon` WS channel invalidation and refetch
+     *  `daemonSnapshot()` themselves. */
+    async beginDrain(): Promise<DaemonLifecycleSnapshot> {
+      return daemonLifecycleSnapshotSchema.parse(await request("/api/daemon/drain", { method: "POST" }));
+    },
+    async cancelDrain(): Promise<DaemonLifecycleSnapshot> {
+      return daemonLifecycleSnapshotSchema.parse(await request("/api/daemon/drain", { method: "DELETE" }));
     },
     async health(): Promise<HealthResponse> {
       return healthSchema.parse(await request("/api/health"));

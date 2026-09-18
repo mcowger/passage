@@ -19,10 +19,13 @@ The event catalog lives in code (`src/shared/protocol/`, emitters in
    authoritative HTTP snapshot. (`MAX_PROTOCOL_PAYLOAD_BYTES` = 48KB,
    `src/shared/protocol/index.ts`.)
 2. **Three sockets, no more.** `GET /ws` (JSON text) for `pi` + `workspace` +
-   `daemon/ping`; `GET /api/terminals/:id/ws` (binary frames + JSON
-   control) for PTY bytes; `GET /api/previews/:previewId/ws` (bounded
-   frame/input relay) for web-preview streams. A PR MUST NOT add a fourth
-   socket, SSE (`EventSource`), polling loops, or a new envelope format.
+   `daemon` (`ping`, and `subscribe`/`unsubscribe` to lifecycle
+   invalidations -- one well-known subject, `DAEMON_SNAPSHOT_SUBJECT`,
+   docs/BACKTOSQUAREONE.md step 5); `GET /api/terminals/:id/ws` (binary
+   frames + JSON control) for PTY bytes; `GET /api/previews/:previewId/ws`
+   (bounded frame/input relay) for web-preview streams. A PR MUST NOT add a
+   fourth socket, SSE (`EventSource`), polling loops, or a new envelope
+   format.
    The preview socket is a narrow exception: high-volume disposable frames
    and input only, never `/ws` invalidation envelopes, replay buffers,
    SQLite rows, or Pi history. It MUST validate `Host`/`Origin`, verify
@@ -42,10 +45,13 @@ exposed beyond loopback.
 4. **Ownership.** `PiRpcManager` alone owns Pi framing; `AgentEventHub`
    (`src/daemon/agents/events/index.ts`) owns `pi` fan-out;
    `WorkspaceEventHub` (`src/daemon/workspaces/events.ts`) owns
-   `workspace` fan-out; `TerminalManager`
-   (`src/daemon/terminals/manager.ts`) owns PTY fan-out; `ReplayBuffer` /
-   `IdempotencyCache` (`src/daemon/replay/index.ts`) own replay and
-   request dedup. A PR MUST NOT duplicate this logic per feature.
+   `workspace` fan-out; `DaemonEventHub` (`src/daemon/lifecycle/events.ts`)
+   owns `daemon` fan-out; `DaemonLifecycle` (`src/daemon/lifecycle/index.ts`)
+   owns the running/draining/ready/stopping phase and readiness recompute;
+   `TerminalManager` (`src/daemon/terminals/manager.ts`) owns PTY fan-out;
+   `ReplayBuffer` / `IdempotencyCache` (`src/daemon/replay/index.ts`) own
+   replay and request dedup. A PR MUST NOT duplicate this logic per
+   feature.
 5. **Bun end-to-end.** `Bun.serve` `websocket:` + Hono routes + native
    `WebSocket`. No Node `ws` shims, no `socket.io` /
    `@socket.io/bun-engine`, no `react-use-websocket`, no PartySocket, no

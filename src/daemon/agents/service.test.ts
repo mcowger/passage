@@ -529,3 +529,96 @@ describe("agent-side git invalidations (merge button freshness)", () => {
     f.store.close();
   });
 });
+
+describe("drain admission gate (docs/BACKTOSQUAREONE.md step 5)", () => {
+  test("closing admission refuses new agent work but keeps abort, question answers, and resource-close working", async () => {
+    const root = await mkdtemp(join("/tmp", "passage-agent-"));
+    roots.push(root);
+    const store = new MetadataStore(join(root, "meta.sqlite"));
+    const repos = new MetadataRepositories(store.db);
+    repos.projects.save({ id: "p", configuredRootPath: root, canonicalRootPath: root, displayLabel: "p", archivedAt: null });
+    const workspace: Workspace = { id: "w", projectId: "p", kind: "directory", cwd: root, checkoutRoot: root, mainRepositoryRoot: root, branchRef: null, displayLabel: "w", locationId: null, ownershipState: "not-owned", archivedAt: null };
+    repos.workspaces.save(workspace);
+    let open = true;
+    const service = new AgentService(repos, {
+      sessionsRoot: join(root, "sessions"),
+      manager: new PiRpcManager(4),
+      pi: { executable: process.execPath, executableArgs: ["-e", script] },
+      admissionGate: () => open,
+    });
+    const agent = await service.create("w");
+    await service.capabilities(agent.id);
+
+    open = false;
+    await expect(service.create("w")).rejects.toMatchObject({ code: "draining" });
+    await expect(service.prompt(agent.id, "hi")).rejects.toMatchObject({ code: "draining" });
+    await expect(service.steer(agent.id, "hi")).rejects.toMatchObject({ code: "draining" });
+    await expect(service.followUp(agent.id, "hi")).rejects.toMatchObject({ code: "draining" });
+    await expect(service.compact(agent.id)).rejects.toMatchObject({ code: "draining" });
+    await expect(service.model(agent.id, "test", "model")).rejects.toMatchObject({ code: "draining" });
+    await expect(service.thinking(agent.id, "medium")).rejects.toMatchObject({ code: "draining" });
+
+    open = true;
+    await service.stop(agent.id);
+    open = false;
+    // Explicit resume (new work) is refused...
+    await expect(service.start(agent.id)).rejects.toMatchObject({ code: "draining" });
+    // ...and so is a read that would need to lazily spawn a fresh process.
+    await expect(service.capabilities(agent.id)).rejects.toMatchObject({ code: "draining" });
+
+    // Abort, question answers, and resource-close controls stay usable
+    // while draining -- they let admitted work settle or the resource
+    // close, neither of which is new work.
+    await expect(service.abort(agent.id)).resolves.toBeUndefined();
+    await expect(service.archive(agent.id)).resolves.toBeUndefined();
+
+    await service.shutdown();
+    store.close();
+  });
+
+  test("listQuickBlockers and listBlockers reflect live agent activity, not persisted status alone", async () => {
+    const f = await make();
+    const idleAgent = await f.service.create("w");
+    await f.service.capabilities(idleAgent.id);
+    expect(f.service.listQuickBlockers()).toEqual([]);
+    expect(await f.service.listBlockers()).toEqual([]);
+
+    const runningScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);const data=r.type==='get_state'?{isStreaming:true}:{};if(r.type==='prompt')process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n');process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+    const g = await make(10, ["-e", runningScript]);
+    const runningAgent = await g.service.create("w");
+    await g.service.prompt(runningAgent.id, "keep going");
+    await Bun.sleep(20);
+    expect(g.service.listQuickBlockers()).toContainEqual({ agentId: runningAgent.id, reason: "running" });
+    expect(await g.service.listBlockers()).toContainEqual({ agentId: runningAgent.id, reason: "running" });
+
+    await f.service.shutdown();
+    await g.service.shutdown();
+    f.store.close();
+    g.store.close();
+  });
+
+  test("listQuickBlockers reports needs-attention for an outstanding extension question", async () => {
+    const attentionScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');if(r.type==='get_entries')setTimeout(()=>process.stdout.write(JSON.stringify({type:'extension_ui_request',id:'q-1',method:'select',title:'Pick',options:['One','Two']})+'\\n'),5)}})`;
+    const f = await make(10, ["-e", attentionScript]);
+    const agent = await f.service.create("w");
+    await Bun.sleep(30);
+    expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("needs-attention");
+    expect(f.service.listQuickBlockers()).toContainEqual({ agentId: agent.id, reason: "needs-attention" });
+    await f.service.shutdown();
+    f.store.close();
+  });
+
+  test("listBlockers treats a get_state probe failure as an unknown blocker, not idle", async () => {
+    // Handshake (manager.start) and the post-boot reconcile() each issue one
+    // get_state; only the third (the drain probe) fails, so this exercises
+    // the probe's own error path without the process ever failing to start.
+    const failScript = `let n=0;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='get_state'){n++;if(n<=2){process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{isStreaming:false}})+'\\n')}else{process.stdout.write(JSON.stringify({type:'response',id:r.id,success:false,error:'boom'})+'\\n')}}else{process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n')}}})`;
+    const f = await make(10, ["-e", failScript]);
+    const agent = await f.service.create("w");
+    await Bun.sleep(20);
+    expect(f.service.listQuickBlockers()).toEqual([]);
+    expect(await f.service.listBlockers()).toContainEqual({ agentId: agent.id, reason: "unknown" });
+    await f.service.shutdown();
+    f.store.close();
+  });
+});

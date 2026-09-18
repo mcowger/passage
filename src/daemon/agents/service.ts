@@ -4,6 +4,7 @@ import { agentCapabilitiesSchema, type AgentHistory, type AgentStatus, type Time
 import { AttachmentCache, safeAttachmentContentType, withFileRefs } from "./attachments.ts";
 import { getSlashCommands, piCommandsToSlashCommands } from "./slash-commands.ts";
 import { agentFileSchema, agentImageSchema, type AgentFile, type AgentImage } from "../../shared/protocol/agents.ts";
+import type { DaemonBlocker } from "../../shared/protocol/daemon.ts";
 import { pageHistory, readPiHistory, type HistoryPage } from "./history/index.ts";
 import { TranscriptState, truncateRowForWire } from "./transcript/index.ts";
 import {
@@ -31,6 +32,10 @@ const MAX_RUNTIME_DIAGNOSTICS = 100;
  *  purpose so a large install still gets fully normalized on restart. */
 const MAX_RESTART_RECONCILE = 10_000;
 const DEFAULT_ABORT_TIMEOUT_MS = 30_000;
+/** Bound on a drain readiness probe (listBlockers()): short enough that a
+ *  hung agent shows up as an "unknown" blocker quickly rather than
+ *  stalling every readiness recompute behind it. */
+const BLOCKER_PROBE_TIMEOUT_MS = 5_000;
 /** Summarizing a large session is a single LLM call that can run for
  *  minutes; the default 10s RPC admission timeout would false-fail it. */
 const COMPACT_TIMEOUT_MS = 300_000;
@@ -105,7 +110,7 @@ function compactRefusalReason(cause: unknown): "session-too-short" | "already-co
 export type AgentHistoryResult = HistoryPage | { unpersisted: true; history: null };
 
 export class AgentError extends Error {
-  constructor(readonly code: "not-found" | "archived" | "not-running" | "invalid-input" | "limit", message: string) {
+  constructor(readonly code: "not-found" | "archived" | "not-running" | "invalid-input" | "limit" | "draining", message: string) {
     super(message);
     this.name = "AgentError";
   }
@@ -161,6 +166,10 @@ export class AgentService {
   private readonly attachmentCache: AttachmentCache;
   private readonly abortTimeoutMs: number;
   private readonly onWorkspaceGitChanged?: (workspaceId: string) => void;
+  /** Daemon lifecycle admission gate (docs/BACKTOSQUAREONE.md step 5).
+   *  Defaults to always-open so tests/tools that never wire a
+   *  `DaemonLifecycle` see no behavior change. */
+  private readonly admissionGate: () => boolean;
 
   constructor(
     private readonly repositories: MetadataRepositories,
@@ -178,6 +187,11 @@ export class AgentService {
       /** Called (never-throw) when an agent run likely mutated its workspace's
        *  Git state, so the daemon can invalidate subscribed Git views. */
       onWorkspaceGitChanged?: (workspaceId: string) => void;
+      /** True while the daemon accepts new agent work (`DaemonLifecycle
+       *  .isAdmissionOpen`). Checked synchronously at every new-work entry
+       *  point and before any lazy Pi spawn; already-admitted work is never
+       *  affected by a later `false`. */
+      admissionGate?: () => boolean;
     },
   ) {
     if (!options.sessionsRoot) throw new AgentError("invalid-input", "sessionsRoot is required");
@@ -200,6 +214,15 @@ export class AgentService {
     );
     this.abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_ABORT_TIMEOUT_MS;
     this.onWorkspaceGitChanged = options.onWorkspaceGitChanged;
+    this.admissionGate = options.admissionGate ?? (() => true);
+  }
+
+  /** Refuses new agent work while the daemon is draining/ready/stopping.
+   *  Called synchronously at the top of every new-work entry point, before
+   *  any validation or async work, so admission closes exactly at the
+   *  boundary `DaemonLifecycle.beginDrain()` set. */
+  private assertAdmissionOpen(): void {
+    if (!this.admissionGate()) throw new AgentError("draining", "Passage is draining; new agent work is not accepted");
   }
 
   subscribe(listener: (event: AgentServiceEvent) => void): () => boolean {
@@ -321,7 +344,80 @@ export class AgentService {
     return { interrupted };
   }
 
+  /** Every agentId this service currently has any runtime bookkeeping for:
+   *  a live process, an in-flight admitted operation, or a pending
+   *  question. Bounded by the manager's live-process cap plus a handful of
+   *  transient trackers -- never a full agent-table scan. This is exactly
+   *  the set `listQuickBlockers()`/`listBlockers()` need to consider;
+   *  anything not in it has no live process and nothing in flight, so it
+   *  is trivially idle. */
+  private candidateBlockerAgentIds(): Set<string> {
+    return new Set<string>([
+      ...this.pendingStarts.keys(),
+      ...this.cancellations.keys(),
+      ...this.compacting,
+      ...this.runStartedAt.keys(),
+      ...this.eventChains.keys(),
+      ...this.pendingUiRequests.keys(),
+      ...this.subscriptions.keys(),
+    ]);
+  }
+
+  /** Synchronous, in-memory-only reason a single agent is not idle, or
+   *  undefined if nothing tracked says otherwise (which does not by itself
+   *  mean idle -- see listBlockers()). Never performs I/O. */
+  private quickBlockerReason(agentId: string): DaemonBlocker["reason"] | undefined {
+    if (this.pendingStarts.has(agentId)) return "starting";
+    if (this.cancellations.has(agentId)) return "cancelling";
+    if (this.compacting.has(agentId)) return "compacting";
+    if (this.eventChains.has(agentId)) return "reconciling";
+    if (this.pendingUiRequests.has(agentId)) return "needs-attention";
+    if (this.manager.get(agentId)?.getPendingUiRequest()) return "needs-attention";
+    if (this.runStartedAt.has(agentId)) return "running";
+    return undefined;
+  }
+
+  /** Cheap, synchronous blocker pass (docs/BACKTOSQUAREONE.md step 5). Safe
+   *  to call on every event; `DaemonLifecycle` uses it only to revoke a
+   *  `ready` phase the instant new activity is observed, never to grant
+   *  `ready` -- that requires the authoritative, get_state-verified
+   *  `listBlockers()`. */
+  listQuickBlockers(): DaemonBlocker[] {
+    const blockers: DaemonBlocker[] = [];
+    for (const agentId of this.candidateBlockerAgentIds()) {
+      const reason = this.quickBlockerReason(agentId);
+      if (reason) blockers.push({ agentId, reason });
+    }
+    return blockers;
+  }
+
+  /** Authoritative blocker pass: the quick pass plus one bounded `get_state`
+   *  probe against every remaining candidate agent with a live process, so
+   *  readiness is never granted purely from cached in-memory flags -- only
+   *  ever revoked early by them. A probe failure (or a confirmed
+   *  `isStreaming: true`) is a blocker; a missing process with nothing
+   *  tracked is not probed at all, it is just idle. Never throws. */
+  async listBlockers(): Promise<DaemonBlocker[]> {
+    const blockers = this.listQuickBlockers();
+    const blockedIds = new Set(blockers.map((blocker) => blocker.agentId));
+    const probeIds = [...this.candidateBlockerAgentIds()].filter((agentId) => !blockedIds.has(agentId) && this.manager.get(agentId) !== undefined);
+    const probes = await Promise.all(probeIds.map(async (agentId): Promise<DaemonBlocker | undefined> => {
+      const process = this.manager.get(agentId);
+      if (!process) return undefined;
+      try {
+        const state = await process.request({ type: "get_state" }, BLOCKER_PROBE_TIMEOUT_MS);
+        const data = responseData<{ isStreaming?: unknown }>(state);
+        return data?.isStreaming === true ? { agentId, reason: "running" } : undefined;
+      } catch {
+        return { agentId, reason: "unknown" };
+      }
+    }));
+    for (const probe of probes) if (probe) blockers.push(probe);
+    return blockers;
+  }
+
   async create(workspaceId: string, title = "Agent"): Promise<AgentSnapshot> {
+    this.assertAdmissionOpen();
     this.validateShortValue(title, "title");
     this.requireWorkspace(workspaceId);
     const agent: Agent = {
@@ -347,7 +443,7 @@ export class AgentService {
     // failures via an error status, so nothing is lost by not awaiting it.
     // Tracked in pendingStarts so prompt/steer/history/etc. still run
     // after boot (preserving the old ordering) and shutdown waits for it.
-    const tracked: Promise<void> = this.start(agent.id).catch(() => undefined).finally(() => {
+    const tracked: Promise<void> = this.start(agent.id, { admitted: true }).catch(() => undefined).finally(() => {
       if (this.pendingStarts.get(agent.id) === tracked) this.pendingStarts.delete(agent.id);
     });
     this.pendingStarts.set(agent.id, tracked);
@@ -361,7 +457,12 @@ export class AgentService {
     return pending;
   }
 
-  async start(agentId: string): Promise<void> {
+  /** `options.admitted` is set only by create()'s own background boot: that
+   *  work was already admitted when create() passed the gate, so it must
+   *  run to completion even if drain begins moments later. An explicit
+   *  resume (HTTP/WS `start`) is new work and is gated normally. */
+  async start(agentId: string, options?: { admitted?: boolean }): Promise<void> {
+    if (!options?.admitted) this.assertAdmissionOpen();
     // Serialize behind create()'s background boot so two overlapping
     // starts (and their trailing reconciles) can't interleave. The
     // background invocation itself sees no entry (it is set only after
@@ -400,6 +501,7 @@ export class AgentService {
   }
 
   async prompt(agentId: string, text: string, images?: AgentImage[], files?: AgentFile[]): Promise<void> {
+    this.assertAdmissionOpen();
     this.validateMessage(text);
     const agent = this.requireAgent(agentId);
     this.rejectWhileStopping(agent);
@@ -431,6 +533,7 @@ export class AgentService {
   }
 
   async steer(agentId: string, text: string, images?: AgentImage[], files?: AgentFile[]): Promise<void> {
+    this.assertAdmissionOpen();
     this.validateMessage(text);
     this.rejectWhileStopping(this.requireAgent(agentId));
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
@@ -442,6 +545,7 @@ export class AgentService {
   }
 
   async followUp(agentId: string, text: string, images?: AgentImage[], files?: AgentFile[]): Promise<void> {
+    this.assertAdmissionOpen();
     this.validateMessage(text);
     this.rejectWhileStopping(this.requireAgent(agentId));
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
@@ -541,6 +645,7 @@ export class AgentService {
   }
 
   async compact(agentId: string, customInstructions?: string): Promise<CompactResult> {
+    this.assertAdmissionOpen();
     if (customInstructions !== undefined) this.validateShortValue(customInstructions, "instructions");
     this.rejectWhileStopping(this.requireAgent(agentId));
     const process = await this.ensureProcess(agentId);
@@ -575,6 +680,7 @@ export class AgentService {
   }
 
   async model(agentId: string, provider: string, modelId: string): Promise<void> {
+    this.assertAdmissionOpen();
     this.validateShortValue(provider, "provider");
     this.validateShortValue(modelId, "model");
     this.rejectWhileStopping(this.requireAgent(agentId));
@@ -589,6 +695,7 @@ export class AgentService {
   }
 
   async thinking(agentId: string, level: string): Promise<void> {
+    this.assertAdmissionOpen();
     this.validateShortValue(level, "thinking level");
     this.rejectWhileStopping(this.requireAgent(agentId));
     const capabilities = await this.capabilities(agentId);
@@ -1190,6 +1297,12 @@ export class AgentService {
     await this.awaitPendingStart(agentId);
     let process = this.manager.get(agentId);
     if (!process) {
+      // Not `{ admitted: true }`: this is a lazy spawn, so it goes through
+      // start()'s own admission gate. That is the only enforcement point
+      // capabilities()/history() (which never call assertAdmissionOpen()
+      // themselves, since they must keep serving reads against an already
+      // -live process while draining) need to refuse spawning a fresh Pi
+      // process instead of silently bypassing the gate.
       await this.start(agentId);
       process = this.manager.get(agentId);
     }
