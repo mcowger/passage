@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Project, Workspace } from "../../shared/domain/workspaces.ts";
+import type { GitFileStatus, GitStatus } from "../../shared/domain/git.ts";
 import { friendlyApiError, type WorkspaceApi } from "../api.ts";
 import { CopyValueButton } from "./CopyValueButton.tsx";
 import { Button } from "./ui/button.tsx";
@@ -37,6 +38,26 @@ export function WorkspaceDetailsModal({
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removeError, setRemoveError] = useState("");
   const [forceAvailable, setForceAvailable] = useState(false);
+  const [removeStatus, setRemoveStatus] = useState<GitStatus | null>(null);
+  const [removeStatusLoading, setRemoveStatusLoading] = useState(false);
+
+  const resetRemoveDialog = () => {
+    setRemoveError("");
+    setForceAvailable(false);
+    setRemoveStatus(null);
+    setRemoveStatusLoading(false);
+  };
+
+  const loadRemoveStatus = async () => {
+    setRemoveStatusLoading(true);
+    try {
+      setRemoveStatus(await api.gitStatus(workspace.id));
+    } catch {
+      setRemoveStatus(null);
+    } finally {
+      setRemoveStatusLoading(false);
+    }
+  };
 
   const handleRename = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,11 +113,13 @@ export function WorkspaceDetailsModal({
       setRemoveError("");
       await api.removeWorktree(workspace.id, force);
       setConfirmRemove(false);
+      resetRemoveDialog();
       await onRefresh();
       onClose();
     } catch (err) {
       setRemoveError(friendlyApiError(err, "Failed to remove worktree"));
       setForceAvailable(true);
+      void loadRemoveStatus();
     } finally {
       setBusy(false);
     }
@@ -193,7 +216,7 @@ export function WorkspaceDetailsModal({
               <Button
                 size="xs"
                 variant="destructive"
-                onClick={() => { setRemoveError(""); setForceAvailable(false); setConfirmRemove(true); }}
+                onClick={() => { resetRemoveDialog(); setConfirmRemove(true); }}
                 disabled={busy}
               >
                 Delete Worktree
@@ -238,7 +261,7 @@ export function WorkspaceDetailsModal({
 
       {/* Confirmation Dialog for Worktree Deletion */}
       {confirmRemove && (
-        <Dialog open onOpenChange={(open) => { if (!open) { setConfirmRemove(false); setForceAvailable(false); } }}>
+        <Dialog open onOpenChange={(open) => { if (!open) { setConfirmRemove(false); resetRemoveDialog(); } }}>
           <DialogContent className="max-w-[min(440px,calc(100%-2rem))] overflow-x-hidden">
             <DialogHeader className="min-w-0 pr-6">
               <DialogTitle className="text-base font-semibold [overflow-wrap:anywhere]">Delete Git Worktree</DialogTitle>
@@ -251,8 +274,9 @@ export function WorkspaceDetailsModal({
                 <AlertDescription className="text-xs">{removeError}</AlertDescription>
               </Alert>
             )}
+            {forceAvailable && <RemoveDirtyFiles status={removeStatus} loading={removeStatusLoading} />}
             <div className="flex justify-end gap-2 pt-2 flex-wrap">
-              <Button size="xs" variant="secondary" onClick={() => { setConfirmRemove(false); setForceAvailable(false); }}>Cancel</Button>
+              <Button size="xs" variant="secondary" onClick={() => { setConfirmRemove(false); resetRemoveDialog(); }}>Cancel</Button>
               {forceAvailable && (
                 <Button size="xs" variant="destructive" onClick={() => handleRemoveWorktree(true)} disabled={busy}>
                   {busy ? "Deleting..." : "Force"}
@@ -267,4 +291,64 @@ export function WorkspaceDetailsModal({
       )}
     </>
   );
+}
+
+const MAX_DIRTY_FILES_SHOWN = 30;
+
+function RemoveDirtyFiles({ status, loading }: { status: GitStatus | null; loading: boolean }) {
+  if (loading) {
+    return <p className="text-xs text-muted-foreground my-2">Checking for uncommitted changes…</p>;
+  }
+  if (!status) return null;
+  if (status.files.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground my-2">
+        The working tree reports no uncommitted changes — Git refused for another reason (unmerged history or a lock). Forcing still permanently deletes the worktree.
+      </p>
+    );
+  }
+  const shown = status.files.slice(0, MAX_DIRTY_FILES_SHOWN);
+  const hidden = status.files.length - shown.length;
+  return (
+    <div className="my-2 rounded-md border border-destructive/30 bg-destructive/5 p-2">
+      <p className="text-xs font-semibold mb-1">
+        Uncommitted changes that forcing would discard ({status.files.length}):
+      </p>
+      <ul className="max-h-40 overflow-y-auto text-xs font-mono space-y-0.5 min-w-0">
+        {shown.map((file) => (
+          <li key={`${file.path}-${file.staged ? "staged" : "wt"}`} className="flex items-baseline gap-1.5 min-w-0">
+            <span className="shrink-0 text-muted-foreground" title={describeDirtyFile(file)}>{dirtyKindLabel(file)}</span>
+            <span className="min-w-0 flex-1 [overflow-wrap:anywhere]" title={file.path}>
+              {file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {hidden > 0 && <p className="text-xs text-muted-foreground mt-1">…and {hidden} more.</p>}
+    </div>
+  );
+}
+
+function dirtyKindLabel(file: GitFileStatus): string {
+  switch (file.kind) {
+    case "modified":
+      return "M";
+    case "added":
+      return "A";
+    case "deleted":
+      return "D";
+    case "renamed":
+      return "R";
+    case "untracked":
+      return "?";
+    case "conflict":
+      return "C";
+    default:
+      return "•";
+  }
+}
+
+function describeDirtyFile(file: GitFileStatus): string {
+  const scope = file.staged ? "staged" : "working tree";
+  return `${file.kind} (${scope})`;
 }
