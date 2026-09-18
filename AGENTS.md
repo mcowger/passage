@@ -43,6 +43,7 @@ Authority: `docs/DESIGN.md` (architecture/security/scope), `docs/UI.md` (UI/a11y
 - Tailwind v4 via `bun-plugin-tailwind` (`bunfig.toml`); tokens in `src/web/styles.css` `@theme inline`. No Vite/PostCSS/watchers.
 - shadcn first (`bunx --bun shadcn@latest add <component>`, `cn()` in `src/web/lib/utils.ts`): never reimplement focus trap/portal/dismiss/keyboard nav. Custom code is for CodeMirror/Xterm/transcripts/diffs/splits only.
 - Mobile = single panel + drawers/full-screen artifacts, not compressed desktop. Verify browser-facing changes with `agent-browser` (desktop + mobile if responsive, incl. loading/error/reconnect/keyboard) — unit tests alone are not done.
+- Client-rendered component tests use happy-dom scoped per-file via `setupDomTests()` (`src/web/test-utils/dom.ts`, `*.interaction.test.tsx`) — never a global `[test] preload`, which breaks the fake-global socket tests (readonly globals) and daemon `Request` tests. SSR + pure-function tests stay the default; use render-bound queries, never the `screen` global.
 
 ## Git
 
