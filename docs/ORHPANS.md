@@ -10,9 +10,11 @@ Retain the original design below until this reference is explicitly deleted.
 
 The replacement direction is daemon-owned Pi CLI RPC processes, accepting
 interruption on crashes and adding safe draining for planned shutdowns. The
-holder implementation is still present; this deprecation does not mean the
-rollback or safe shutdown mechanism has been implemented. Follow
-`BACKTOSQUAREONE.md` for migration order, safeguards, and acceptance tests.
+holder implementation described below has been removed (`BACKTOSQUAREONE.md`
+steps 1-3); this inventory is kept only to identify what was reversed. The
+safe-drain and shutdown mechanism (steps 4-6) is still planned, not
+implemented. Follow `BACKTOSQUAREONE.md` for migration order, safeguards, and
+acceptance tests.
 
 Historical implementation inventory:
 

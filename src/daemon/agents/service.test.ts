@@ -1,5 +1,4 @@
 import { expect, test, afterEach, describe } from "bun:test";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { MetadataStore } from "../metadata/database.ts";
@@ -23,46 +22,6 @@ test("creates and immediately persists an agent, and supports admission/settleme
   const f = await make(); const events: string[] = []; f.service.subscribe(e => events.push(e.type));
   const agent = await f.service.create("w", "one"); expect(agent.piSessionId).toStartWith("pi_"); expect(agent.piSessionPath).toBeNull();
   await f.service.prompt(agent.id, "hello"); await Bun.sleep(20); expect(events).toContain("settled"); await f.service.shutdown(); f.store.close();
-});
-
-test("boot sweep kills orphans, keeps live agents, and respawns dead sockets", async () => {
-  const f = await make();
-  const sessionsRoot = join(f.root, "sessions");
-  // Holder-wired manager, but nothing is started: every socket here is
-  // stale, so the sweep must decide without spawning any process.
-  const service = new AgentService(f.repos, {
-    sessionsRoot,
-    manager: new PiRpcManager(4, { sessionsRoot }),
-    pi: { executable: process.execPath, executableArgs: ["-e", script] },
-  });
-  const seed = (id: string, archived: boolean) => {
-    f.repos.agents.save({
-      id, workspaceId: "w", piSessionId: `pi_${id}`, piSessionPath: null,
-      title: id, titleOverridden: false, modelPreference: null, thinkingPreference: null,
-      lastKnownStatus: "idle", archivedAt: null,
-    });
-    if (archived) {
-      f.repos.agents.archive(id, new Date().toISOString());
-      f.repos.agents.updateStatus(id, "archived");
-    }
-    mkdirSync(join(sessionsRoot, id), { recursive: true });
-    writeFileSync(join(sessionsRoot, id, "rpc.sock"), "stale");
-  };
-  seed("agt_live1", false);
-  seed("agt_old1", true);
-  mkdirSync(join(sessionsRoot, "agt_ghost1"), { recursive: true });
-  writeFileSync(join(sessionsRoot, "agt_ghost1", "rpc.sock"), "stale");
-  const result = await service.sweepOrphanHolders();
-  // Live agent + dead socket → lazy respawn on next use (socket removed).
-  expect(result.respawned).toContain("agt_live1");
-  expect(existsSync(join(sessionsRoot, "agt_live1", "rpc.sock"))).toBe(false);
-  // Archived agent and unknown sockets → killed and removed.
-  expect(result.killed).toContain("agt_old1");
-  expect(result.killed).toContain("agt_ghost1");
-  expect(existsSync(join(sessionsRoot, "agt_ghost1", "rpc.sock"))).toBe(false);
-  await service.shutdown();
-  await f.service.shutdown();
-  f.store.close();
 });
 
 test("isolates agents, prevents duplicate subscriptions, and bounds listing", async () => {

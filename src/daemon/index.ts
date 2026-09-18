@@ -57,51 +57,6 @@ import icon from "../web/icon.svg" with { type: "text" };
 import swScript from "../web/sw.js" with { type: "text" };
 import { getBuildInfo } from "./build-info.ts";
 
-// Same-binary subcommand dispatch (see docs/ORHPANS.md "Binary mode"). This
-// branch runs BEFORE SQLite open, Hono setup, Bun.serve, pidfile/dev.port
-// writes, and logging configuration: the holder must never open SQLite and
-// pulls in no HTTP/WebSocket code (lazy import keeps daemon startup cost
-// unchanged and the holder dependency-light).
-const earlySubcommand = Bun.argv[2];
-if (earlySubcommand === "pi-holder") {
-  const { runHolder } = await import("./agents/holder/cli.ts");
-  try {
-    await runHolder(Bun.argv);
-  } catch (error) {
-    process.stderr.write(`pi-holder failed: ${error instanceof Error ? error.message : String(error)}\n`);
-    process.exit(1);
-  }
-}
-if (earlySubcommand === "shutdown-holders" || earlySubcommand === "pi-status") {
-  const { shutdownHolders, holderStatus } = await import("./agents/holder/spawn.ts");
-  const cliDataRoot = (Bun as { isStandaloneExecutable?: boolean }).isStandaloneExecutable === true
-    ? join(process.cwd(), ".data")
-    : join(import.meta.dir, "..", "..", ".data");
-  const cliMetadataPath = process.env.PASSAGE_DB_PATH ?? join(cliDataRoot, "passage.sqlite");
-  const cliSessionsRoot = process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(cliMetadataPath), "sessions");
-  if (earlySubcommand === "shutdown-holders") {
-    const result = await shutdownHolders(cliSessionsRoot);
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-    process.exit(0);
-  } else {
-    const target = Bun.argv[3];
-    if (target) {
-      process.stdout.write(`${JSON.stringify(await holderStatus(cliSessionsRoot, target))}\n`);
-    } else {
-      const { readdir: readSessions } = await import("node:fs/promises");
-      let entries: string[] = [];
-      try { entries = await readSessions(cliSessionsRoot); } catch {}
-      const rows: Record<string, unknown>[] = [];
-      for (const entry of entries) {
-        if (!/^[A-Za-z0-9_-]{1,128}$/.test(entry)) continue;
-        rows.push(await holderStatus(cliSessionsRoot, entry));
-      }
-      process.stdout.write(`${JSON.stringify(rows)}\n`);
-    }
-    process.exit(0);
-  }
-}
-
 const DEFAULT_PORT = 3333;
 const MAX_WEBSOCKET_COMMAND_BYTES = 64 * 1024;
 const MAX_AGENT_SUBSCRIPTIONS_PER_SOCKET = 32;
@@ -162,15 +117,6 @@ const agentService = new AgentService(repositories, {
   },
 });
 const agentEvents = new AgentEventHub(agentService);
-// Orphan sweep on boot, before serving agent commands: kill holders with no
-// live, unarchived agent (stale after archive-while-down, manual DB edits,
-// or crashes). Live holders are left alone; later commands re-attach.
-try {
-  const sweep = await agentService.sweepOrphanHolders();
-  if (sweep.killed.length > 0 || sweep.respawned.length > 0) {
-    log.info("Holder sweep on boot", { event: "holder.swept", kept: sweep.kept.length, killed: sweep.killed, respawned: sweep.respawned });
-  }
-} catch {}
 const responses = new IdempotencyCache<{ fingerprint: string; response: string }>();
 const inflightResponses = new Map<string, { fingerprint: string; response: Promise<string> }>();
 const app = new Hono();
@@ -209,14 +155,8 @@ app.get("/api/daemon/snapshot", (context) => context.json({
   build: getBuildInfo(),
 }));
 app.post("/api/daemon/shutdown", async (context) => {
-  const url = new URL(context.req.url);
-  const holders = url.searchParams.get("holders") === "true";
   // Respond before tearing down: shutdown() stops the server.
-  const payload = { ok: true as const, holders };
-  if (holders) {
-    const { shutdownHolders } = await import("./agents/holder/spawn.ts");
-    await shutdownHolders(sessionsRoot);
-  }
+  const payload = { ok: true as const };
   context.executionCtx.waitUntil(shutdown().then(() => process.exit(0)));
   return context.json(payload);
 });
