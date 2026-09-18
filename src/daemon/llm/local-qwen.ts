@@ -7,6 +7,20 @@ import {
   isLocalQwenModelValue,
 } from "../../shared/domain/settings.ts";
 import { logger } from "../logging.ts";
+import {
+  CHARS_PER_TOKEN_ESTIMATE,
+  LLAMA_CTX_TOKENS,
+  LLAMA_PROMPT_MARGIN_TOKENS,
+  LLAMA_SERVER_BUILD,
+  LLAMA_GPU_LAYERS,
+  chatCompletion,
+  defaultSocketPath,
+  ensureServerBinary,
+  startLlamaServer,
+  stopServer,
+  waitForHealth,
+  type ServerProc,
+} from "./llama-uds.ts";
 
 export { LOCAL_QWEN_LABEL, LOCAL_QWEN_MODEL_VALUE };
 export const LOCAL_QWEN_MODEL_URL =
@@ -16,10 +30,9 @@ export const LOCAL_QWEN_FILENAME = "qwen2.5-0.5b-instruct-q4_k_m.gguf";
 export const LOCAL_QWEN_DEFAULT_MAX_TOKENS = 1000;
 /** Hard ceiling even when a caller requests more. */
 export const LOCAL_QWEN_MAX_TOKENS = 1000;
-/** Context window sized for large inputs (up to ~50K input tokens) plus
- *  the max output budget and prompt overhead, aligned to a multiple of
- *  256 as llama.cpp requires. */
-export const LOCAL_QWEN_CONTEXT_SIZE = 53248;
+/** Server context window (llama.cpp multiple-of-256 aligned). Prompts are
+ *  truncated client-side to fit within ctx minus output budget and margin. */
+export const LOCAL_QWEN_CONTEXT_SIZE = LLAMA_CTX_TOKENS;
 
 const log = logger("llm");
 
@@ -67,54 +80,77 @@ export async function ensureLocalModelFile(
   return { path: modelPath, downloaded: true };
 }
 
+export type LocalQwenChatFn = (
+  prompt: string,
+  opts: { maxTokens: number; temperature: number },
+) => Promise<string>;
+
 export type LocalQwenBackend = {
-  llama: { gpu: unknown; dispose: () => unknown | Promise<unknown> };
-  model: { createContext?: (...args: never[]) => unknown; dispose: () => unknown | Promise<unknown> };
-  context: { getSequence: () => { dispose?: () => unknown | Promise<unknown> }; dispose: () => unknown | Promise<unknown> };
+  chat: LocalQwenChatFn;
+  dispose: () => unknown | Promise<unknown>;
 };
 
 export type CreateLocalQwenBackend = (modelPath: string) => Promise<LocalQwenBackend>;
 
-/** Default backend: auto-detected GPU (Vulkan/CUDA/Metal, else CPU),
- *  model + context kept loaded across calls. */
+function isConnectionDown(error: unknown): boolean {
+  const code = (error as { code?: unknown })?.code;
+  return code === "ECONNREFUSED" || code === "ENOENT" || code === "EPIPE";
+}
+
+/** Default backend: static llama-server binary over a unix socket.
+ *  One restart is attempted when the server dies mid-flight; anything else
+ *  throws and the suggestion callers fall back to Pi/deterministic output. */
 export const createDefaultBackend: CreateLocalQwenBackend = async (modelPath: string) => {
-  const { getLlama, LlamaChatSession } = await import("node-llama-cpp");
-  // Keep a module-level handle so generate() can construct sessions without
-  // re-importing; stored on globalThis to survive singleton resets in tests.
-  (globalThis as Record<string, unknown>).__passageLlamaChatSession = LlamaChatSession;
-  const llama = await getLlama();
-  const model = await llama.loadModel({ modelPath });
-  const context = await model.createContext({ contextSize: LOCAL_QWEN_CONTEXT_SIZE });
+  const binaryPath = await ensureServerBinary();
+  let current = await startLlamaServer({ modelPath, binaryPath });
+  await waitForHealth(current.sockPath);
+
+  const chat: LocalQwenChatFn = async (prompt, opts) => {
+    try {
+      return await chatCompletion(current.sockPath, prompt, opts);
+    } catch (error) {
+      if (!isConnectionDown(error)) throw error;
+      log.warn("llama-server connection lost; restarting once", {
+        event: "llm.server_restart",
+        error: error instanceof Error ? error.message.slice(0, 256) : String(error).slice(0, 256),
+      });
+      await stopServer(current.proc, current.sockPath).catch(() => undefined);
+      current = await startLlamaServer({ modelPath, binaryPath });
+      await waitForHealth(current.sockPath);
+      return chatCompletion(current.sockPath, prompt, opts);
+    }
+  };
+
   return {
-    llama,
-    model,
-    context: context as unknown as LocalQwenBackend["context"],
+    chat,
+    dispose: async () => {
+      await stopServer(current.proc, current.sockPath);
+    },
   };
 };
-
-function getSessionCtor(): new (opts: { contextSequence: unknown }) => {
-  prompt: (text: string, opts?: { maxTokens?: number; temperature?: number }) => Promise<string>;
-  dispose: (opts?: { disposeSequence?: boolean }) => void | Promise<void>;
-} {
-  const ctor = (globalThis as Record<string, unknown>).__passageLlamaChatSession as
-    | (new (opts: { contextSequence: unknown }) => {
-        prompt: (text: string, opts?: { maxTokens?: number; temperature?: number }) => Promise<string>;
-        dispose: (opts?: { disposeSequence?: boolean }) => void | Promise<void>;
-      })
-    | undefined;
-  if (!ctor) throw new Error("Local Qwen backend is not initialized");
-  return ctor;
-}
 
 export type LocalQwenGenerateOptions = {
   maxTokens?: number;
   temperature?: number;
 };
 
-/** In-process Qwen service. Model + context stay loaded; every generate()
- *  call uses its own fresh sequence/session so no chat history leaks
- *  between one-shot title/branch/commit prompts. Serializes concurrent
- *  calls through a chain so small contexts are never over-subscribed. */
+/** Shrink an over-long prompt to fit ctx minus the output budget and the
+ *  template margin, using a conservative chars-per-token estimate. */
+export function fitPromptToContext(
+  prompt: string,
+  maxTokens: number,
+): { text: string; truncated: boolean } {
+  const budget = LOCAL_QWEN_CONTEXT_SIZE - maxTokens - LLAMA_PROMPT_MARGIN_TOKENS;
+  if (Math.ceil(prompt.length / CHARS_PER_TOKEN_ESTIMATE) <= budget) {
+    return { text: prompt, truncated: false };
+  }
+  return { text: prompt.slice(0, Math.max(0, budget * CHARS_PER_TOKEN_ESTIMATE)), truncated: true };
+}
+
+/** Local Qwen service. The server stays up across calls; every generate()
+ *  is one stateless HTTP turn so no chat history leaks between one-shot
+ *  title/branch/commit prompts. Serializes concurrent calls through a
+ *  chain so a slow request never overlaps the next. */
 export class LocalQwenService {
   private backend: LocalQwenBackend | undefined;
   private chain: Promise<void> = Promise.resolve();
@@ -129,31 +165,33 @@ export class LocalQwenService {
     return this.backend !== undefined && !this.disposed;
   }
 
-  /** Load the model, log the selected GPU backend, and run one throwaway
-   *  generation so the first real request isn't slow. */
+  /** Start the server, log the build, and run one throwaway generation
+   *  so the first real request isn't slow. */
   async init(): Promise<void> {
     if (this.backend) return;
     this.disposed = false;
     this.backend = await this.createBackend(this.modelPath);
-    let gpu = "unknown";
-    try {
-      gpu = String(this.backend.llama.gpu ?? "unknown");
-    } catch {}
-    log.info("Local Qwen model loaded", { event: "llm.local_loaded", gpu, modelPath: this.modelPath });
+    log.info("Local Qwen model loaded", {
+      event: "llm.local_loaded",
+      build: LLAMA_SERVER_BUILD,
+      ctx: LOCAL_QWEN_CONTEXT_SIZE,
+      ngl: LLAMA_GPU_LAYERS,
+      sockPath: defaultSocketPath(),
+      modelPath: this.modelPath,
+    });
     try {
       await this.generateInner("Hi", { maxTokens: 8 });
-      log.info("Local Qwen warm-up generation completed", { event: "llm.local_warmup", gpu });
+      log.info("Local Qwen warm-up generation completed", { event: "llm.local_warmup" });
     } catch (error) {
       log.warn("Local Qwen warm-up generation failed", {
         event: "llm.local_warmup_failed",
-        gpu,
         error: error instanceof Error ? error.message.slice(0, 256) : String(error).slice(0, 256),
       });
     }
   }
 
-  /** Single-shot generation with a fresh sequence/session per call.
-   *  `maxTokens` is capped to keep title/branch output short. */
+  /** Single-shot generation. `maxTokens` is capped to the output budget
+   *  and the prompt is truncated to leave room for that output. */
   async generate(prompt: string, options: LocalQwenGenerateOptions = {}): Promise<string> {
     const run = this.chain.then(() => this.generateInner(prompt, options));
     // Keep the chain alive across failures; the caller's `run` still rejects.
@@ -171,39 +209,26 @@ export class LocalQwenService {
       Math.max(1, Math.floor(options.maxTokens ?? LOCAL_QWEN_DEFAULT_MAX_TOKENS)),
       LOCAL_QWEN_MAX_TOKENS,
     );
-    const sequence = backend.context.getSequence();
-    const SessionCtor = getSessionCtor();
-    const session = new SessionCtor({ contextSequence: sequence });
-    try {
-      const text = await session.prompt(prompt, { maxTokens, temperature: options.temperature ?? 0 });
-      return text;
-    } finally {
-      try {
-        await session.dispose({ disposeSequence: true });
-      } catch {
-        try {
-          await (sequence as { dispose?: () => Promise<void> | void }).dispose?.();
-        } catch {}
-      }
+    const fitted = fitPromptToContext(prompt, maxTokens);
+    if (fitted.truncated) {
+      log.warn("Local Qwen prompt truncated to fit context", {
+        event: "llm.prompt_truncated",
+        originalChars: prompt.length,
+        keptChars: fitted.text.length,
+        maxTokens,
+      });
     }
+    return backend.chat(fitted.text, { maxTokens, temperature: options.temperature ?? 0 });
   }
 
-  /** Clean disposal for graceful daemon shutdown: context/model/llama. */
+  /** Clean shutdown for daemon stop: SIGTERM the server, remove the socket. */
   async dispose(): Promise<void> {
     this.disposed = true;
     const backend = this.backend;
     this.backend = undefined;
     if (!backend) return;
-    // Reverse order of creation; each step is best-effort so one failure
-    // never blocks releasing the rest.
     try {
-      await backend.context.dispose();
-    } catch {}
-    try {
-      await backend.model.dispose();
-    } catch {}
-    try {
-      await backend.llama.dispose();
+      await backend.dispose();
     } catch {}
   }
 }
@@ -267,3 +292,5 @@ export async function disposeSharedLocalQwen(): Promise<void> {
   if (!service) return;
   await service.dispose().catch(() => undefined);
 }
+
+export type { ServerProc };

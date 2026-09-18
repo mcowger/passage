@@ -1,5 +1,6 @@
 node_modules/
 dist/
 .data/
+vendor/
 .DS_Store
 *.har

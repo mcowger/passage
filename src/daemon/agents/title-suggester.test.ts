@@ -57,22 +57,9 @@ describe("buildTitlePrompt", () => {
 });
 
 function installFakeLocal(output: string): LocalQwenService {
-  (globalThis as Record<string, unknown>).__passageLlamaChatSession = class {
-    constructor(private readonly opts: { contextSequence: unknown }) {}
-    async prompt(): Promise<string> {
-      return output;
-    }
-    async dispose() {
-      await (this.opts.contextSequence as { dispose?: () => Promise<void> }).dispose?.();
-    }
-  };
   const service = new LocalQwenService("/models/qwen.gguf", async () => ({
-    llama: { gpu: "cpu", dispose: async () => undefined },
-    model: { dispose: async () => undefined },
-    context: {
-      getSequence: () => ({ dispose: async () => undefined }),
-      dispose: async () => undefined,
-    },
+    chat: async () => output,
+    dispose: async () => undefined,
   }));
   return service;
 }
@@ -81,7 +68,6 @@ describe("AgentTitleSuggester local routing", () => {
   afterEach(async () => {
     await disposeSharedLocalQwen();
     setSharedLocalQwenForTesting(undefined);
-    delete (globalThis as Record<string, unknown>).__passageLlamaChatSession;
   });
 
   it("routes Qwen (Local) through the shared local service with the same signature", async () => {

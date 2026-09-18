@@ -3,12 +3,17 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, rm } from "node:fs/promises";
 import {
+  CHARS_PER_TOKEN_ESTIMATE,
+  LLAMA_PROMPT_MARGIN_TOKENS,
+} from "./llama-uds.ts";
+import {
   LOCAL_QWEN_CONTEXT_SIZE,
   LOCAL_QWEN_DEFAULT_MAX_TOKENS,
   LOCAL_QWEN_MAX_TOKENS,
   LocalQwenService,
   disposeSharedLocalQwen,
   ensureLocalModelFile,
+  fitPromptToContext,
   initSharedLocalQwen,
   isLocalQwenModel,
   resolveLocalModelPath,
@@ -19,8 +24,6 @@ import {
 afterEach(async () => {
   await disposeSharedLocalQwen();
   setSharedLocalQwenForTesting(undefined);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  delete (globalThis as any).__passageLlamaChatSession;
 });
 
 describe("isLocalQwenModel", () => {
@@ -86,74 +89,82 @@ describe("ensureLocalModelFile", () => {
   });
 });
 
-function makeFakeBackend(seen: { sequences: number; prompts: Array<{ text: string; maxTokens?: number }> }): LocalQwenBackend {
-  // Minimal chat-session constructor: fresh session per generate() call.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (globalThis as any).__passageLlamaChatSession = class {
-    constructor(private readonly opts: { contextSequence: unknown }) {}
-    async prompt(text: string, promptOpts?: { maxTokens?: number }): Promise<string> {
-      seen.prompts.push({ text, maxTokens: promptOpts?.maxTokens });
-      return `title for ${text.slice(0, 12)}`;
-    }
-    async dispose() {
-      await (this.opts.contextSequence as { dispose?: () => Promise<void> }).dispose?.();
-    }
-  };
-  const context = {
-    getSequence: () => {
-      seen.sequences += 1;
-      return { dispose: async () => undefined };
-    },
-    dispose: async () => undefined,
-  };
+type SeenCall = { text: string; maxTokens: number; temperature: number };
+
+function makeFakeBackend(seen: { calls: SeenCall[]; disposals: number }): LocalQwenBackend {
   return {
-    llama: { gpu: "cpu", dispose: async () => undefined },
-    model: { dispose: async () => undefined },
-    context,
+    chat: async (text: string, opts: { maxTokens: number; temperature: number }) => {
+      seen.calls.push({ text, maxTokens: opts.maxTokens, temperature: opts.temperature });
+      return `title for ${text.slice(0, 12)}`;
+    },
+    dispose: async () => {
+      seen.disposals += 1;
+    },
   };
 }
 
+function newSeen(): { calls: SeenCall[]; disposals: number } {
+  return { calls: [], disposals: 0 };
+}
+
 describe("LocalQwenService.generate", () => {
-  it("produces output without throwing and uses a fresh sequence per call", async () => {
-    const seen = { sequences: 0, prompts: [] as Array<{ text: string; maxTokens?: number }> };
+  it("produces output without throwing and chats once per call", async () => {
+    const seen = newSeen();
     const service = new LocalQwenService("/models/qwen.gguf", async () => makeFakeBackend(seen));
     await service.init();
     // init() runs one throwaway warm-up generation.
-    expect(seen.sequences).toBe(1);
+    expect(seen.calls).toHaveLength(1);
     const out = await service.generate("Suggest a short title for: fix login retry");
     expect(typeof out).toBe("string");
     expect(out.length).toBeGreaterThan(0);
-    expect(seen.sequences).toBe(2);
-    expect(seen.prompts.at(-1)?.maxTokens).toBeLessThanOrEqual(LOCAL_QWEN_DEFAULT_MAX_TOKENS);
+    expect(seen.calls).toHaveLength(2);
+    expect(seen.calls.at(-1)?.text).toContain("fix login retry");
+    expect(seen.calls.at(-1)?.maxTokens).toBeLessThanOrEqual(LOCAL_QWEN_DEFAULT_MAX_TOKENS);
     await service.dispose();
     expect(service.ready).toBe(false);
+    expect(seen.disposals).toBe(1);
   });
 
   it("caps maxTokens to the output budget", async () => {
-    const seen = { sequences: 0, prompts: [] as Array<{ text: string; maxTokens?: number }> };
+    const seen = newSeen();
     const service = new LocalQwenService("/models/qwen.gguf", async () => makeFakeBackend(seen));
     await service.init();
     await service.generate("hello", { maxTokens: 2000 });
-    expect(seen.prompts.at(-1)?.maxTokens).toBe(LOCAL_QWEN_MAX_TOKENS);
+    expect(seen.calls.at(-1)?.maxTokens).toBe(LOCAL_QWEN_MAX_TOKENS);
     await service.generate("hello");
-    expect(seen.prompts.at(-1)?.maxTokens).toBe(LOCAL_QWEN_DEFAULT_MAX_TOKENS);
+    expect(seen.calls.at(-1)?.maxTokens).toBe(LOCAL_QWEN_DEFAULT_MAX_TOKENS);
     expect(LOCAL_QWEN_DEFAULT_MAX_TOKENS).toBe(1000);
     expect(LOCAL_QWEN_MAX_TOKENS).toBe(1000);
     await service.dispose();
   });
 
-  it("sizes the context window for large inputs", () => {
-    // ~50K input tokens + output budget + overhead, llama.cpp-aligned.
-    expect(LOCAL_QWEN_CONTEXT_SIZE).toBeGreaterThanOrEqual(51000);
+  it("truncates over-long prompts to leave room for output", async () => {
+    const seen = newSeen();
+    const service = new LocalQwenService("/models/qwen.gguf", async () => makeFakeBackend(seen));
+    await service.init();
+    const maxTokens = 1000;
+    const budgetChars = (LOCAL_QWEN_CONTEXT_SIZE - maxTokens - LLAMA_PROMPT_MARGIN_TOKENS) * CHARS_PER_TOKEN_ESTIMATE;
+    await service.generate("x".repeat(budgetChars + 9000), { maxTokens });
+    expect(seen.calls.at(-1)?.text.length).toBe(budgetChars);
+    await service.generate("short prompt", { maxTokens });
+    expect(seen.calls.at(-1)?.text).toBe("short prompt");
+    await service.dispose();
+  });
+
+  it("uses the 32K server context window", () => {
+    expect(LOCAL_QWEN_CONTEXT_SIZE).toBe(32768);
     expect(LOCAL_QWEN_CONTEXT_SIZE % 256).toBe(0);
+    // Empty prompt always fits.
+    expect(fitPromptToContext("", 1000)).toEqual({ text: "", truncated: false });
   });
 
   it("dispose is safe to call twice", async () => {
-    const seen = { sequences: 0, prompts: [] as Array<{ text: string; maxTokens?: number }> };
+    const seen = newSeen();
     const service = new LocalQwenService("/models/qwen.gguf", async () => makeFakeBackend(seen));
     await service.init();
     await service.dispose();
     await service.dispose();
+    expect(seen.disposals).toBe(1);
   });
 });
 
@@ -162,7 +173,7 @@ describe("initSharedLocalQwen", () => {
     const dir = await mkdtemp(join(tmpdir(), "passage-qwen-shared-"));
     try {
       const dbPath = join(dir, "passage.sqlite");
-      const seen = { sequences: 0, prompts: [] as Array<{ text: string; maxTokens?: number }> };
+      const seen = newSeen();
       let fetchCalls = 0;
       const service = await initSharedLocalQwen(dbPath, {
         createBackend: async () => makeFakeBackend(seen),
@@ -177,7 +188,7 @@ describe("initSharedLocalQwen", () => {
       expect(service?.ready).toBe(true);
       expect(fetchCalls).toBe(1);
       // Warm-up ran once during init.
-      expect(seen.sequences).toBe(1);
+      expect(seen.calls).toHaveLength(1);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

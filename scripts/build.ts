@@ -37,6 +37,17 @@ const define = {
 };
 console.log(`build: commit=${buildCommit.slice(0, 12)}${buildDirty === "true" ? " (dirty)" : ""} builtAt=${buildTime}`);
 
+// Vendor the static llama-server before bundling so the embed below always
+// resolves. Skips when fresh; fails the build when the source is missing.
+const vendor = Bun.spawnSync([process.execPath, "scripts/vendor-llama-server.ts"], {
+  stdout: "inherit",
+  stderr: "inherit",
+});
+if (vendor.exitCode !== 0) {
+  console.error("build: vendoring llama-server failed");
+  process.exit(vendor.exitCode ?? 1);
+}
+
 const result = isCompile
   ? await Bun.build({
       entrypoints: ["./src/daemon/index.ts"],
