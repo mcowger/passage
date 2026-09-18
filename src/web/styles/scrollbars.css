@@ -1,0 +1,91 @@
+/* Shadcn-style slim scrollbars (global).
+ *
+ * The app already uses the Radix-based Shadcn `ScrollArea` component where it
+ * fits (popovers, selects, command palette). The main panes (timeline,
+ * sidebar, explorer, diffs) keep native scrolling on purpose: AgentPanel owns
+ * scroll pinning, stick-to-bottom, and backfill compensation in JS, and those
+ * read scrollTop/scrollHeight directly off the scroll element. Rewrapping
+ * them in Radix viewports would risk that behavior for no visual gain.
+ *
+ * So instead every native scrollbar gets the same slim overlay look as the
+ * Shadcn ScrollBar: transparent track, thin rounded thumb cut from
+ * theme-aware border tokens, darkening on hover. Colors resolve from CSS
+ * vars so custom theme packs (light/dark) follow automatically. */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 999px;
+  /* Transparent border + content-box clip = slim floating thumb with
+     breathing room from the track edge, matching the p-px ScrollBar. */
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Touch layouts keep the OS overlay behavior; no hover affordance there. */
+@media (pointer: coarse) {
+  * {
+    scrollbar-width: auto;
+  }
+}
+
+/* Keep the scroll-thumb subtle until the pane is hovered or actively
+   scrolling, so long transcripts read as clean documents. Covers the main
+   panes plus text inputs: the composer (native textarea fallback and the
+   contenteditable .composer-editor) and the shared Textarea component used
+   for commit messages / question replies. */
+.timeline,
+.project-list,
+.explorer-tree,
+.changes-list,
+.diff-content-list,
+.composer-card textarea,
+.composer-editor,
+textarea[data-slot="textarea"] {
+  scrollbar-color: color-mix(in srgb, var(--border-strong) 70%, transparent) transparent;
+}
+
+.timeline::-webkit-scrollbar-thumb,
+.project-list::-webkit-scrollbar-thumb,
+.explorer-tree::-webkit-scrollbar-thumb,
+.changes-list::-webkit-scrollbar-thumb,
+.diff-content-list::-webkit-scrollbar-thumb,
+.composer-card textarea::-webkit-scrollbar-thumb,
+.composer-editor::-webkit-scrollbar-thumb,
+textarea[data-slot="textarea"]::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--border-strong) 70%, transparent);
+}
+
+.timeline:hover::-webkit-scrollbar-thumb,
+.project-list:hover::-webkit-scrollbar-thumb,
+.explorer-tree:hover::-webkit-scrollbar-thumb,
+.changes-list:hover::-webkit-scrollbar-thumb,
+.diff-content-list:hover::-webkit-scrollbar-thumb,
+.composer-card textarea:hover::-webkit-scrollbar-thumb,
+.composer-editor:hover::-webkit-scrollbar-thumb,
+textarea[data-slot="textarea"]:hover::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+}
