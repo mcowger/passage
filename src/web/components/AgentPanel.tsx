@@ -1083,7 +1083,7 @@ const LiveStreamPhase = memo(function LiveStreamPhase({
   phase: StreamPhase | null;
   receiving: boolean;
 }) {
-  if (!phase) return null;
+  if (!phase) return <span className="live-stream-phase" aria-hidden="true" />;
   const Icon = STREAM_PHASE_ICONS[phase];
   const label = STREAM_PHASE_LABELS[phase];
   return (
@@ -1113,11 +1113,11 @@ const LiveStreamTraffic = memo(function LiveStreamTraffic({
   return (
     <span className="composer-status-traffic" aria-hidden="true" title={title}>
       <span aria-hidden="true">·</span>
-      <span>{formatByteCount(bytes)}</span>
+      <span className="composer-status-bytes">{formatByteCount(bytes)}</span>
       <span aria-hidden="true">·</span>
       <span className="composer-status-idle">
         <RotateCwFadingClock size={11} aria-hidden="true" />
-        <span>{idleText}</span>
+        <span className="composer-status-idle-text">{idleText}</span>
       </span>
     </span>
   );

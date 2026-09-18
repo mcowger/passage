@@ -37,12 +37,33 @@
   background: var(--surface-subtle);
   border: 1px solid var(--border);
   border-radius: 999px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .composer-status-duration {
+  display: inline-block;
+  min-width: 6ch;
   font-weight: 600;
   color: var(--foreground);
   font-variant-numeric: tabular-nums;
   font-size: 11px;
+}
+.composer-status-pill .live-stream-phase {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  justify-content: center;
+}
+.composer-status-bytes {
+  display: inline-block;
+  min-width: 7ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.composer-status-idle-text {
+  display: inline-block;
+  min-width: 5ch;
+  font-variant-numeric: tabular-nums;
 }
 .composer-status-traffic {
   display: inline-flex;
