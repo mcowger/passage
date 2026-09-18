@@ -1577,9 +1577,12 @@ function AgentComposerInner({
   };
 
   // Attached follow-ups enter the chat only once the run settles: while the
-  // agent is idle the queue drains in order through `follow_up`. A failed
-  // send stops the drain, restores the unsent remainder to the front, and
-  // surfaces the error -- nothing silently disappears from the queue.
+  // agent is idle the queue drains in order, starting a new turn with
+  // `prompt` and queueing any remainder behind it with `follow_up` (a bare
+  // `follow_up` on an idle agent only queues in Pi and never starts a run).
+  // A failed send stops the drain, restores the unsent remainder to the
+  // front, and surfaces the error -- nothing silently disappears from
+  // the queue.
   useEffect(() => {
     if (!idle || stopping || busy || dispatchingRef.current || queue.length === 0) return;
     dispatchingRef.current = true;
@@ -1588,7 +1591,7 @@ function AgentComposerInner({
     void (async () => {
       const pending = [...queue];
       setQueue([]);
-      for (const item of pending) {
+      for (const [index, item] of pending.entries()) {
         const payloadImages: AgentImage[] = item.images.map(({ type, data, mimeType, name }) => ({
           type,
           data,
@@ -1620,12 +1623,17 @@ function AgentComposerInner({
           optimisticFiles.length > 0 ? optimisticFiles : undefined,
         );
         try {
-          await api.followUp(
-            agentId,
-            item.text,
-            payloadImages.length > 0 ? payloadImages : undefined,
-            payloadFiles.length > 0 ? payloadFiles : undefined,
-          );
+          const imagesArg = payloadImages.length > 0 ? payloadImages : undefined;
+          const filesArg = payloadFiles.length > 0 ? payloadFiles : undefined;
+          // The agent is idle at drain start, so the first item must start a
+          // new turn via `prompt`. Anything after it rides behind the now
+          // active run via `follow_up` (a sequential `prompt` would 409 as
+          // "agent is active").
+          if (index === 0) {
+            await api.prompt(agentId, item.text, imagesArg, filesArg);
+          } else {
+            await api.followUp(agentId, item.text, imagesArg, filesArg);
+          }
         } catch (cause) {
           const failedIndex = pending.indexOf(item);
           setQueue((current) => [...pending.slice(failedIndex), ...current]);
