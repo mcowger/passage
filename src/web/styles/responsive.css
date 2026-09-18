@@ -32,6 +32,37 @@
   .workspace-nav-actions { flex: none; }
   .workspace-nav-actions .nav-action-btn { padding: 5px 6px; font-size: 12px; }
   .workspace-nav-actions .nav-action-btn kbd { display: none; }
+  /* Mobile context bar replaces the desktop tab strip: one compact row with
+     drawer access, a tappable workspace/destination title (opens the session
+     switcher), and an overflow menu. No hidden horizontal scrolling. */
+  .mobile-context-wrap { flex: 0 0 auto; background: var(--background); border-bottom: 1px solid var(--border); }
+  .mobile-context-bar { display: flex; align-items: center; gap: 4px; min-height: 52px; padding: 4px 8px; }
+  .mobile-context-icon-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; border: 0; border-radius: 8px; background: none; color: var(--foreground); }
+  .mobile-context-icon-btn:hover { background: var(--surface-hover); }
+  .mobile-context-title { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 2px 8px; border: 0; border-radius: 8px; background: none; text-align: left; color: var(--foreground); }
+  .mobile-context-title:hover { background: var(--surface-hover); }
+  .mobile-context-workspace { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .mobile-context-dest { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; max-width: 100%; }
+  .mobile-context-dest-text { overflow: hidden; text-overflow: ellipsis; }
+  .mobile-context-dest-meta { flex: none; }
+  .mobile-back-bar { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0 16px; border: 0; border-top: 1px solid var(--border); background: var(--surface-subtle); color: var(--foreground); font-size: 13px; font-weight: 600; }
+  .mobile-back-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* WS health indicator inside the context bar: same real heartbeat status
+     as the topbar/sidebar footer, kept compact so the title keeps priority. */
+  .mobile-context-health { flex: none; padding: 0 2px; font-size: 11px; }
+  /* Session switcher bottom sheet (positioning via tailwind-merge classnames
+     on DialogContent; only non-conflicting surface rules live here). */
+  .mobile-sheet-content { border: 0; border-top: 1px solid var(--border); }
+  .mobile-sheet-list { overflow-y: auto; max-height: calc(80dvh - 16px); padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); }
+  .mobile-sheet-section { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding: 10px 12px 4px; }
+  .mobile-sheet-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 12px; border: 0; border-radius: 8px; background: none; color: var(--foreground); text-align: left; }
+  .mobile-sheet-row:hover { background: var(--surface-hover); }
+  .mobile-sheet-row.current { background: var(--surface-selected); }
+  .mobile-sheet-row-main { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; flex: 1 1 auto; }
+  .mobile-sheet-row-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .mobile-sheet-row-meta { font-size: 12px; color: var(--muted); }
+  .mobile-sheet-empty { font-size: 12.5px; color: var(--muted); padding: 4px 12px 8px; }
+  .mobile-sheet-check { font-weight: 700; color: var(--accent); }
   /* Composer toolbar wraps so the Send button is never clipped off-screen. */
   .composer-toolbar { flex-wrap: wrap; row-gap: 8px; }
   .composer-toolbar-left { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }

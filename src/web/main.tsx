@@ -5,7 +5,7 @@ import type { WorkspaceSnapshot, Workspace } from "../shared/domain/workspaces.t
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import type { WebPreview } from "../shared/domain/previews.ts";
 import type { PaneTab, WorkspaceLayout, LayoutNode } from "../shared/domain/layout.ts";
-import { addTabToGroup, countTabsOfKind, createDefaultLayout, findFirstDeadTerminalTab, findTab, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs, setActiveTabInTree, updateTabInTree } from "../shared/domain/layout.ts";
+import { addTabToGroup, countTabsOfKind, createDefaultLayout, findFirstDeadTerminalTab, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs, updateTabInTree } from "../shared/domain/layout.ts";
 import type { WorkspaceSettings } from "../shared/domain/settings.ts";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
 import type { ThemePack, FontMapping, FontOption } from "../shared/domain/customization.ts";
@@ -18,6 +18,8 @@ import type { ConnectionHealth } from "./socketLifecycle.ts";
 import type { DaemonLifecycleSnapshot } from "./api.ts";
 import type { WorkspaceActionRun } from "../shared/domain/workspace-actions.ts";
 import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
+import { MobileContextBar, MobileSessionSheet, type MobileDestinationKind, type MobileReturn } from "./components/MobileNav.tsx";
+import { AGENT_STATUS_LABEL, getAgentStatusKind } from "./components/agentStatus.ts";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { WsHealthIndicator } from "./components/WsHealthIndicator.tsx";
 import { WorkspaceDetailsModal } from "./components/WorkspaceDetailsModal.tsx";
@@ -192,6 +194,8 @@ function App() {
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>();
   const [activeTab, setActiveTab] = useState<TabKind>("agent");
+  const [mobileReturnTo, setMobileReturnTo] = useState<MobileReturn | null>(null);
+  const [mobileSessionOpen, setMobileSessionOpen] = useState(false);
   const [openEditorPath, setOpenEditorPath] = useState<string>();
   const [openDiffPath, setOpenDiffPath] = useState<string>();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -558,6 +562,64 @@ function App() {
   const selectedTerminal = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
   const isGitWorkspace = workspace?.mainRepositoryRoot != null;
 
+  // Mobile return stack: leaving a working destination for Files, an editor,
+  // or another surface records where "Back to …" should return. Explicit
+  // jumps (switcher, back button, selecting the agent) clear it.
+  const buildMobileReturn = (): MobileReturn | null => {
+    if (activeTab === "agent") {
+      const target = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
+      if (!target) return null;
+      return { kind: "agent", targetId: target.id, label: target.title };
+    }
+    if (activeTab === "terminal") {
+      const target = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
+      if (!target) return null;
+      return { kind: "terminal", targetId: target.id, label: target.title };
+    }
+    if (activeTab === "preview") {
+      const target = previews.find((p) => p.id === selectedPreviewId) ?? previews[0];
+      if (!target) return null;
+      return { kind: "preview", targetId: target.id, label: target.label };
+    }
+    if (activeTab === "explorer") return { kind: "explorer", label: "Files" };
+    if (activeTab === "changes") return { kind: "changes", label: "Changes" };
+    if (activeTab === "overview") return { kind: "overview", label: "Overview" };
+    return null;
+  };
+
+  const captureMobileReturn = () => {
+    if (!isMobile) return;
+    setMobileReturnTo((current) => current ?? buildMobileReturn());
+  };
+  // Ref-stable capturer for memoized callbacks (openEditorFile/openDiffFile)
+  // whose closures predate the latest render.
+  const captureMobileReturnRef = useRef(captureMobileReturn);
+  captureMobileReturnRef.current = captureMobileReturn;
+
+  const mobileDest: { kind: MobileDestinationKind; title: string; meta?: string } = (() => {
+    if (activeTab === "agent") {
+      const current = agents.find((a) => a.id === selectedAgentId) ?? agents[0];
+      return current
+        ? { kind: "agent", title: current.title, meta: AGENT_STATUS_LABEL[getAgentStatusKind(current)] }
+        : { kind: "agent", title: "Agent" };
+    }
+    if (activeTab === "terminal") {
+      const current = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
+      return { kind: "terminal", title: current?.title ?? "Terminal" };
+    }
+    if (activeTab === "preview") {
+      const current = previews.find((p) => p.id === selectedPreviewId) ?? previews[0];
+      return { kind: "preview", title: current?.label ?? "Preview" };
+    }
+    if (activeTab === "explorer") return { kind: "explorer", title: "Files" };
+    if (activeTab === "changes") return { kind: "changes", title: "Changes" };
+    if (activeTab === "overview") return { kind: "overview", title: "Overview" };
+    if (activeTab === "editor") {
+      return { kind: "editor", title: openEditorPath?.split("/").pop() ?? "Editor" };
+    }
+    return { kind: "diff", title: openDiffPath ? `Diff: ${openDiffPath.split("/").pop()}` : "Diff" };
+  })();
+
   // Resources are ended when their canvas pane closes, so the top-bar counts
   // reflect the tabs actually present for the current workspace rather than
   // any durable rows left behind by an earlier session.
@@ -615,6 +677,7 @@ function App() {
   );
 
   const openEditorFile = useCallback((path: string) => {
+    captureMobileReturnRef.current();
     setOpenEditorPath(path);
     setActiveTab("editor");
     openPaneTab({
@@ -626,6 +689,7 @@ function App() {
   }, [openPaneTab]);
 
   const openDiffFile = useCallback((path: string) => {
+    captureMobileReturnRef.current();
     setOpenDiffPath(path);
     setActiveTab("diff");
     openPaneTab({
@@ -873,6 +937,7 @@ function App() {
     setSelectedPreviewId(id);
     setActiveTab("preview");
     setDrawerOpen(false);
+    setMobileReturnTo(null);
     const previewObj = previews.find((p) => p.id === id);
     if (previewObj) {
       openPaneTab({
@@ -925,6 +990,7 @@ function App() {
     setSelectedAgentId(id);
     setActiveTab("agent");
     setDrawerOpen(false);
+    setMobileReturnTo(null);
     const agentObj = agents.find((a) => a.id === id);
     if (agentObj) {
       openPaneTab({
@@ -940,6 +1006,7 @@ function App() {
     setSelectedTerminalId(id);
     setActiveTab("terminal");
     setDrawerOpen(false);
+    setMobileReturnTo(null);
     const termObj = terminals.find((t) => t.id === id);
     if (termObj) {
       openPaneTab({
@@ -995,6 +1062,31 @@ function App() {
     setSelectedPreviewId(undefined);
     setActiveTab("agent");
     setDrawerOpen(false);
+    setMobileReturnTo(null);
+  };
+
+  const goMobileBack = () => {
+    const ret = mobileReturnTo;
+    if (!ret) return;
+    setMobileReturnTo(null);
+    setMobileSessionOpen(false);
+    if (ret.kind === "agent" && ret.targetId) {
+      handleSelectAgent(ret.targetId);
+      return;
+    }
+    if (ret.kind === "terminal" && ret.targetId) {
+      handleSelectTerminal(ret.targetId);
+      return;
+    }
+    if (ret.kind === "preview" && ret.targetId) {
+      handleSelectPreview(ret.targetId);
+      return;
+    }
+    if (!workspace) return;
+    if (ret.kind === "explorer" || ret.kind === "changes" || ret.kind === "overview") {
+      setActiveTab(ret.kind);
+      openPaneTab({ id: `${ret.kind}-${workspace.id}`, kind: ret.kind, title: ret.label });
+    }
   };
 
   // After a merged workspace is deleted, land on the home empty state rather
@@ -1056,10 +1148,12 @@ function App() {
             onOpenAgent={handleSelectAgent}
             onNewTerminal={() => void createTerminal()}
             onOpenFiles={() => {
+              captureMobileReturn();
               setActiveTab("explorer");
               openPaneTab({ id: `explorer-${workspace.id}`, kind: "explorer", title: "Files" });
             }}
             onOpenChanges={() => {
+              captureMobileReturn();
               setActiveTab("changes");
               openPaneTab({ id: `changes-${workspace.id}`, kind: "changes", title: "Changes" });
             }}
@@ -1260,6 +1354,11 @@ function App() {
         </div>
       )}
 
+      {/* No workspace (or desktop, where CSS hides this): the topbar carries
+       *  the drawer button and the always-visible WS health indicator. With
+       *  a workspace on mobile the context bar below takes over both roles,
+       *  so the topbar stays out of the way instead of doubling the chrome. */}
+      {(!isMobile || !workspace) && (
       <div className="mobile-topbar">
         <button className="mobile-nav" onClick={() => setDrawerOpen(true)} aria-label="Open navigation">
           <span aria-hidden="true">☰</span> Navigate
@@ -1269,6 +1368,7 @@ function App() {
          *  the same real WS heartbeat status (docs/IOSWEBSOCKETS.md). */}
         <WsHealthIndicator health={wsHealth} />
       </div>
+      )}
 
       {snapshot ? (
         <Sidebar
@@ -1325,7 +1425,26 @@ function App() {
 
         {workspace ? (
           <div className="workspace-container">
-            {/* Top Command & Settings Bar */}
+            {/* Mobile context bar, or the desktop tab strip */}
+            {isMobile ? (
+              <MobileContextBar
+                workspaceLabel={workspace.displayLabel}
+                destKind={mobileDest.kind}
+                destTitle={mobileDest.title}
+                destMeta={mobileDest.meta}
+                returnLabel={mobileReturnTo?.label ?? null}
+                wsHealth={wsHealth}
+                onOpenDrawer={() => setDrawerOpen(true)}
+                onOpenSwitcher={() => setMobileSessionOpen(true)}
+                onBack={goMobileBack}
+                onNewAgent={() => { setMobileReturnTo(null); void createAgent(); }}
+                onNewTerminal={() => { setMobileReturnTo(null); void createTerminal(); }}
+                onNewPreview={() => { setMobileReturnTo(null); void createPreview(); }}
+                onOpenCommands={() => setCommandPaletteOpen(true)}
+                onOpenSettings={() => setSettingsModalOpen(true)}
+                onOpenWorkspaceDetails={() => setWorkspaceDetailsOpen(true)}
+              />
+            ) : (
             <nav className="workspace-nav-bar" aria-label="Workspace views">
               <div className="workspace-nav-brand min-w-0 max-w-[30vw] flex items-center gap-1.5">
                 <button
@@ -1349,139 +1468,36 @@ function App() {
                 </button>
               </div>
               <div className="nav-tabs shrink-0">
-                {isMobile ? (
-                  <>
-                    <button
-                      type="button"
-                      className={`nav-tab ${activeTab === "agent" ? "active" : ""}`}
-                      aria-label="Go to agent session"
-                      title="Go to agent session"
-                      onClick={() => {
-                        const target = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
-                        if (target) handleSelectAgent(target.id);
-                        else void createAgent();
-                      }}
-                    >
-                      ◈ Agent
-                      {openAgentCount > 0 && <span className="tab-badge">{openAgentCount}</span>}
-                    </button>
-                    <button
-                      type="button"
-                      className="nav-tab"
-                      aria-label="Create new agent session"
-                      title="Create new agent session"
-                      onClick={() => void createAgent()}
-                    >
-                      <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    className={`nav-tab ${activeTab === "agent" ? "active" : ""}`}
-                    aria-label="Create new agent session"
-                    title="Create new agent session"
-                    onClick={() => void createAgent()}
-                  >
-                    ◈ Agent <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                    {openAgentCount > 0 && <span className="tab-badge">{openAgentCount}</span>}
-                  </button>
-                )}
-                {isMobile ? (
-                  <>
-                    <button
-                      type="button"
-                      className={`nav-tab ${activeTab === "terminal" ? "active" : ""}`}
-                      aria-label="Go to terminal session"
-                      title="Go to terminal session"
-                      onClick={() => {
-                        const target = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
-                        if (target) {
-                          handleSelectTerminal(target.id);
-                        } else {
-                          const liveIds = new Set(terminals.map((t) => t.id));
-                          const deadTab = layout ? findFirstDeadTerminalTab(layout.root, liveIds) : null;
-                          if (deadTab) {
-                            setActiveTab("terminal");
-                            handleActivateTab(deadTab);
-                            if (layout) {
-                              const found = findTab(layout.root, deadTab.id);
-                              if (found) {
-                                handleLayoutChange({ ...layout, root: setActiveTabInTree(layout.root, found.node.id, deadTab.id) });
-                              }
-                            }
-                          } else {
-                            void createTerminal();
-                          }
-                        }
-                      }}
-                    >
-                      &gt;_ Terminal
-                      {openTerminalCount > 0 && <span className="tab-badge">{openTerminalCount}</span>}
-                    </button>
-                    <button
-                      type="button"
-                      className="nav-tab"
-                      aria-label="Create new terminal"
-                      title="Create new terminal"
-                      onClick={() => void createTerminal()}
-                    >
-                      <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    className={`nav-tab ${activeTab === "terminal" ? "active" : ""}`}
-                    aria-label="Create new terminal"
-                    title="Create new terminal"
-                    onClick={() => void createTerminal()}
-                  >
-                    &gt;_ Terminal <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                    {openTerminalCount > 0 && <span className="tab-badge">{openTerminalCount}</span>}
-                  </button>
-                )}
-                {isMobile ? (
-                  <>
-                    <button
-                      type="button"
-                      className={`nav-tab ${activeTab === "preview" ? "active" : ""}`}
-                      aria-label="Go to web preview"
-                      title="Go to web preview"
-                      onClick={() => {
-                        const target = previews.find((p) => p.id === selectedPreviewId) ?? previews[0];
-                        if (target) {
-                          handleSelectPreview(target.id);
-                        } else {
-                          void createPreview();
-                        }
-                      }}
-                    >
-                      ◉ Preview
-                      {openPreviewCount > 0 && <span className="tab-badge">{openPreviewCount}</span>}
-                    </button>
-                    <button
-                      type="button"
-                      className="nav-tab"
-                      aria-label="Create new web preview"
-                      title="Create new web preview"
-                      onClick={() => void createPreview()}
-                    >
-                      <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    className={`nav-tab ${activeTab === "preview" ? "active" : ""}`}
-                    aria-label="Create new web preview"
-                    title="Create new web preview"
-                    onClick={() => void createPreview()}
-                  >
-                    ◉ Preview <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                    {openPreviewCount > 0 && <span className="tab-badge">{openPreviewCount}</span>}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className={`nav-tab ${activeTab === "agent" ? "active" : ""}`}
+                  aria-label="Create new agent session"
+                  title="Create new agent session"
+                  onClick={() => void createAgent()}
+                >
+                  ◈ Agent <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                  {openAgentCount > 0 && <span className="tab-badge">{openAgentCount}</span>}
+                </button>
+                <button
+                  type="button"
+                  className={`nav-tab ${activeTab === "terminal" ? "active" : ""}`}
+                  aria-label="Create new terminal"
+                  title="Create new terminal"
+                  onClick={() => void createTerminal()}
+                >
+                  &gt;_ Terminal <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                  {openTerminalCount > 0 && <span className="tab-badge">{openTerminalCount}</span>}
+                </button>
+                <button
+                  type="button"
+                  className={`nav-tab ${activeTab === "preview" ? "active" : ""}`}
+                  aria-label="Create new web preview"
+                  title="Create new web preview"
+                  onClick={() => void createPreview()}
+                >
+                  ◉ Preview <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                  {openPreviewCount > 0 && <span className="tab-badge">{openPreviewCount}</span>}
+                </button>
                 <button
                   className={`nav-tab ${activeTab === "explorer" ? "active" : ""}`}
                   onClick={() => {
@@ -1523,6 +1539,7 @@ function App() {
                 </button>
               </div>
             </nav>
+            )}
 
             {/* Split Canvas for Desktop, Single active tab view for Mobile */}
             <div className="workspace-view">
@@ -1574,6 +1591,38 @@ function App() {
         )}
       </main>
 
+      {/* Mobile session switcher */}
+      {workspace && (
+      <MobileSessionSheet
+        open={mobileSessionOpen}
+        onClose={() => setMobileSessionOpen(false)}
+        agents={agents}
+        terminals={terminals}
+        previews={previews}
+        showChanges={isGitWorkspace}
+        currentKind={activeTab}
+        currentTargetId={activeTab === "agent" ? selectedAgentId : activeTab === "terminal" ? selectedTerminalId : activeTab === "preview" ? selectedPreviewId : activeTab === "editor" ? openEditorPath : activeTab === "diff" ? openDiffPath : undefined}
+        selectedAgentId={selectedAgentId}
+        selectedTerminalId={selectedTerminalId}
+        selectedPreviewId={selectedPreviewId}
+        onSelectAgent={handleSelectAgent}
+        onSelectTerminal={handleSelectTerminal}
+        onSelectPreview={handleSelectPreview}
+        onOpenFiles={() => {
+          captureMobileReturn();
+          setActiveTab("explorer");
+          openPaneTab({ id: `explorer-${workspace.id}`, kind: "explorer", title: "Files" });
+        }}
+        onOpenChanges={() => {
+          captureMobileReturn();
+          setActiveTab("changes");
+          openPaneTab({ id: `changes-${workspace.id}`, kind: "changes", title: "Changes" });
+        }}
+        onNewAgent={() => { setMobileReturnTo(null); void createAgent(); }}
+        onNewTerminal={() => { setMobileReturnTo(null); void createTerminal(); }}
+      />
+      )}
+
       {/* Command Palette */}
       <CommandPalette
         open={commandPaletteOpen}
@@ -1588,6 +1637,7 @@ function App() {
         onSelectTerminal={handleSelectTerminal}
         onOpenView={(view) => {
           if ((view === "changes" || view === "diff") && !isGitWorkspace) return;
+          captureMobileReturn();
           setActiveTab(view);
           if (workspace) openPaneTab({ id: `${view}-${workspace.id}`, kind: view, title: view });
         }}
