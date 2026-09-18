@@ -160,6 +160,15 @@
   font-family: var(--font-mono);
 }
 
+/* Thinking & Effort section embedded in the model chooser popover */
+.model-thinking-section {
+  border-top: 1px solid var(--border);
+  padding: 4px;
+}
+.model-thinking-section .popover-header-title {
+  border-bottom: 0;
+}
+
 /* Thinking Popover */
 .thinking-popover {
   position: absolute;

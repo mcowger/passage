@@ -75,8 +75,7 @@ export function ModelPicker({
   onSelectThinking,
   disabled,
 }: ModelPickerProps) {
-  const [modelOpen, setModelOpen] = useState(false);
-  const [thinkingOpen, setThinkingOpen] = useState(false);
+  const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
   const [favorites, setFavorites] = useState<string[]>(() => {
@@ -134,8 +133,8 @@ export function ModelPicker({
 
   // Reset search on open
   useEffect(() => {
-    if (modelOpen) setSearch("");
-  }, [modelOpen]);
+    if (open) setSearch("");
+  }, [open]);
 
   // Grouped sections for display (search filtering is handled by cmdk)
   const sections = useMemo<ModelSection[]>(() => {
@@ -166,7 +165,7 @@ export function ModelPicker({
   const selectModel = (provider: string, id: string) => {
     addRecent(`${provider}:${id}`);
     void onSelectModel(provider, id);
-    setModelOpen(false);
+    setOpen(false);
   };
 
   const cycleThinking = (delta: 1 | -1) => {
@@ -177,24 +176,16 @@ export function ModelPicker({
 
   return (
     <div className="model-picker-container">
-      {/* Model Chooser Chip Button */}
-      <Popover
-        open={modelOpen}
-        onOpenChange={(isOpen) => {
-          setModelOpen(isOpen);
-          if (isOpen) setThinkingOpen(false);
-        }}
-      >
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
             className="composer-chip-btn"
             disabled={disabled || availableModels.length === 0}
-            title={`Active Model: ${currentModelName}`}
+            title={`Active Model: ${currentModelName} · Thinking: ${currentThinking}`}
             aria-haspopup="dialog"
-            aria-expanded={modelOpen}
+            aria-expanded={open}
           >
-            <span className="chip-sparkle">❖</span>
             <span className="chip-label">{currentModelName}</span>
           </button>
         </PopoverTrigger>
@@ -265,64 +256,39 @@ export function ModelPicker({
                 </CommandGroup>
               ))}
             </CommandList>
+            <div className="model-thinking-section">
+              <div className="popover-header-title px-2 py-1.5">Thinking & Effort</div>
+              <div role="listbox" aria-label="Select thinking effort">
+                {thinkingOptions.map((level) => (
+                  <div
+                    key={level}
+                    role="option"
+                    aria-selected={level === currentThinking}
+                    className={`thinking-option-row ${level === currentThinking ? "active" : ""}`}
+                    onClick={() => {
+                      void onSelectThinking(level);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        void onSelectThinking(level);
+                      }
+                    }}
+                    tabIndex={0}
+                  >
+                    <ThinkingSignalBars options={thinkingOptions} current={level} />
+                    <span className="thinking-option-name">{level}</span>
+                    {level === currentThinking && <span className="check-icon">✓</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="model-popover-footer">
               <span>↑↓ navigate</span>
               <span>Tab switch agent</span>
               <span>←→ thinking</span>
             </div>
           </Command>
-        </PopoverContent>
-      </Popover>
-
-      {/* Thinking / Effort Chip Button */}
-      <Popover
-        open={thinkingOpen}
-        onOpenChange={(isOpen) => {
-          setThinkingOpen(isOpen);
-          if (isOpen) setModelOpen(false);
-        }}
-      >
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            className="composer-chip-btn blue"
-            disabled={disabled || thinkingOptions.length === 0}
-            title={`Thinking / Effort: ${currentThinking}`}
-            aria-label={`Thinking effort: ${currentThinking}. Activate to change.`}
-            aria-haspopup="listbox"
-            aria-expanded={thinkingOpen}
-          >
-            <ThinkingSignalBars options={thinkingOptions} current={currentThinking} />
-          </button>
-        </PopoverTrigger>
-        <PopoverContent className="thinking-popover w-56 p-1" align="start" sideOffset={6}>
-          <div className="popover-header-title px-2 py-1.5">Thinking & Effort</div>
-          <div role="listbox" aria-label="Select thinking effort">
-            {thinkingOptions.map((level) => (
-              <div
-                key={level}
-                role="option"
-                aria-selected={level === currentThinking}
-                className={`thinking-option-row ${level === currentThinking ? "active" : ""}`}
-                onClick={() => {
-                  void onSelectThinking(level);
-                  setThinkingOpen(false);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    void onSelectThinking(level);
-                    setThinkingOpen(false);
-                  }
-                }}
-                tabIndex={0}
-              >
-                <ThinkingSignalBars options={thinkingOptions} current={level} />
-                <span className="thinking-option-name">{level}</span>
-                {level === currentThinking && <span className="check-icon">✓</span>}
-              </div>
-            ))}
-          </div>
         </PopoverContent>
       </Popover>
     </div>
