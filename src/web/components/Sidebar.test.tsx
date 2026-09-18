@@ -162,4 +162,47 @@ describe("Sidebar", () => {
     expect(offlineHtml).toContain("Disconnected");
     expect(offlineHtml).toContain("ws-offline");
   });
+
+  test("default-only projects start collapsed while projects with worktrees stay expanded", () => {
+    const base = { open: false, onClose: () => {}, onSelect: () => {}, onNewProject: () => {}, onNewWorktree: () => {}, agents: [] as never[] };
+    const defaultOnly: WorkspaceSnapshot = {
+      projects: [
+        {
+          id: "prj-1",
+          configuredRootPath: "/tmp/project",
+          canonicalRootPath: "/tmp/project",
+          displayLabel: "Project",
+          archivedAt: null,
+        },
+      ],
+      workspaces: [
+        {
+          id: "wsp-default",
+          projectId: "prj-1",
+          kind: "directory",
+          cwd: "/tmp/project",
+          checkoutRoot: "/tmp/project",
+          mainRepositoryRoot: "/tmp/project",
+          branchRef: null,
+          displayLabel: "Default",
+          locationId: null,
+          ownershipState: "active",
+          markerId: null,
+          markerPath: null,
+          repairDetail: null,
+          archivedAt: null,
+        },
+      ],
+      locations: [],
+    };
+
+    // No stored override in SSR (no window/localStorage), so the default applies.
+    const collapsedHtml = ReactDOMServer.renderToString(React.createElement(Sidebar, { ...base, data: defaultOnly }));
+    expect(collapsedHtml).toContain('aria-expanded="false"');
+    expect(collapsedHtml).not.toContain("workspace-list");
+
+    const expandedHtml = ReactDOMServer.renderToString(React.createElement(Sidebar, { ...base, data: snapshot }));
+    expect(expandedHtml).toContain('aria-expanded="true"');
+    expect(expandedHtml).toContain("workspace-list");
+  });
 });

@@ -226,7 +226,18 @@ function ProjectRow({
   onDiscoverWorktrees?: (projectId?: string) => void;
   onRequestRemoveProject?: (project: Project) => void;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsedKey = `passage:project-collapsed:${project.id}`;
+  const [collapsedOverride, setCollapsedOverride] = useState<boolean | null>(() => {
+    try {
+      if (typeof window === "undefined" || typeof localStorage === "undefined") return null;
+      const raw = localStorage.getItem(collapsedKey);
+      if (raw === "1") return true;
+      if (raw === "0") return false;
+      return null;
+    } catch {
+      return null;
+    }
+  });
   const isDefaultWorkspace = (workspace: Workspace) =>
     workspace.kind !== "worktree" && workspace.cwd === project.canonicalRootPath;
   const byLabel = (a: Workspace, b: Workspace) => {
@@ -242,6 +253,19 @@ function ProjectRow({
     .sort(byLabel);
   const [showArchived, setShowArchived] = useState(false);
   const rows = showArchived ? [...activeRows, ...archivedRows] : activeRows;
+  // Default-only projects (no real worktrees) start collapsed to cut noise.
+  // An explicit user toggle wins and is persisted per project; otherwise the
+  // default follows the current rows so a new worktree auto-expands.
+  const defaultCollapsed = !activeRows.some((workspace) => !isDefaultWorkspace(workspace));
+  const collapsed = collapsedOverride ?? defaultCollapsed;
+  const setCollapsed = (next: boolean) => {
+    setCollapsedOverride(next);
+    try {
+      localStorage.setItem(collapsedKey, next ? "1" : "0");
+    } catch {
+      /* storage unavailable (private mode, SSR) -- session state still works */
+    }
+  };
   return (
     <section className="project">
       <div
@@ -250,7 +274,7 @@ function ProjectRow({
         role="button"
         tabIndex={0}
         aria-expanded={!collapsed}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setCollapsed(!collapsed); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setCollapsed(!collapsed); } }}
       >
         <span className="project-chevron shrink-0" aria-hidden="true">
           {collapsed ? <ChevronRight className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}
@@ -258,6 +282,20 @@ function ProjectRow({
         <Folder className="w-3.5 h-3.5 text-muted-foreground/80 shrink-0" />
         <strong className="min-w-0 flex-1 truncate" title={project.displayLabel}>{project.displayLabel}</strong>
         <code title={project.canonicalRootPath}>{project.canonicalRootPath}</code>
+        {onNewWorktree && (
+          <button
+            type="button"
+            className="project-new-hover opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground transition-opacity ml-1 shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              onNewWorktree(project.id);
+            }}
+            title="New worktree"
+            aria-label={`New worktree in ${project.displayLabel}`}
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+        )}
         {onDiscoverWorktrees && (
           <button
             type="button"
@@ -372,7 +410,7 @@ function ProjectRow({
           {onNewWorktree && (
             <button
               type="button"
-              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors px-2 py-1 mt-0.5 text-left flex items-center gap-1 cursor-pointer"
+              className="new-worktree-row text-[11px] text-muted-foreground hover:text-foreground transition-colors px-2 py-1 mt-0.5 text-left items-center gap-1 cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
                 onNewWorktree(project.id);

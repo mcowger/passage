@@ -86,6 +86,10 @@
    stays an accelerator, never the only route to archive or manage a resource. */
 @media (pointer: coarse), (max-width: 640px) {
   .touch-visible { opacity: 1; }
+  /* No hover on touch/narrow: hide the desktop header "+" and restore the
+     explicit per-project row button instead. */
+  .project-new-hover { display: none; }
+  .new-worktree-row { display: flex; }
 }
 
 @media (prefers-reduced-motion: reduce) {
