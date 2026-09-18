@@ -655,13 +655,17 @@ function App() {
 
   const handleSaveSettings = useCallback(
     async (nextSettings: WorkspaceSettings) => {
-      setSettings(nextSettings);
-      if (selectedWorkspaceId) {
-        await api.saveSettings(selectedWorkspaceId, nextSettings);
-      }
-      const activeTheme = themes.find((t) => t.id === nextSettings.themeId) ?? themes[0];
+      // Shared fields (theme/fonts/prompts/suggestion model/default display
+      // options) are stored globally: adopt the server-merged snapshot so
+      // local state never diverges from what a restart or another workspace
+      // will read back.
+      const saved = selectedWorkspaceId
+        ? await api.saveSettings(selectedWorkspaceId, nextSettings)
+        : nextSettings;
+      setSettings(saved);
+      const activeTheme = themes.find((t) => t.id === saved.themeId) ?? themes[0];
       applyThemeTokens(activeTheme);
-      applyFontTokens(nextSettings.fonts, fontOptions);
+      applyFontTokens(saved.fonts, fontOptions);
     },
     [api, selectedWorkspaceId, themes, fontOptions]
   );

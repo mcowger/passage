@@ -125,8 +125,8 @@ export class WorkspaceService {
     return parsed;
   }
 
-  /** Global appearance (theme/fonts) shared by every workspace. Reads adopt
-   *  a legacy per-workspace row once on upgrade so pre-existing theme/font
+  /** All settings are global, stored once and shared by every workspace.
+   *  Reads adopt a legacy per-workspace row once on upgrade so pre-existing
    *  choices survive the move to global storage. */
   getAppearance(seed?: unknown): AppearanceSettings {
     const stored = this.repositories.appSettings.get(APPEARANCE_SETTINGS_KEY);
@@ -141,7 +141,14 @@ export class WorkspaceService {
         return fromRow.data;
       }
     }
-    return { ...DEFAULT_APPEARANCE_SETTINGS, fonts: { ...DEFAULT_APPEARANCE_SETTINGS.fonts } };
+    return {
+      ...DEFAULT_APPEARANCE_SETTINGS,
+      fonts: { ...DEFAULT_APPEARANCE_SETTINGS.fonts },
+      timelineExpansion: {
+        ...DEFAULT_APPEARANCE_SETTINGS.timelineExpansion,
+        tools: { ...DEFAULT_APPEARANCE_SETTINGS.timelineExpansion.tools },
+      },
+    };
   }
 
   saveAppearance(appearance: AppearanceSettings): AppearanceSettings {
@@ -165,7 +172,7 @@ export class WorkspaceService {
   saveSettings(workspaceId: string, settings: WorkspaceSettings): WorkspaceSettings {
     this.requireWorkspace(workspaceId);
     const parsed = workspaceSettingsSchema.parse(settings);
-    this.saveAppearance({ themeId: parsed.themeId, fonts: parsed.fonts, worktreePrompt: parsed.worktreePrompt, titlePrompt: parsed.titlePrompt, commitPrompt: parsed.commitPrompt });
+    this.saveAppearance(parsed);
     this.repositories.workspaces.savePreferences(workspaceId, parsed);
     return this.getSettings(workspaceId);
   }

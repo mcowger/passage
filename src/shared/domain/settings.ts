@@ -133,10 +133,9 @@ export function renderCommitPrompt(template: string, files: string, diff: string
   return out;
 }
 
-/** Appearance preferences shared across every workspace: a theme change in
- *  one workspace applies everywhere, so a refresh that lands on another
- *  workspace never appears to lose the user's theme/fonts. Prompt templates
- *  are global for the same reason. */
+/** All settings are global: a change in one workspace applies everywhere,
+ *  so a refresh that lands on another workspace never appears to lose the
+ *  user's settings. There are no per-workspace settings. */
 export const appearanceSettingsSchema = z.object({
   themeId: z.string().min(1).max(64).default("passage-light"),
   /** Per-surface font mapping (ui, mono, editor, xterm), each a font catalog id. */
@@ -145,6 +144,18 @@ export const appearanceSettingsSchema = z.object({
   worktreePrompt: promptTemplateSchema.default(""),
   titlePrompt: promptTemplateSchema.default(""),
   commitPrompt: promptTemplateSchema.default(""),
+  suggestModel: z.string().trim().max(256).default(""),
+  /** Thinking level for suggestion-model runs (agent auto-titles,
+   *  worktree metadata). Empty means the pi default. Constrained to the
+   *  chosen model's supported levels in the UI; the daemon passes it
+   *  through verbatim. */
+  suggestThinkingLevel: z.string().trim().max(256).default(""),
+  timelineExpansion: timelineExpansionSchema.default(DEFAULT_TIMELINE_EXPANSION),
+  toolRendererPackId: z.string().min(1).max(64).default("builtin"),
+  notificationsEnabled: z.boolean().default(false),
+  editorWordWrap: z.boolean().default(true),
+  editorTabSize: z.number().int().min(1).max(8).default(2),
+  terminalFontSize: z.number().int().min(9).max(32).default(13),
 });
 export type AppearanceSettings = z.infer<typeof appearanceSettingsSchema>;
 
@@ -154,22 +165,23 @@ export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
   worktreePrompt: "",
   titlePrompt: "",
   commitPrompt: "",
+  suggestModel: "",
+  suggestThinkingLevel: "",
+  timelineExpansion: {
+    ...DEFAULT_TIMELINE_EXPANSION,
+    tools: { ...DEFAULT_TIMELINE_EXPANSION.tools },
+  },
+  toolRendererPackId: "builtin",
+  notificationsEnabled: false,
+  editorWordWrap: true,
+  editorTabSize: 2,
+  terminalFontSize: 13,
 };
 
-export const workspaceSettingsSchema = appearanceSettingsSchema.extend({
-  toolRendererPackId: z.string().min(1).max(64).default("builtin"),
-  notificationsEnabled: z.boolean().default(false),
-  editorWordWrap: z.boolean().default(true),
-  editorTabSize: z.number().int().min(1).max(8).default(2),
-  terminalFontSize: z.number().int().min(9).max(32).default(13),
-  suggestModel: z.string().trim().max(256).default(""),
-  /** Thinking level for suggestion-model runs (agent auto-titles,
-   *  worktree metadata). Empty means the pi default. Constrained to the
-   *  chosen model's supported levels in the UI; the daemon passes it
-   *  through verbatim. */
-  suggestThinkingLevel: z.string().trim().max(256).default(""),
-  timelineExpansion: timelineExpansionSchema.default(DEFAULT_TIMELINE_EXPANSION),
-});
+/** Workspace settings are global: same shape as appearance, stored once and
+ *  merged into every workspace's settings response. There are no
+ *  per-workspace settings. */
+export const workspaceSettingsSchema = appearanceSettingsSchema;
 export type WorkspaceSettings = z.infer<typeof workspaceSettingsSchema>;
 
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
@@ -185,5 +197,8 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   terminalFontSize: 13,
   suggestModel: "",
   suggestThinkingLevel: "",
-  timelineExpansion: DEFAULT_TIMELINE_EXPANSION,
+  timelineExpansion: {
+    ...DEFAULT_TIMELINE_EXPANSION,
+    tools: { ...DEFAULT_TIMELINE_EXPANSION.tools },
+  },
 };

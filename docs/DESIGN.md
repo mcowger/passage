@@ -167,7 +167,7 @@ Project
     ├── Files and editors (explorer, editor, changes, diff)
     ├── Web preview(s)    ── workspace-bound agent-browser sessions
     ├── Workspace action(s) ── setup runs from paseo.json (daemon memory only)
-    └── Per-workspace pane layout + per-workspace settings
+    └── Per-workspace pane layout + global settings
 ```
 
 Definitions:
@@ -764,17 +764,17 @@ Four builtin themes ship (`passage-light` default warm light,
 `chip*`/`secondary*`, `diffAdd/Remove/Hunk*`,
 `terminalBackground/Foreground`, `editorBackground`). A bundled font catalog
 (`AVAILABLE_FONTS`: 5 sans UI fonts, 9 Nerd Font Mono families served over
-`GET /api/customization/font-options`) backs global appearance settings
-(`appearanceSettingsSchema`): `themeId`, `fonts` (per-surface mapping of
-`ui`/`mono`/`editor`/`xterm` to catalog ids). Appearance is stored once in
-`app_settings` and merged into every workspace's settings response, so a
-theme/font change in one workspace survives a refresh that lands on another.
-Per-workspace settings (`workspaceSettingsSchema` v1): `toolRendererPackId`,
-`notificationsEnabled`, `editorWordWrap`
-(default true), `editorTabSize` (default 2), `terminalFontSize` (default 13),
-`suggestModel` (empty = Pi default), `timelineExpansion`
-(thinking/tools-baseline/otherTools, each `always`/`latest`/`none`, defaults
-`latest`). There is no density setting and no custom-pack upload; theme
+`GET /api/customization/font-options`) backs global settings
+(`appearanceSettingsSchema` = `workspaceSettingsSchema` v1): `themeId`,
+`fonts` (per-surface mapping of `ui`/`mono`/`editor`/`xterm` to catalog ids),
+prompt templates, `suggestModel` (empty = Pi default) + `suggestThinkingLevel`,
+`timelineExpansion` (thinking/tools-baseline/otherTools, each
+`always`/`latest`/`none`, defaults `latest`), `toolRendererPackId`,
+`notificationsEnabled`, `editorWordWrap` (default true), `editorTabSize`
+(default 2), `terminalFontSize` (default 13). There are no per-workspace
+settings: settings are stored once in `app_settings` and merged into every
+workspace's settings response, so a change in one workspace survives a
+refresh that lands on another. There is no density setting and no custom-pack upload; theme
 application sets `data-theme-mode` + CSS vars, fonts set `--font-ui`/
 `--font-mono`/`--font-editor`/`--font-xterm` (editor panes and xterm read
 their own vars, and a terminal font change triggers a safe fit).
@@ -873,5 +873,5 @@ When changing Passage, keep these invariants intact:
    takeover only, never focus-steal.
 6. Fixed Git argument arrays, `paseo.json` action IDs only, loopback-only
    preview URLs, bounded outputs everywhere.
-7. Per-workspace layout + settings; per-session expansion;
+7. Per-workspace layout + global settings; per-session expansion;
    builtin read-only packs; generic fallback for unknown tools.

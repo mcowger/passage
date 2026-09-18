@@ -109,6 +109,8 @@ describe("layout and settings HTTP API", () => {
         editor: "fira-code",
         xterm: "meslo-lg",
       },
+      suggestModel: "test/model",
+      suggestThinkingLevel: "high",
       timelineExpansion: {
         thinking: "always",
         tools: {
@@ -119,6 +121,7 @@ describe("layout and settings HTTP API", () => {
           find: "none",
           grep: "latest",
           ls: "none",
+          ask: "none",
         },
         otherTools: "latest",
       },
@@ -143,11 +146,13 @@ describe("layout and settings HTTP API", () => {
     expect(updated.timelineExpansion.thinking).toBe("always");
     expect(updated.timelineExpansion.tools.read).toBe("none");
     expect(updated.timelineExpansion.tools.write).toBe("always");
+    expect(updated.suggestModel).toBe("test/model");
+    expect(updated.suggestThinkingLevel).toBe("high");
 
     f.store.close();
   });
 
-  test("shares theme and fonts across workspaces while keeping other settings per-workspace", async () => {
+  test("shares all settings across workspaces (no per-workspace settings)", async () => {
     const f = await fixture();
     const project = await (
       await f.app.fetch(
@@ -178,19 +183,28 @@ describe("layout and settings HTTP API", () => {
           themeId: "nord",
           fonts: { ui: "inter", mono: "jetbrains-mono", editor: "fira-code", xterm: "meslo-lg" },
           terminalFontSize: 16,
+          suggestModel: "test/model-a",
+          suggestThinkingLevel: "high",
+          timelineExpansion: {
+            ...DEFAULT_WORKSPACE_SETTINGS.timelineExpansion,
+            thinking: "always",
+          },
         }),
       })
     );
     expect(putRes.status).toBe(200);
 
-    // Workspace B inherits the global appearance but keeps its own defaults otherwise.
+    // Workspace B inherits the global settings.
     const settingsB = await (await f.app.fetch(request(`/api/workspaces/${workspaceB.id}/settings`))).json();
     expect(settingsB.themeId).toBe("nord");
     expect(settingsB.fonts.ui).toBe("inter");
     expect(settingsB.fonts.xterm).toBe("meslo-lg");
-    expect(settingsB.terminalFontSize).toBe(DEFAULT_WORKSPACE_SETTINGS.terminalFontSize);
+    expect(settingsB.suggestModel).toBe("test/model-a");
+    expect(settingsB.suggestThinkingLevel).toBe("high");
+    expect(settingsB.timelineExpansion.thinking).toBe("always");
+    expect(settingsB.terminalFontSize).toBe(16);
 
-    // Saving appearance in B is visible in A; workspace-scoped fields stay independent.
+    // Saving settings in B is visible in A.
     await f.app.fetch(
       request(`/api/workspaces/${workspaceB.id}/settings`, {
         method: "PUT",
@@ -199,13 +213,22 @@ describe("layout and settings HTTP API", () => {
           themeId: "passage-dark",
           fonts: { ui: "manrope", mono: "hack", editor: "hack", xterm: "hack" },
           terminalFontSize: 20,
+          suggestModel: "test/model-b",
+          suggestThinkingLevel: "low",
+          timelineExpansion: {
+            ...DEFAULT_WORKSPACE_SETTINGS.timelineExpansion,
+            thinking: "none",
+          },
         }),
       })
     );
     const settingsA = await (await f.app.fetch(request(`/api/workspaces/${workspaceA.id}/settings`))).json();
     expect(settingsA.themeId).toBe("passage-dark");
     expect(settingsA.fonts.ui).toBe("manrope");
-    expect(settingsA.terminalFontSize).toBe(16);
+    expect(settingsA.suggestModel).toBe("test/model-b");
+    expect(settingsA.suggestThinkingLevel).toBe("low");
+    expect(settingsA.timelineExpansion.thinking).toBe("none");
+    expect(settingsA.terminalFontSize).toBe(20);
 
     f.store.close();
   });
@@ -237,11 +260,18 @@ describe("layout and settings HTTP API", () => {
       ...DEFAULT_WORKSPACE_SETTINGS,
       themeId: "nord",
       fonts: { ui: "inter", mono: "jetbrains-mono", editor: "fira-code", xterm: "meslo-lg" },
+      suggestModel: "test/legacy-model",
+      timelineExpansion: {
+        ...DEFAULT_WORKSPACE_SETTINGS.timelineExpansion,
+        thinking: "always",
+      },
     });
 
     const seeded = await (await f.app.fetch(request(`/api/workspaces/${workspace.id}/settings`))).json();
     expect(seeded.themeId).toBe("nord");
     expect(seeded.fonts.ui).toBe("inter");
+    expect(seeded.suggestModel).toBe("test/legacy-model");
+    expect(seeded.timelineExpansion.thinking).toBe("always");
 
     // The adopted appearance is now global: a fresh workspace inherits it.
     const other = await (
@@ -255,6 +285,8 @@ describe("layout and settings HTTP API", () => {
     const otherSettings = await (await f.app.fetch(request(`/api/workspaces/${other.id}/settings`))).json();
     expect(otherSettings.themeId).toBe("nord");
     expect(otherSettings.fonts.xterm).toBe("meslo-lg");
+    expect(otherSettings.suggestModel).toBe("test/legacy-model");
+    expect(otherSettings.timelineExpansion.thinking).toBe("always");
 
     f.store.close();
   });

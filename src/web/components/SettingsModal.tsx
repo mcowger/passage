@@ -480,7 +480,7 @@ export function SettingsModal({
 
           <TabsContent value="fonts-colors" className="flex flex-col gap-4 py-2">
           <p className="text-xs text-muted-foreground">
-            Theme and fonts apply to every workspace.
+            All settings are global and apply to every workspace.
           </p>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="settings-theme">Color Theme</Label>
@@ -541,6 +541,9 @@ export function SettingsModal({
           </TabsContent>
 
           <TabsContent value="suggestion-output" className="flex flex-col gap-4 py-2">
+          <p className="text-xs text-muted-foreground">
+            All settings are global and apply to every workspace.
+          </p>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="settings-suggest-model">Suggestion Model</Label>
             <Select
@@ -658,7 +661,7 @@ export function SettingsModal({
 
           <TabsContent value="prompts" className="flex flex-col gap-4 py-2">
           <p className="text-xs text-muted-foreground">
-            Prompt templates for AI-generated text. They apply to every workspace. Leave a template blank to use the built-in default.
+            Prompt templates for AI-generated text. All settings are global. Leave a template blank to use the built-in default.
             Placeholders are replaced before sending to the model; if a template omits a placeholder, its value is appended automatically.
           </p>
 
