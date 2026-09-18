@@ -48,5 +48,6 @@ describe("OutputExpansionSection", () => {
     expect(html).toContain("settings-tool-find");
     expect(html).toContain("settings-tool-grep");
     expect(html).toContain("settings-tool-ls");
+    expect(html).toContain("settings-tool-ask");
   });
 });

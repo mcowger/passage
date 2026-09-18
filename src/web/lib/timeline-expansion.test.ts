@@ -46,6 +46,13 @@ describe("resolveCanonicalTool", () => {
     expect(resolveCanonicalTool("list_dir")).toBe("ls");
   });
 
+  test("maps ask_user_question and aliases to ask", () => {
+    expect(resolveCanonicalTool("ask_user_question")).toBe("ask");
+    expect(resolveCanonicalTool("ask_user")).toBe("ask");
+    expect(resolveCanonicalTool("ask")).toBe("ask");
+    expect(resolveCanonicalTool("ASK_USER_QUESTION")).toBe("ask");
+  });
+
   test("maps unlisted and mcp tools to other", () => {
     expect(resolveCanonicalTool("mcp__github__search")).toBe("other");
     expect(resolveCanonicalTool("custom_tool")).toBe("other");
@@ -199,5 +206,21 @@ describe("isItemExpanded", () => {
     // latestIds points at tool-read-2, so the older row stays collapsed.
     expect(isItemExpanded(read1, settings, latestIds)).toBe(false);
     expect(isItemExpanded(read2, settings, latestIds)).toBe(true);
+  });
+
+  test("ask_user_question follows the ask setting, not otherTools", () => {
+    const askSettings = {
+      ...DEFAULT_TIMELINE_EXPANSION,
+      tools: { ...DEFAULT_TIMELINE_EXPANSION.tools, ask: "none" as const },
+      otherTools: "always" as const,
+    };
+    const askLatest: ToolActivity = { kind: "tool", id: "tool-ask-1", name: "ask_user_question", input: null, status: "complete" };
+    const askIds = { latestThinkingId: undefined, latestToolIds: { ask: "tool-ask-1", other: "tool-ask-1" } };
+    // Even though it is the latest ask row (and otherTools is always),
+    // the ask=none setting keeps the gross input JSON collapsed.
+    expect(isItemExpanded(askLatest, askSettings, askIds)).toBe(false);
+
+    const askAlways = { ...askSettings, tools: { ...askSettings.tools, ask: "always" as const } };
+    expect(isItemExpanded(askLatest, askAlways, askIds)).toBe(true);
   });
 });

@@ -29,4 +29,18 @@ describe("workspace font mapping", () => {
     expect(parsed.fonts).toEqual(DEFAULT_FONT_MAPPING);
     expect("fontId" in parsed).toBe(false);
   });
+
+  test("defaults ask to collapsed and backfills legacy expansion without ask", () => {
+    expect(DEFAULT_WORKSPACE_SETTINGS.timelineExpansion.tools.ask).toBe("none");
+    const { ask: _dropped, ...legacyTools } = DEFAULT_WORKSPACE_SETTINGS.timelineExpansion.tools;
+    void _dropped;
+    const parsed = workspaceSettingsSchema.parse({
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      timelineExpansion: {
+        ...DEFAULT_WORKSPACE_SETTINGS.timelineExpansion,
+        tools: legacyTools,
+      },
+    });
+    expect(parsed.timelineExpansion.tools.ask).toBe("none");
+  });
 });

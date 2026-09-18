@@ -33,6 +33,7 @@ const TOOL_LABELS: Record<BaselineTool, string> = {
   find: "Find Files",
   grep: "Grep Search",
   ls: "List Directory",
+  ask: "Ask User",
 };
 
 export interface DisplayOptionsPopoverProps {
@@ -199,7 +200,7 @@ export const DisplayOptionsPopover = memo(function DisplayOptionsPopover({
                     {TOOL_LABELS[tool]}
                   </Label>
                   <Select
-                    value={expansion.tools[tool]}
+                    value={expansion.tools[tool] ?? expansion.otherTools}
                     onValueChange={(val) => handleToolChange(tool, val as ExpandMode)}
                   >
                     <SelectTrigger

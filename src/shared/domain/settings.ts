@@ -9,7 +9,7 @@ export const CURRENT_SETTINGS_SCHEMA_VERSION = 1;
 export const expandModeSchema = z.enum(["always", "latest", "none"]);
 export type ExpandMode = z.infer<typeof expandModeSchema>;
 
-export const baselineTools = ["read", "write", "edit", "bash", "find", "grep", "ls"] as const;
+export const baselineTools = ["read", "write", "edit", "bash", "find", "grep", "ls", "ask"] as const;
 export type BaselineTool = (typeof baselineTools)[number];
 
 export const baselineToolExpansionSchema = z.object({
@@ -20,6 +20,7 @@ export const baselineToolExpansionSchema = z.object({
   find: expandModeSchema.default("latest"),
   grep: expandModeSchema.default("latest"),
   ls: expandModeSchema.default("latest"),
+  ask: expandModeSchema.default("none"),
 });
 export type BaselineToolExpansion = z.infer<typeof baselineToolExpansionSchema>;
 
@@ -33,6 +34,7 @@ export const timelineExpansionSchema = z.object({
     find: "latest",
     grep: "latest",
     ls: "latest",
+    ask: "none",
   }),
   otherTools: expandModeSchema.default("latest"),
 });
@@ -48,6 +50,7 @@ export const DEFAULT_TIMELINE_EXPANSION: TimelineExpansionSettings = {
     find: "latest",
     grep: "latest",
     ls: "latest",
+    ask: "none",
   },
   otherTools: "latest",
 };

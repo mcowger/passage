@@ -40,6 +40,7 @@ const BASELINE_TOOL_LABELS: Record<BaselineTool, string> = {
   find: "Find Files (find, glob)",
   grep: "Search Files (grep)",
   ls: "List Directory (ls, list)",
+  ask: "Ask User (ask_user_question)",
 };
 
 export interface OutputExpansionSectionProps {
@@ -138,7 +139,7 @@ export function OutputExpansionSection({
                 {BASELINE_TOOL_LABELS[tool]}
               </Label>
               <Select
-                value={expansion.tools[tool]}
+                value={expansion.tools[tool] ?? expansion.otherTools}
                 onValueChange={(val) =>
                   onExpansionChange({
                     ...expansion,

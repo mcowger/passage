@@ -36,6 +36,10 @@ export function resolveCanonicalTool(name: string): BaselineTool | "other" {
     case "list":
     case "list_dir":
       return "ls";
+    case "ask":
+    case "ask_user":
+    case "ask_user_question":
+      return "ask";
     default:
       return "other";
   }
@@ -79,8 +83,10 @@ export function isItemExpanded(
     if (item.status === "running") return true;
 
     const canonical = resolveCanonicalTool(item.name);
+    // Fall back to otherTools when a persisted expansion predates a
+    // baseline tool (e.g. ask), so legacy in-memory settings never crash.
     const mode: ExpandMode =
-      canonical === "other" ? settings.otherTools : settings.tools[canonical];
+      canonical === "other" ? settings.otherTools : (settings.tools[canonical] ?? settings.otherTools);
 
     if (mode === "always") return true;
     if (mode === "none") return false;
