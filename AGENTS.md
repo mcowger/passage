@@ -27,6 +27,7 @@ Authority: `docs/DESIGN.md` (architecture/security/scope), `docs/UI.md` (UI/a11y
 - Git only via the centralized service (fixed argv, locale, limits, timeouts). No shell-string APIs.
 - Remove a Passage worktree only with its DB ownership record; dirty/unmerged needs explicit force. Never auto-delete branches.
 - Executable project resources (extensions, skills, MCP) need a persisted workspace-trust decision. No plugin framework.
+- Don't over-engineer security until the feature is unusable: match the control to the threat model instead of stacking maximal restrictions plus workaround machinery.
 - No app auth; keep Host/Origin validation, LAN-trusted-only without upstream TLS/auth/VPN.
 
 ## UI
