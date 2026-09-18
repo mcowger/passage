@@ -16,7 +16,7 @@
     "package": "bun run scripts/build.ts --compile",
     "build:linux": "bun run scripts/build.ts --compile --target=bun-linux-x64-modern --outfile=./dist/passage-linux-x64",
     "deploy": "bun run scripts/deploy.ts",
-    "test": "bun test",
+    "test": "bun test --dots",
     "test:gate": "bun run tests/gate.ts",
     "test:pi-rpc": "bun test tests/pi-rpc",
     "test:pi-live": "bun run tests/pi-rpc/run-live.ts",
