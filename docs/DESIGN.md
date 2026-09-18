@@ -241,7 +241,7 @@ desktop Enter-to-send becomes newline-insert on mobile.
 | Agent messages, content blocks, session tree, compaction, Pi usage | Pi JSONL session | Read through a bounded, version-pinned Pi JSONL reader + transcript projection; do not mirror messages to SQLite. Multi-stage history load with scroll backfill. |
 | Checked-out files and Git state | Filesystem and Git | Git CLI calculates status, worktree state, and diffs. |
 | Live Pi RPC and PTY processes, preview sessions, action runs | Daemon memory | Process lifetime is independent of a browser connection and ends on daemon restart. Action runs and preview runtime (ports, PIDs, frames, leases) are never in SQLite. |
-| Passage object identity, workspace policy, layout, labels, settings, preview metadata | Local SQLite | Small, migration-versioned registry (schema version 1); no transcript duplication. |
+| Passage object identity, workspace policy, layout, labels, settings, preview metadata | Local SQLite | Small, migration-versioned registry (schema version 2); no transcript duplication. |
 | Browser drafts and ephemeral view state | Browser local storage / memory | Per-agent drafts and timeline expansion overrides. Disposable. |
 
 ### SQLite records
@@ -764,9 +764,12 @@ Four builtin themes ship (`passage-light` default warm light,
 `chip*`/`secondary*`, `diffAdd/Remove/Hunk*`,
 `terminalBackground/Foreground`, `editorBackground`). A bundled font catalog
 (`AVAILABLE_FONTS`: 5 sans UI fonts, 9 Nerd Font Mono families served over
-`GET /api/customization/font-options`) backs per-workspace settings
-(`workspaceSettingsSchema` v1): `themeId`, `fonts` (per-surface mapping of
-`ui`/`mono`/`editor`/`xterm` to catalog ids), `toolRendererPackId`,
+`GET /api/customization/font-options`) backs global appearance settings
+(`appearanceSettingsSchema`): `themeId`, `fonts` (per-surface mapping of
+`ui`/`mono`/`editor`/`xterm` to catalog ids). Appearance is stored once in
+`app_settings` and merged into every workspace's settings response, so a
+theme/font change in one workspace survives a refresh that lands on another.
+Per-workspace settings (`workspaceSettingsSchema` v1): `toolRendererPackId`,
 `notificationsEnabled`, `editorWordWrap`
 (default true), `editorTabSize` (default 2), `terminalFontSize` (default 13),
 `suggestModel` (empty = Pi default), `timelineExpansion`

@@ -147,6 +147,118 @@ describe("layout and settings HTTP API", () => {
     f.store.close();
   });
 
+  test("shares theme and fonts across workspaces while keeping other settings per-workspace", async () => {
+    const f = await fixture();
+    const project = await (
+      await f.app.fetch(
+        request("/api/projects", {
+          method: "POST",
+          body: JSON.stringify({ configuredRootPath: f.root, displayLabel: "Project" }),
+        })
+      )
+    ).json();
+
+    const createWorkspace = async (displayLabel: string) => {
+      const res = await f.app.fetch(
+        request(`/api/projects/${project.id}/workspaces`, {
+          method: "POST",
+          body: JSON.stringify({ displayLabel }),
+        }),
+      );
+      return res.json();
+    };
+    const workspaceA = await createWorkspace("Workspace A");
+    const workspaceB = await createWorkspace("Workspace B");
+
+    const putRes = await f.app.fetch(
+      request(`/api/workspaces/${workspaceA.id}/settings`, {
+        method: "PUT",
+        body: JSON.stringify({
+          ...DEFAULT_WORKSPACE_SETTINGS,
+          themeId: "nord",
+          fonts: { ui: "inter", mono: "jetbrains-mono", editor: "fira-code", xterm: "meslo-lg" },
+          terminalFontSize: 16,
+        }),
+      })
+    );
+    expect(putRes.status).toBe(200);
+
+    // Workspace B inherits the global appearance but keeps its own defaults otherwise.
+    const settingsB = await (await f.app.fetch(request(`/api/workspaces/${workspaceB.id}/settings`))).json();
+    expect(settingsB.themeId).toBe("nord");
+    expect(settingsB.fonts.ui).toBe("inter");
+    expect(settingsB.fonts.xterm).toBe("meslo-lg");
+    expect(settingsB.terminalFontSize).toBe(DEFAULT_WORKSPACE_SETTINGS.terminalFontSize);
+
+    // Saving appearance in B is visible in A; workspace-scoped fields stay independent.
+    await f.app.fetch(
+      request(`/api/workspaces/${workspaceB.id}/settings`, {
+        method: "PUT",
+        body: JSON.stringify({
+          ...DEFAULT_WORKSPACE_SETTINGS,
+          themeId: "passage-dark",
+          fonts: { ui: "manrope", mono: "hack", editor: "hack", xterm: "hack" },
+          terminalFontSize: 20,
+        }),
+      })
+    );
+    const settingsA = await (await f.app.fetch(request(`/api/workspaces/${workspaceA.id}/settings`))).json();
+    expect(settingsA.themeId).toBe("passage-dark");
+    expect(settingsA.fonts.ui).toBe("manrope");
+    expect(settingsA.terminalFontSize).toBe(16);
+
+    f.store.close();
+  });
+
+  test("seeds global appearance from a legacy per-workspace row", async () => {
+    const f = await fixture();
+    const project = await (
+      await f.app.fetch(
+        request("/api/projects", {
+          method: "POST",
+          body: JSON.stringify({ configuredRootPath: f.root, displayLabel: "Project" }),
+        })
+      )
+    ).json();
+
+    const workspace = await (
+      await f.app.fetch(
+        request(`/api/projects/${project.id}/workspaces`, {
+          method: "POST",
+          body: JSON.stringify({ displayLabel: "Workspace" }),
+        })
+      )
+    ).json();
+
+    // Simulate a row written before appearance went global: bypass the
+    // service so no global row is created.
+    const repositories = new MetadataRepositories(f.store.db);
+    repositories.workspaces.savePreferences(workspace.id, {
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      themeId: "nord",
+      fonts: { ui: "inter", mono: "jetbrains-mono", editor: "fira-code", xterm: "meslo-lg" },
+    });
+
+    const seeded = await (await f.app.fetch(request(`/api/workspaces/${workspace.id}/settings`))).json();
+    expect(seeded.themeId).toBe("nord");
+    expect(seeded.fonts.ui).toBe("inter");
+
+    // The adopted appearance is now global: a fresh workspace inherits it.
+    const other = await (
+      await f.app.fetch(
+        request(`/api/projects/${project.id}/workspaces`, {
+          method: "POST",
+          body: JSON.stringify({ displayLabel: "Other" }),
+        })
+      )
+    ).json();
+    const otherSettings = await (await f.app.fetch(request(`/api/workspaces/${other.id}/settings`))).json();
+    expect(otherSettings.themeId).toBe("nord");
+    expect(otherSettings.fonts.xterm).toBe("meslo-lg");
+
+    f.store.close();
+  });
+
   test("serves customization packs", async () => {
     const f = await fixture();
     const themesRes = await f.app.fetch(request("/api/customization/themes"));

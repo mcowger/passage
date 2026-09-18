@@ -2,7 +2,7 @@ import { realpath, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { projectSchema, locationSchema, workspaceSchema, type Project, type WorktreeLocation, type Workspace, type WorkspaceSnapshot } from "../../shared/domain/workspaces.ts";
 import { workspaceLayoutSchema, createDefaultLayout, type WorkspaceLayout } from "../../shared/domain/layout.ts";
-import { workspaceSettingsSchema, DEFAULT_WORKSPACE_SETTINGS, type WorkspaceSettings } from "../../shared/domain/settings.ts";
+import { appearanceSettingsSchema, workspaceSettingsSchema, DEFAULT_APPEARANCE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, type AppearanceSettings, type WorkspaceSettings } from "../../shared/domain/settings.ts";
 import { MetadataRepositories } from "../metadata/repositories.ts";
 
 const MAX_LIST = 100;
@@ -10,6 +10,8 @@ const MAX_GIT_OUTPUT = 4096;
 const GIT_TIMEOUT_MS = 2000;
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
+/** Key for the global appearance row in app_settings (themeId + fonts). */
+const APPEARANCE_SETTINGS_KEY = "appearance";
 
 export class WorkspaceError extends Error { constructor(public readonly code: "not-found" | "invalid-root" | "outside-root" | "archived" | "invalid-location", message: string) { super(message); this.name = "WorkspaceError"; } }
 
@@ -123,21 +125,49 @@ export class WorkspaceService {
     return parsed;
   }
 
+  /** Global appearance (theme/fonts) shared by every workspace. Reads adopt
+   *  a legacy per-workspace row once on upgrade so pre-existing theme/font
+   *  choices survive the move to global storage. */
+  getAppearance(seed?: unknown): AppearanceSettings {
+    const stored = this.repositories.appSettings.get(APPEARANCE_SETTINGS_KEY);
+    if (stored !== undefined) {
+      const parsed = appearanceSettingsSchema.safeParse(stored);
+      if (parsed.success) return parsed.data;
+    }
+    if (seed !== undefined) {
+      const fromRow = appearanceSettingsSchema.safeParse(seed);
+      if (fromRow.success) {
+        this.repositories.appSettings.set(APPEARANCE_SETTINGS_KEY, fromRow.data);
+        return fromRow.data;
+      }
+    }
+    return { ...DEFAULT_APPEARANCE_SETTINGS, fonts: { ...DEFAULT_APPEARANCE_SETTINGS.fonts } };
+  }
+
+  saveAppearance(appearance: AppearanceSettings): AppearanceSettings {
+    const parsed = appearanceSettingsSchema.parse(appearance);
+    this.repositories.appSettings.set(APPEARANCE_SETTINGS_KEY, parsed);
+    return parsed;
+  }
+
   getSettings(workspaceId: string): WorkspaceSettings {
     this.requireWorkspace(workspaceId);
     const existing = this.repositories.workspaces.getPreferences<WorkspaceSettings>(workspaceId);
+    const appearance = this.getAppearance(existing);
     if (!existing) {
-      return DEFAULT_WORKSPACE_SETTINGS;
+      return { ...DEFAULT_WORKSPACE_SETTINGS, ...appearance };
     }
     const parsed = workspaceSettingsSchema.safeParse(existing);
-    return parsed.success ? parsed.data : DEFAULT_WORKSPACE_SETTINGS;
+    if (!parsed.success) return { ...DEFAULT_WORKSPACE_SETTINGS, ...appearance };
+    return { ...parsed.data, ...appearance };
   }
 
   saveSettings(workspaceId: string, settings: WorkspaceSettings): WorkspaceSettings {
     this.requireWorkspace(workspaceId);
     const parsed = workspaceSettingsSchema.parse(settings);
+    this.saveAppearance({ themeId: parsed.themeId, fonts: parsed.fonts });
     this.repositories.workspaces.savePreferences(workspaceId, parsed);
-    return parsed;
+    return this.getSettings(workspaceId);
   }
 
   snapshot(): WorkspaceSnapshot {

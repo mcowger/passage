@@ -68,6 +68,22 @@ export class AgentRepository {
   archive(id: string, archivedAt: string): void { this.db.query("UPDATE agents SET archived_at=? WHERE id=?").run(archivedAt, id); }
 }
 
+export class AppSettingsRepository {
+  constructor(private readonly db: Database) {}
+  get(key: string): unknown {
+    const row = this.db.query<{ value_json: string }, [string]>("SELECT value_json FROM app_settings WHERE key=?").get(key);
+    if (!row) return undefined;
+    try {
+      return JSON.parse(row.value_json) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+  set(key: string, value: unknown): void {
+    this.db.query("INSERT INTO app_settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json").run(key, encode(value));
+  }
+}
+
 export class WebPreviewRepository {
   constructor(private readonly db: Database) {}
   save(value: WebPreviewRow): void {
@@ -84,6 +100,6 @@ export class WebPreviewRepository {
 }
 
 export class MetadataRepositories {
-  readonly projects: ProjectRepository; readonly worktreeLocations: WorktreeLocationRepository; readonly workspaces: WorkspaceRepository; readonly agents: AgentRepository; readonly webPreviews: WebPreviewRepository;
-  constructor(db: Database) { this.projects = new ProjectRepository(db); this.worktreeLocations = new WorktreeLocationRepository(db); this.workspaces = new WorkspaceRepository(db); this.agents = new AgentRepository(db); this.webPreviews = new WebPreviewRepository(db); }
+  readonly projects: ProjectRepository; readonly worktreeLocations: WorktreeLocationRepository; readonly workspaces: WorkspaceRepository; readonly agents: AgentRepository; readonly webPreviews: WebPreviewRepository; readonly appSettings: AppSettingsRepository;
+  constructor(db: Database) { this.projects = new ProjectRepository(db); this.worktreeLocations = new WorktreeLocationRepository(db); this.workspaces = new WorkspaceRepository(db); this.agents = new AgentRepository(db); this.webPreviews = new WebPreviewRepository(db); this.appSettings = new AppSettingsRepository(db); }
 }

@@ -442,6 +442,9 @@ export function SettingsModal({
           </TabsList>
 
           <TabsContent value="fonts-colors" className="flex flex-col gap-4 py-2">
+          <p className="text-xs text-muted-foreground">
+            Theme and fonts apply to every workspace.
+          </p>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="settings-theme">Color Theme</Label>
             <Select

@@ -52,10 +52,22 @@ export const DEFAULT_TIMELINE_EXPANSION: TimelineExpansionSettings = {
   otherTools: "latest",
 };
 
-export const workspaceSettingsSchema = z.object({
+/** Appearance preferences shared across every workspace: a theme change in
+ *  one workspace applies everywhere, so a refresh that lands on another
+ *  workspace never appears to lose the user's theme/fonts. */
+export const appearanceSettingsSchema = z.object({
   themeId: z.string().min(1).max(64).default("passage-light"),
   /** Per-surface font mapping (ui, mono, editor, xterm), each a font catalog id. */
   fonts: fontMappingSchema.default(DEFAULT_FONT_MAPPING),
+});
+export type AppearanceSettings = z.infer<typeof appearanceSettingsSchema>;
+
+export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
+  themeId: "passage-light",
+  fonts: { ...DEFAULT_FONT_MAPPING },
+};
+
+export const workspaceSettingsSchema = appearanceSettingsSchema.extend({
   toolRendererPackId: z.string().min(1).max(64).default("builtin"),
   notificationsEnabled: z.boolean().default(false),
   editorWordWrap: z.boolean().default(true),

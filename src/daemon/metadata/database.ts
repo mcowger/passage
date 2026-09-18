@@ -41,6 +41,15 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 2,
+    name: "global_app_settings",
+    sql: `
+      CREATE TABLE app_settings (
+        key TEXT PRIMARY KEY, value_json TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export class MetadataStore {
