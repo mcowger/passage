@@ -17,6 +17,7 @@ import { themePackSchema, fontPackSchema, toolRendererPackSchema, type ThemePack
 import type { AgentFile, AgentImage } from "../shared/protocol/agents.ts";
 import { z } from "zod";
 import { filesSearchResponseSchema, directorySuggestResponseSchema } from "../shared/protocol/workspace.ts";
+import { buildInfoSchema, type BuildInfo } from "../shared/build-info.ts";
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
 import type { GitDiff, GitStatus } from "../shared/domain/git.ts";
 import { webPreviewSchema, type WebPreview } from "../shared/domain/previews.ts";
@@ -75,6 +76,17 @@ export function friendlyApiError(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
 }
 
+export type { BuildInfo };
+const daemonSnapshotSchema = z.object({
+  protocolVersion: z.number(),
+  metadataSchemaVersion: z.number(),
+  build: buildInfoSchema,
+}).strict();
+const healthSchema = z.object({ ok: z.literal(true), build: buildInfoSchema }).strict();
+
+export type DaemonSnapshot = z.infer<typeof daemonSnapshotSchema>;
+export type HealthResponse = z.infer<typeof healthSchema>;
+
 export type DiscoveredWorktree = {
   path: string;
   branchRef: string | null;
@@ -130,6 +142,12 @@ export function createWorkspaceApi(
   }
 
   return {
+    async daemonSnapshot(): Promise<DaemonSnapshot> {
+      return daemonSnapshotSchema.parse(await request("/api/daemon/snapshot"));
+    },
+    async health(): Promise<HealthResponse> {
+      return healthSchema.parse(await request("/api/health"));
+    },
     async snapshot(): Promise<WorkspaceSnapshot> {
       return workspaceSnapshotSchema.parse(await request("/api/workspaces/snapshot"));
     },

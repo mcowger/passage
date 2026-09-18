@@ -55,6 +55,7 @@ import homepage from "../web/index.html";
 import manifest from "../web/manifest.webmanifest" with { type: "text" };
 import icon from "../web/icon.svg" with { type: "text" };
 import swScript from "../web/sw.js" with { type: "text" };
+import { getBuildInfo } from "./build-info.ts";
 
 // Same-binary subcommand dispatch (see docs/ORHPANS.md "Binary mode"). This
 // branch runs BEFORE SQLite open, Hono setup, Bun.serve, pidfile/dev.port
@@ -201,10 +202,11 @@ app.onError((error, context) => {
   logger("http").error("HTTP request failed", { event: "http.error", path: context.req.path, ...errorFields(error) });
   return context.json({ error: "internal-error" }, 500);
 });
-app.get("/api/health", (context) => context.json({ ok: true }));
+app.get("/api/health", (context) => context.json({ ok: true, build: getBuildInfo() }));
 app.get("/api/daemon/snapshot", (context) => context.json({
   protocolVersion: PROTOCOL_VERSION,
   metadataSchemaVersion: metadata.schemaVersion,
+  build: getBuildInfo(),
 }));
 app.post("/api/daemon/shutdown", async (context) => {
   const url = new URL(context.req.url);

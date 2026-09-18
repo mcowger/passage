@@ -14,6 +14,8 @@ import {
   Plus,
 } from "lucide-react";
 import { cn } from "../lib/utils.ts";
+import type { BuildInfo } from "../../shared/build-info.ts";
+import { formatBuildDetail, formatBuildLabel } from "../../shared/build-info.ts";
 import { AGENT_STATUS_LABEL, getWorkspaceStatusKind } from "./agentStatus.ts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
 import {
@@ -40,6 +42,7 @@ export type SidebarProps = {
   onManageWorkspace?: (workspace: Workspace) => void;
   onDiscoverWorktrees?: (projectId?: string) => void;
   onArchiveProject?: (id: string) => void;
+  build?: BuildInfo | null;
 };
 
 export function Sidebar({
@@ -54,6 +57,7 @@ export function Sidebar({
   onManageWorkspace,
   onDiscoverWorktrees,
   onArchiveProject,
+  build,
 }: SidebarProps) {
   const activeProjects = data.projects.filter((project) => !project.archivedAt);
   const [pendingRemove, setPendingRemove] = useState<Project | null>(null);
@@ -85,7 +89,12 @@ export function Sidebar({
       <footer>
         <span className="footer-status"><span className="connected-dot" aria-hidden="true" /> Connected</span>
         <span className="flex items-center gap-1">
-          <span className="muted">v1.4.0</span>
+          <span
+            className="muted"
+            title={build ? formatBuildDetail(build) : undefined}
+          >
+            {build ? formatBuildLabel(build) : "v1.4.0"}
+          </span>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon-xs" onClick={onNewProject} aria-label="Register project">

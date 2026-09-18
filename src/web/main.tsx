@@ -11,6 +11,7 @@ import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
 import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
 import { BUILTIN_THEMES, BUILTIN_FONTS } from "../shared/domain/customization.ts";
 import { createWorkspaceApi, friendlyApiError } from "./api.ts";
+import type { BuildInfo } from "../shared/build-info.ts";
 import { subscribeWorkspace, subscribeWorkspaces } from "./workspaceSocket.ts";
 import type { WorkspaceActionRun } from "../shared/domain/workspace-actions.ts";
 import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
@@ -176,6 +177,7 @@ function App() {
   const api = useMemo(() => createWorkspaceApi(), []);
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
   const [snapshotError, setSnapshotError] = useState("");
+  const [build, setBuild] = useState<BuildInfo | null>(null);
   const [formError, setFormError] = useState("");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>();
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
@@ -354,6 +356,16 @@ function App() {
   }, [api]);
 
   useEffect(() => { void refreshWorkspaces(); }, [refreshWorkspaces]);
+
+  // Daemon build identity for the sidebar footer + deploy verification.
+  // Best-effort: the sidebar falls back to the static version when unknown.
+  useEffect(() => {
+    let cancelled = false;
+    void api.daemonSnapshot()
+      .then((daemon) => { if (!cancelled) setBuild(daemon.build); })
+      .catch(() => { if (!cancelled) setBuild(null); });
+    return () => { cancelled = true; };
+  }, [api]);
 
   // Live workspace-list invalidation from other windows/tabs: the mutating
   // window already reloaded its snapshot inline, so WS echoes (own or
@@ -1196,6 +1208,7 @@ function App() {
             setForm("worktree");
           }}
           agents={agents}
+          build={build}
           onDiscoverWorktrees={(projId) => {
             setFormError("");
             setWorktreeModalTab("discover");
