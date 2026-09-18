@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import type { ThemePack, FontMapping, FontOption, FontRole } from "../../shared/domain/customization.ts";
 import { BUILTIN_THEMES, AVAILABLE_FONTS, fontOptionsForRole, resolveFontFamilies } from "../../shared/domain/customization.ts";
 import type { WorkspaceSettings, BaselineTool, ExpandMode, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
-import { baselineTools, DEFAULT_TIMELINE_EXPANSION, DEFAULT_WORKTREE_PROMPT, DEFAULT_TITLE_PROMPT, DEFAULT_COMMIT_PROMPT } from "../../shared/domain/settings.ts";
+import { baselineTools, DEFAULT_TIMELINE_EXPANSION, DEFAULT_WORKTREE_PROMPT, DEFAULT_TITLE_PROMPT, DEFAULT_COMMIT_PROMPT, LOCAL_QWEN_LABEL, LOCAL_QWEN_MODEL_VALUE, isLocalQwenModelValue } from "../../shared/domain/settings.ts";
 import type { AgentCapabilities } from "../../shared/domain/agents.ts";
 import type { Project, WorktreeLocation } from "../../shared/domain/workspaces.ts";
 import type { WorkspaceApi } from "../api.ts";
@@ -48,6 +48,8 @@ export function suggestThinkingOptions(
   fallbackLevels: string[] = [],
 ): string[] {
   const selected = suggestModel.trim();
+  // Qwen (Local) is hardcoded to no thinking: no levels apply.
+  if (isLocalQwenModelValue(selected)) return [];
   if (selected) {
     const entry = models.find((m) => `${m.provider}/${m.id}` === selected);
     if (entry && entry.supportedThinkingLevels.length > 0) return [...entry.supportedThinkingLevels];
@@ -546,6 +548,10 @@ export function SettingsModal({
               onValueChange={(value) =>
                 setCurrentSettings((prev) => {
                   const suggestModel = value === DEFAULT_SUGGEST_MODEL_VALUE ? "" : value;
+                  // Qwen (Local) is hardcoded to no thinking.
+                  if (isLocalQwenModelValue(suggestModel)) {
+                    return { ...prev, suggestModel, suggestThinkingLevel: "" };
+                  }
                   const levels = suggestThinkingOptions(suggestModels, suggestModel, suggestThinkingFallback);
                   const thinking = prev.suggestThinkingLevel?.trim() ?? "";
                   // A model change can invalidate the stored level: only
@@ -564,6 +570,7 @@ export function SettingsModal({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={DEFAULT_SUGGEST_MODEL_VALUE}>Use pi default</SelectItem>
+                <SelectItem value={LOCAL_QWEN_MODEL_VALUE}>{LOCAL_QWEN_LABEL} — on-device, no network</SelectItem>
                 {suggestModels.map((m) => {
                   const value = `${m.provider}/${m.id}`;
                   return (
@@ -574,7 +581,7 @@ export function SettingsModal({
                 })}
                 {(() => {
                   const stored = currentSettings.suggestModel?.trim() ?? "";
-                  const known = new Set(suggestModels.map((m) => `${m.provider}/${m.id}`));
+                  const known = new Set([LOCAL_QWEN_MODEL_VALUE, ...suggestModels.map((m) => `${m.provider}/${m.id}`)]);
                   return stored && !known.has(stored) ? (
                     <SelectItem value={stored}>{stored} (saved)</SelectItem>
                   ) : null;
@@ -593,10 +600,10 @@ export function SettingsModal({
                   suggestThinkingLevel: value === DEFAULT_SUGGEST_THINKING_VALUE ? "" : value,
                 })
               }
-              disabled={suggestModelsLoading || !api}
+              disabled={suggestModelsLoading || !api || isLocalQwenModelValue(currentSettings.suggestModel?.trim() ?? "")}
             >
               <SelectTrigger id="settings-suggest-thinking" className="w-full">
-                <SelectValue placeholder={suggestModelsLoading ? "Loading levels\u2026" : "Select a thinking level"} />
+                <SelectValue placeholder={isLocalQwenModelValue(currentSettings.suggestModel?.trim() ?? "") ? "No thinking (Qwen Local)" : suggestModelsLoading ? "Loading levels\u2026" : "Select a thinking level"} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={DEFAULT_SUGGEST_THINKING_VALUE}>Use pi default</SelectItem>
@@ -615,7 +622,7 @@ export function SettingsModal({
               </SelectContent>
             </Select>
             <small className="text-xs font-normal text-muted-foreground">
-              Only levels the chosen model supports are listed. Models without an explicit list support pi&apos;s global levels.{(currentSettings.suggestModel?.trim() || "") === "" ? " With pi default, the global levels are listed." : ""}
+              Only levels the chosen model supports are listed. Models without an explicit list support pi&apos;s global levels.{(currentSettings.suggestModel?.trim() || "") === "" ? " With pi default, the global levels are listed." : ""}{isLocalQwenModelValue(currentSettings.suggestModel?.trim() ?? "") ? " Qwen (Local) is hardcoded to no thinking." : ""}
             </small>
             {suggestModelsError && (
               <small className="text-xs font-normal text-muted-foreground">

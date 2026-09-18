@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderTitlePrompt } from "../../shared/domain/settings.ts";
+import { getSharedLocalQwen, isLocalQwenModel } from "../llm/local-qwen.ts";
 import { PiRpcManager, type PiEvent, type PiProcessHandle, type PiRpcOptions } from "./rpc/index.ts";
 
 /** Eligible default title: agents still carrying the create() placeholder
@@ -74,6 +75,18 @@ export class AgentTitleSuggester {
   async suggestTitle(messages: string[], cwd?: string, model?: string, thinkingLevel?: string, promptTemplate = ""): Promise<string | null> {
     const sources = messages.map((message) => message.trim()).filter(Boolean);
     if (sources.length === 0) return null;
+    // Local path: same signature/return type, no Pi spawn. Thinking level
+    // is intentionally ignored (Qwen Local is hardcoded to no thinking).
+    if (isLocalQwenModel(model)) {
+      try {
+        const local = getSharedLocalQwen();
+        if (!local) return fallbackAgentTitle(sources);
+        const response = await local.generate(buildTitlePrompt(sources, promptTemplate));
+        return sanitizeAgentTitle(response) ?? fallbackAgentTitle(sources);
+      } catch {
+        return fallbackAgentTitle(sources);
+      }
+    }
     let sessionDir: string | undefined;
     let agentId: string | undefined;
     try {

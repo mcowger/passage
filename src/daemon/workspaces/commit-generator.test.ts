@@ -45,7 +45,8 @@ describe("formatChangedFiles / truncateCommitDiff", () => {
   });
   it("truncates huge diffs", () => {
     expect(truncateCommitDiff("")).toBe("(no textual diff)");
-    expect(truncateCommitDiff("x".repeat(30000))).toContain("(diff truncated)");
+    expect(truncateCommitDiff("x".repeat(30000))).not.toContain("(diff truncated)");
+    expect(truncateCommitDiff("x".repeat(120000))).toContain("(diff truncated)");
   });
 });
 

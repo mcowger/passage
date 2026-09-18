@@ -1,5 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { deterministicSlugSuggestion, MetadataGenerator, sanitizeBranchName, sanitizeFolderName, sanitizeSuggestion, worktreeSuggestionSchema } from "./metadata-generator.ts";
+import { LOCAL_QWEN_MODEL_VALUE, LocalQwenService, disposeSharedLocalQwen, setSharedLocalQwenForTesting } from "../llm/local-qwen.ts";
 
 const piScript = `let buffer = ""; process.stdin.on("data", (chunk) => { buffer += chunk; const lines = buffer.split("\\n"); buffer = lines.pop() ?? ""; for (const line of lines) { if (!line) continue; const request = JSON.parse(line); if (request.type === "get_state") { process.stdout.write(JSON.stringify({ type: "response", id: request.id, command: "get_state", success: true }) + "\\n"); continue; } if (request.type !== "prompt") continue; process.stdout.write(JSON.stringify({ type: "response", id: request.id, command: "prompt", success: true }) + "\\n"); process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "{\\\"label\\\":\\\"Webhook retries\\\",\\\"branch\\\":\\\"fix/webhook-retries\\\"," } }) + "\\n"); process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "{\\\"label\\\":\\\"Webhook retries\\\",\\\"branch\\\":\\\"fix/webhook-retries\\\",\\\"folder\\\":\\\"webhook-retries--wk_abcd\\\"}" }] } }) + "\\n"); process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n"); } });`;
 
@@ -75,5 +76,54 @@ describe("MetadataGenerator thinking level", () => {
     const generator = new MetadataGenerator(1_000, { executable: process.execPath, executableArgs: ["-e", piScript] });
     const result = await generator.suggest("Refactor websocket client reconnect loop", "/tmp", "test/model");
     expect(result.folder).toBe("webhook-retries--wk_abcd");
+  });
+});
+
+describe("MetadataGenerator local routing", () => {
+  afterEach(async () => {
+    await disposeSharedLocalQwen();
+    setSharedLocalQwenForTesting(undefined);
+    delete (globalThis as Record<string, unknown>).__passageLlamaChatSession;
+  });
+
+  const installFakeLocal = async (output: string): Promise<void> => {
+    (globalThis as Record<string, unknown>).__passageLlamaChatSession = class {
+      constructor(private readonly opts: { contextSequence: unknown }) {}
+      async prompt(): Promise<string> {
+        return output;
+      }
+      async dispose() {
+        await (this.opts.contextSequence as { dispose?: () => Promise<void> }).dispose?.();
+      }
+    };
+    const service = new LocalQwenService("/models/qwen.gguf", async () => ({
+      llama: { gpu: "cpu", dispose: async () => undefined },
+      model: { dispose: async () => undefined },
+      context: {
+        getSequence: () => ({ dispose: async () => undefined }),
+        dispose: async () => undefined,
+      },
+    }));
+    await service.init();
+    setSharedLocalQwenForTesting(service);
+  };
+
+  it("routes Qwen (Local) through the shared local service with the same signature", async () => {
+    await installFakeLocal('{"label":"Webhook retries","branch":"fix/webhook-retries","folder":"webhook-retries--wk_abcd"}');
+    const generator = new MetadataGenerator();
+    // Same (purpose, cwd, model, thinkingLevel, promptTemplate) signature.
+    const result = await generator.suggest("Refactor websocket client reconnect loop", "/tmp", LOCAL_QWEN_MODEL_VALUE, "high", "");
+    expect(result).toEqual({
+      label: "Webhook retries",
+      branch: "fix/webhook-retries",
+      folder: "webhook-retries--wk_abcd",
+    });
+  });
+
+  it("falls back deterministically when local is selected but not initialized", async () => {
+    const generator = new MetadataGenerator();
+    const result = await generator.suggest("Refactor websocket client reconnect loop", "/tmp", LOCAL_QWEN_MODEL_VALUE);
+    expect(worktreeSuggestionSchema.safeParse(result).success).toBe(true);
+    expect(result.branch).toMatch(/^feature\//);
   });
 });

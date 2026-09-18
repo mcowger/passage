@@ -1,5 +1,11 @@
-import { expect, test, describe } from "bun:test";
-import { buildTitlePrompt, fallbackAgentTitle, sanitizeAgentTitle } from "./title-suggester.ts";
+import { expect, test, describe, it, afterEach } from "bun:test";
+import { AgentTitleSuggester, buildTitlePrompt, fallbackAgentTitle, sanitizeAgentTitle } from "./title-suggester.ts";
+import {
+  LOCAL_QWEN_MODEL_VALUE,
+  LocalQwenService,
+  disposeSharedLocalQwen,
+  setSharedLocalQwenForTesting,
+} from "../llm/local-qwen.ts";
 
 describe("sanitizeAgentTitle", () => {
   test("passes through a clean 3-4 word title", () => {
@@ -47,5 +53,68 @@ describe("buildTitlePrompt", () => {
   test("renders a custom template with {{messages}}", () => {
     const prompt = buildTitlePrompt(["first message"], "Custom: {{messages}}!");
     expect(prompt).toBe("Custom: Message 1: \"first message\"!");
+  });
+});
+
+function installFakeLocal(output: string): LocalQwenService {
+  (globalThis as Record<string, unknown>).__passageLlamaChatSession = class {
+    constructor(private readonly opts: { contextSequence: unknown }) {}
+    async prompt(): Promise<string> {
+      return output;
+    }
+    async dispose() {
+      await (this.opts.contextSequence as { dispose?: () => Promise<void> }).dispose?.();
+    }
+  };
+  const service = new LocalQwenService("/models/qwen.gguf", async () => ({
+    llama: { gpu: "cpu", dispose: async () => undefined },
+    model: { dispose: async () => undefined },
+    context: {
+      getSequence: () => ({ dispose: async () => undefined }),
+      dispose: async () => undefined,
+    },
+  }));
+  return service;
+}
+
+describe("AgentTitleSuggester local routing", () => {
+  afterEach(async () => {
+    await disposeSharedLocalQwen();
+    setSharedLocalQwenForTesting(undefined);
+    delete (globalThis as Record<string, unknown>).__passageLlamaChatSession;
+  });
+
+  it("routes Qwen (Local) through the shared local service with the same signature", async () => {
+    const service = installFakeLocal("Fix login retry loop");
+    await service.init();
+    setSharedLocalQwenForTesting(service);
+    const suggester = new AgentTitleSuggester();
+    // Same (messages, cwd, model, thinkingLevel, promptTemplate) signature.
+    const title = await suggester.suggestTitle(
+      ["The login retry loop hammers the API when offline"],
+      "/tmp",
+      LOCAL_QWEN_MODEL_VALUE,
+      "high",
+      "",
+    );
+    expect(title).toBe("Fix login retry loop");
+  });
+
+  it("sanitizes local output and falls back when unusable", async () => {
+    const service = installFakeLocal("Agent");
+    await service.init();
+    setSharedLocalQwenForTesting(service);
+    const suggester = new AgentTitleSuggester();
+    const messages = ["The login retry loop hammers the API when offline"];
+    const title = await suggester.suggestTitle(messages, "/tmp", LOCAL_QWEN_MODEL_VALUE);
+    expect(title).toBe(fallbackAgentTitle(messages));
+    expect(sanitizeAgentTitle("Agent")).toBeNull();
+  });
+
+  it("falls back deterministically when local is selected but not initialized", async () => {
+    const suggester = new AgentTitleSuggester();
+    const messages = ["The login retry loop hammers the API when offline"];
+    const title = await suggester.suggestTitle(messages, "/tmp", LOCAL_QWEN_MODEL_VALUE);
+    expect(title).toBe(fallbackAgentTitle(messages));
   });
 });
