@@ -6,7 +6,14 @@ import type { WorkspaceApi } from "../api.ts";
 
 // The real dialog portals its content, which renders nothing under SSR. Stub it
 // with plain elements so the class names we hand to DialogContent are visible.
+// `mock.module` replaces the module for the whole process, not just this file
+// (Bun doesn't undo it on `mock.restore()`), so the factory must re-export
+// every real member it isn't overriding -- otherwise any test file that runs
+// later and imports one of the omitted exports (e.g. `DialogDescription`)
+// fails with a missing-export SyntaxError.
+const RealDialog = await import("./ui/dialog.tsx");
 mock.module("./ui/dialog.tsx", () => ({
+  ...RealDialog,
   Dialog: ({ children }: { children: React.ReactNode }) =>
     React.createElement(React.Fragment, null, children),
   DialogContent: ({ children, className }: { children: React.ReactNode; className?: string }) =>
