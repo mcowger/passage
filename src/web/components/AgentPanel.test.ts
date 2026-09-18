@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { createQueuedFollowUp, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
+import { createQueuedFollowUp, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, resolveComposerGitOptions, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 
@@ -78,6 +78,8 @@ describe("isComposerMergeRelevant", () => {
     ahead: 0,
     behind: 0,
     aheadOfMain: 2,
+    behindMain: 0,
+    hasUpstream: false,
     dirty: false,
     conflicted: false,
     truncated: false,
@@ -91,6 +93,55 @@ describe("isComposerMergeRelevant", () => {
     expect(isComposerMergeRelevant({ ...base, checkoutRoot: "/repo", mainCheckoutRoot: "/repo" })).toBe(false);
     expect(isComposerMergeRelevant(null)).toBe(false);
     expect(isComposerMergeRelevant(undefined)).toBe(false);
+  });
+});
+
+describe("resolveComposerGitOptions", () => {
+  const base: import("../../shared/domain/git.ts").GitStatus = {
+    checkoutRoot: "/wt/feature",
+    mainCheckoutRoot: "/repo",
+    repositoryRoot: "/repo",
+    branchRef: "feature",
+    detached: false,
+    ahead: 0,
+    behind: 0,
+    aheadOfMain: 0,
+    behindMain: 0,
+    hasUpstream: false,
+    dirty: false,
+    conflicted: false,
+    truncated: false,
+    files: [],
+  };
+
+  test("offers merge only when ahead of main", () => {
+    expect(resolveComposerGitOptions({ ...base, aheadOfMain: 2 })).toEqual(["merge"]);
+  });
+
+  test("offers rebase only when main has diverged", () => {
+    expect(resolveComposerGitOptions({ ...base, behindMain: 3 })).toEqual(["rebase"]);
+  });
+
+  test("offers push only when a remote branch exists and is behind", () => {
+    expect(resolveComposerGitOptions({ ...base, hasUpstream: true, ahead: 1 })).toEqual(["push"]);
+    expect(resolveComposerGitOptions({ ...base, hasUpstream: false, ahead: 1 })).toEqual([]);
+    expect(resolveComposerGitOptions({ ...base, hasUpstream: true, ahead: 0 })).toEqual([]);
+  });
+
+  test("offers multiple options together in merge/rebase/push order", () => {
+    expect(resolveComposerGitOptions({ ...base, aheadOfMain: 2, behindMain: 1, hasUpstream: true, ahead: 1 })).toEqual([
+      "merge",
+      "rebase",
+      "push",
+    ]);
+  });
+
+  test("hides everything on main, detached, or missing branch", () => {
+    expect(resolveComposerGitOptions({ ...base, aheadOfMain: 2, branchRef: "main" })).toEqual([]);
+    expect(resolveComposerGitOptions({ ...base, aheadOfMain: 2, checkoutRoot: "/repo", mainCheckoutRoot: "/repo" })).toEqual([]);
+    expect(resolveComposerGitOptions({ ...base, aheadOfMain: 2, branchRef: null, detached: true })).toEqual([]);
+    expect(resolveComposerGitOptions(null)).toEqual([]);
+    expect(resolveComposerGitOptions(undefined)).toEqual([]);
   });
 });
 

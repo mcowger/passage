@@ -47,11 +47,14 @@ import {
   Scissors,
   Square,
   ArrowUp,
+  ArrowDownUp,
   Plus,
   Pencil,
   Brain,
   MessageSquareMore,
   FilePenLine,
+  FolderGit2,
+  Upload,
   Wrench,
   PencilSparkles,
   GraduationCap,
@@ -60,6 +63,7 @@ import {
   X,
 } from "lucide-react";
 import { Spinner } from "./ui/spinner.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 
 const STREAMING_STATS_INTERVAL_MS = 300;
 /** Distance from the bottom that still counts as following the live tail. */
@@ -262,6 +266,26 @@ export function isComposerMergeRelevant(status: GitStatus | null | undefined): b
   return !isMainWorktree && status.aheadOfMain > 0;
 }
 
+export type ComposerGitOption = "merge" | "rebase" | "push";
+
+/**
+ * Smart Git options for the composer button:
+ * - Merge: the branch is ahead of main.
+ * - Rebase: main has moved since the branch was cut (branch is behind main).
+ * - Push: a remote branch exists and is behind the local branch.
+ * Main worktrees, detached HEADs, and branches without a branchRef offer nothing.
+ */
+export function resolveComposerGitOptions(status: GitStatus | null | undefined): ComposerGitOption[] {
+  if (!status || !status.branchRef) return [];
+  const isMainWorktree = status.checkoutRoot === status.mainCheckoutRoot || status.branchRef === "main";
+  if (isMainWorktree) return [];
+  const options: ComposerGitOption[] = [];
+  if (status.aheadOfMain > 0) options.push("merge");
+  if ((status.behindMain ?? 0) > 0) options.push("rebase");
+  if (status.hasUpstream && status.ahead > 0) options.push("push");
+  return options;
+}
+
 /**
  * A follow-up composed while the agent is running. It stays attached to the
  * composer (never in the timeline, never sent to Pi) until the run settles,
@@ -359,10 +383,12 @@ export function QueuedFollowUpList({
 }
 
 /**
- * Merge shortcut for the bottom composer bar. Fetches its own Git status and
- * only renders when a merge is relevant (non-main branch ahead of main),
- * so non-Git workspaces, main, and fully-merged branches add no UI noise.
- * The actual merge runs only after explicit confirmation.
+ * Smart Git shortcut for the bottom composer bar. Fetches its own Git status and
+ * only renders when at least one action is relevant: merge (ahead of main),
+ * rebase (main has diverged), or push (remote branch exists and is behind).
+ * A single option renders as a direct action button; multiple options collapse
+ * into a FolderGit2 icon button with a thinking-selector-style popup menu.
+ * Merge still runs only after explicit confirmation.
  */
 function ComposerMergeButton({
   workspaceId,
@@ -376,8 +402,9 @@ function ComposerMergeButton({
   onWorkspaceDeleted?: () => void | Promise<void>;
 }) {
   const [status, setStatus] = useState<GitStatus | null>(null);
-  const [merging, setMerging] = useState(false);
+  const [busyOp, setBusyOp] = useState<ComposerGitOption | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [mergedBranch, setMergedBranch] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
@@ -394,6 +421,7 @@ function ComposerMergeButton({
   useEffect(() => {
     setStatus(null);
     setConfirmOpen(false);
+    setMenuOpen(false);
     setMergedBranch(null);
     setDeleteError("");
     void refresh();
@@ -423,11 +451,14 @@ function ComposerMergeButton({
     };
   }, [workspaceId]);
 
+  const busy = busyOp !== null;
+
   const handleConfirmMerge = () => {
-    if (merging) return;
+    if (busy) return;
     const branchRef = status?.branchRef ?? "branch";
     setConfirmOpen(false);
-    setMerging(true);
+    setMenuOpen(false);
+    setBusyOp("merge");
     void api.gitMergeIntoMain(workspaceId).then(
       (next) => {
         setStatus(next);
@@ -439,7 +470,41 @@ function ComposerMergeButton({
         const message = friendlyApiError(err, "Could not merge into main. Resolve any conflicts and try again.");
         toast.error("Merge into main failed", { description: message });
       },
-    ).finally(() => setMerging(false));
+    ).finally(() => setBusyOp(null));
+  };
+
+  const handleRebase = () => {
+    if (busy) return;
+    const branchRef = status?.branchRef ?? "branch";
+    setMenuOpen(false);
+    setBusyOp("rebase");
+    void api.gitRebaseOntoMain(workspaceId).then(
+      (next) => {
+        setStatus(next);
+        toast.success(`Rebased ${next.branchRef ?? branchRef} onto main`);
+      },
+      (err: unknown) => {
+        const message = friendlyApiError(err, "Could not rebase onto main. Resolve any conflicts and try again.");
+        toast.error("Rebase onto main failed", { description: message });
+      },
+    ).finally(() => setBusyOp(null));
+  };
+
+  const handlePush = () => {
+    if (busy) return;
+    const branchRef = status?.branchRef ?? "branch";
+    setMenuOpen(false);
+    setBusyOp("push");
+    void api.gitPush(workspaceId).then(
+      (next) => {
+        setStatus(next);
+        toast.success(`Pushed ${next.branchRef ?? branchRef}`);
+      },
+      (err: unknown) => {
+        const message = friendlyApiError(err, "Could not push the branch. Check the remote and try again.");
+        toast.error("Push failed", { description: message });
+      },
+    ).finally(() => setBusyOp(null));
   };
 
   const handleDeleteWorkspace = () => {
@@ -460,25 +525,109 @@ function ComposerMergeButton({
     );
   };
 
-  const mergeRelevant = isComposerMergeRelevant(status);
-  if (!mergeRelevant && mergedBranch === null) return null;
+  const options = resolveComposerGitOptions(status);
+  if (options.length === 0 && mergedBranch === null) return null;
   const branchRef = status?.branchRef ?? mergedBranch ?? "branch";
   const ahead = status?.aheadOfMain ?? 0;
+  const behindMain = status?.behindMain ?? 0;
+  const aheadUpstream = status?.ahead ?? 0;
+
+  const runOption = (option: ComposerGitOption) => {
+    if (option === "merge") setConfirmOpen(true);
+    else if (option === "rebase") handleRebase();
+    else handlePush();
+  };
+
+  const optionMeta: Record<ComposerGitOption, { label: string; detail: string; title: string; Icon: typeof GitMerge }> = {
+    merge: {
+      label: "Merge",
+      detail: `${ahead} ahead`,
+      title: `Merge ${branchRef} into main (${ahead} commit${ahead === 1 ? "" : "s"} ahead)`,
+      Icon: GitMerge,
+    },
+    rebase: {
+      label: "Rebase",
+      detail: `${behindMain} behind main`,
+      title: `Rebase ${branchRef} onto main (${behindMain} commit${behindMain === 1 ? "" : "s"} behind)`,
+      Icon: ArrowDownUp,
+    },
+    push: {
+      label: "Push",
+      detail: `${aheadUpstream} ahead`,
+      title: `Push ${branchRef} to remote (${aheadUpstream} commit${aheadUpstream === 1 ? "" : "s"} ahead)`,
+      Icon: Upload,
+    },
+  };
+
   return (
     <>
-      {mergeRelevant ? (
-        <Button
-          variant="secondary"
-          size="xs"
-          className="composer-action-btn"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disabled || merging}
-          title={`Merge ${branchRef} into main (${ahead} commit${ahead === 1 ? "" : "s"} ahead)`}
-          aria-label={`Merge ${branchRef} into main`}
-        >
-          {merging ? <Spinner className="size-3" /> : <GitMerge size={14} aria-hidden="true" />}
-          Merge
-        </Button>
+      {options.length === 1 && options[0] !== undefined ? (() => {
+        const only = options[0];
+        const meta = optionMeta[only];
+        const MetaIcon = meta.Icon;
+        return (
+          <Button
+            variant="secondary"
+            size="xs"
+            className="composer-action-btn"
+            onClick={() => runOption(only)}
+            disabled={disabled || busy}
+            title={meta.title}
+            aria-label={meta.title}
+          >
+            {busy ? <Spinner className="size-3" /> : <MetaIcon size={14} aria-hidden="true" />}
+            {meta.label}
+          </Button>
+        );
+      })() : options.length > 1 ? (
+        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="secondary"
+              size="xs"
+              className="composer-action-btn"
+              disabled={disabled || busy}
+              title={`Git options for ${branchRef}: ${options.map((o) => optionMeta[o].label).join(", ")}`}
+              aria-label={`Git options for ${branchRef}`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+            >
+              {busy ? <Spinner className="size-3" /> : <FolderGit2 size={14} aria-hidden="true" />}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="thinking-popover w-56 p-1" align="end" sideOffset={6}>
+            <div className="popover-header-title px-2 py-1.5">Git options</div>
+            <div role="menu" aria-label={`Git options for ${branchRef}`}>
+              {options.map((option) => {
+                const meta = optionMeta[option];
+                const MetaIcon = meta.Icon;
+                const isBusy = busyOp === option;
+                return (
+                  <div
+                    key={option}
+                    role="menuitem"
+                    className="thinking-option-row"
+                    title={meta.title}
+                    aria-label={meta.title}
+                    aria-disabled={busy}
+                    tabIndex={busy ? -1 : 0}
+                    onClick={() => { if (!busy) runOption(option); }}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === " ") && !busy) {
+                        e.preventDefault();
+                        runOption(option);
+                      }
+                    }}
+                  >
+                    {isBusy ? <Spinner className="size-3" /> : <MetaIcon size={14} aria-hidden="true" />}
+                    <span className="thinking-option-name">{meta.label}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{meta.detail}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </PopoverContent>
+        </Popover>
       ) : null}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>

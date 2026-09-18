@@ -49,6 +49,8 @@ test("client requests a merge into main", async () => {
       ahead: 0,
       behind: 0,
       aheadOfMain: 1,
+      behindMain: 0,
+      hasUpstream: false,
       dirty: false,
       conflicted: false,
       truncated: false,
@@ -58,6 +60,35 @@ test("client requests a merge into main", async () => {
   await api.gitMergeIntoMain("wsp_feature");
   expect(request?.method).toBe("POST");
   expect(request?.url).toContain("/api/workspaces/wsp_feature/git/merge");
+});
+
+test("client requests rebase onto main and push", async () => {
+  const urls: string[] = [];
+  const api = createWorkspaceApi(async (input, init) => {
+    urls.push(String(input));
+    return Response.json({
+      checkoutRoot: "/worktrees/feature",
+      mainCheckoutRoot: "/repo",
+      repositoryRoot: "/repo",
+      branchRef: "feature",
+      detached: false,
+      ahead: 0,
+      behind: 0,
+      aheadOfMain: 0,
+      behindMain: 0,
+      hasUpstream: false,
+      dirty: false,
+      conflicted: false,
+      truncated: false,
+      files: [],
+    });
+  });
+  await api.gitRebaseOntoMain("wsp_feature");
+  await api.gitPush("wsp_feature");
+  expect(urls).toEqual([
+    "/api/workspaces/wsp_feature/git/rebase",
+    "/api/workspaces/wsp_feature/git/push",
+  ]);
 });
 
 test("client validates typed agent responses and serializes commands", async () => {

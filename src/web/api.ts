@@ -253,6 +253,8 @@ export function createWorkspaceApi(
     async gitPull(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/pull`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
     async gitFetch(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/fetch`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
     async gitMergeIntoMain(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/merge`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
+    async gitRebaseOntoMain(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/rebase`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
+    async gitPush(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/push`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
     async listFiles(id: string, path = ".", cursor?: string): Promise<FileListing> { const q = new URLSearchParams({ path }); if (cursor) q.set("cursor", cursor); return await request(`/api/workspaces/${encodeURIComponent(id)}/files?${q}`) as FileListing; },
     async readFile(id: string, path: string): Promise<FileRead> { return await request(`/api/workspaces/${encodeURIComponent(id)}/files/read?path=${encodeURIComponent(path)}`) as FileRead; },
     async writeFile(id: string, path: string, content: string, expected: FileRevision): Promise<FileWrite> { return await request(`/api/workspaces/${encodeURIComponent(id)}/files`, { method: "PUT", body: JSON.stringify({ path, content, expected }) }) as FileWrite; },
