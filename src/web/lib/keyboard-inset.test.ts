@@ -6,6 +6,15 @@ describe("computeKeyboardInset", () => {
     expect(computeKeyboardInset(852, 852, 0)).toBe(0);
   });
 
+  test("ignores safe-area-sized cold-start under-report (WebKit 254868)", () => {
+    // Dynamic Island top (~59px) + home indicator (~34px) ≈ 93px of noise.
+    expect(computeKeyboardInset(852, 759, 0)).toBe(0);
+  });
+
+  test("ignores sub-threshold differences", () => {
+    expect(computeKeyboardInset(852, 703, 0)).toBe(0);
+  });
+
   test("measures the covered height while open", () => {
     expect(computeKeyboardInset(852, 500, 0)).toBe(352);
   });
@@ -20,11 +29,13 @@ describe("computeKeyboardInset", () => {
 });
 
 describe("computeAppHeight", () => {
-  test("uses the full layout height when the keyboard is closed", () => {
-    expect(computeAppHeight(852, 852, 0)).toBe(852);
+  test("always tracks the layout height, keyboard closed", () => {
+    expect(computeAppHeight(852)).toBe(852);
   });
 
-  test("shrinks to the visible height while the keyboard is open", () => {
-    expect(computeAppHeight(852, 500, 352)).toBe(500);
+  test("never shrinks to the visual height while the keyboard is open", () => {
+    // The composer rides via --kb-inset margin; resizing the shell behind
+    // Safari's back produces white gaps and cements cold-start under-report.
+    expect(computeAppHeight(852)).toBe(852);
   });
 });

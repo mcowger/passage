@@ -2,7 +2,7 @@
 @media (max-width: 768px) {
   .app { display: flex; flex-direction: column; }
   .main { height: auto; flex: 1; min-height: 0; }
-  .mobile-topbar { display: flex; align-items: center; width: 100%; min-height: 40px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .mobile-topbar { display: flex; align-items: center; width: 100%; min-height: 40px; padding-top: env(safe-area-inset-top, 0px); background: var(--surface); border-bottom: 1px solid var(--border); }
   .mobile-nav { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; height: 100%; padding: 0 12px; color: var(--foreground); background: transparent; border: 0; font-weight: 600; font-size: 12.5px; }
   .mobile-topbar .footer-status { flex: none; padding: 0 12px; font-size: 11px; color: var(--muted); }
   .mobile-only { display: block; }
@@ -22,7 +22,7 @@
   .user-message-card { max-width: 90%; }
   /* Narrow-viewport header: keep brand, view tabs, and actions on one
      scrollable row instead of colliding. */
-  .workspace-nav-bar { gap: 6px; padding: 0 8px; overflow: hidden; flex-wrap: nowrap; }
+  .workspace-nav-bar { gap: 6px; padding: env(safe-area-inset-top, 0px) 8px 0; overflow: hidden; flex-wrap: nowrap; }
   .workspace-nav-brand { max-width: 34vw; flex: 1 1 auto; }
   .workspace-crumb-title b { max-width: 16vw; }
   .workspace-crumb-title span:last-child { max-width: 16vw; }
@@ -35,7 +35,11 @@
   /* Mobile context bar replaces the desktop tab strip: one compact row with
      drawer access, a tappable workspace/destination title (opens the session
      switcher), and an overflow menu. No hidden horizontal scrolling. */
-  .mobile-context-wrap { flex: 0 0 auto; background: var(--background); border-bottom: 1px solid var(--border); }
+  /* Edge-to-edge PWA (black-translucent status bar): the wrap bleeds its
+     background behind the status bar / Dynamic Island while the top padding
+     keeps the bar content clear of it. Without this the bar hides behind
+     the system status area and reads as missing. */
+  .mobile-context-wrap { flex: 0 0 auto; padding-top: env(safe-area-inset-top, 0px); background: var(--background); border-bottom: 1px solid var(--border); }
   .mobile-context-bar { display: flex; align-items: center; gap: 4px; min-height: 52px; padding: 4px 8px; }
   .mobile-context-icon-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; border: 0; border-radius: 8px; background: none; color: var(--foreground); }
   .mobile-context-icon-btn:hover { background: var(--surface-hover); }

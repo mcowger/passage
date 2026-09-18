@@ -119,8 +119,9 @@ code { font-family: var(--font-mono); }
 
 /* iOS PWA shell: 100vh fallback covers standalone cold start (WebKit 254868
    under-reports 100dvh by the safe-area inset until the viewport is
-   exercised); --app-height is JS-corrected to the visible height. */
-.app { display: flex; height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); max-height: 100vh; max-height: 100dvh; max-height: var(--app-height, 100dvh); overflow: hidden; }
+   exercised); --app-height is JS-set to the layout height (never the
+   visual height — shrinking the shell causes gaps and double-offsets). */
+.app { display: flex; height: 100vh; height: var(--app-height, 100dvh); max-height: 100vh; max-height: var(--app-height, 100dvh); overflow: hidden; }
 
 /* iOS auto-zooms inputs/selects/textareas/contenteditables under 16px on
    focus. Desktop keeps its smaller sizes; touch layouts get the 16px floor
