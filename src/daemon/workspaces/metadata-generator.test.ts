@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { deterministicSlugSuggestion, MetadataGenerator, worktreeSuggestionSchema } from "./metadata-generator.ts";
+import { deterministicSlugSuggestion, MetadataGenerator, sanitizeBranchName, sanitizeFolderName, sanitizeSuggestion, worktreeSuggestionSchema } from "./metadata-generator.ts";
 
 const piScript = `let buffer = ""; process.stdin.on("data", (chunk) => { buffer += chunk; const lines = buffer.split("\\n"); buffer = lines.pop() ?? ""; for (const line of lines) { if (!line) continue; const request = JSON.parse(line); if (request.type === "get_state") { process.stdout.write(JSON.stringify({ type: "response", id: request.id, command: "get_state", success: true }) + "\\n"); continue; } if (request.type !== "prompt") continue; process.stdout.write(JSON.stringify({ type: "response", id: request.id, command: "prompt", success: true }) + "\\n"); process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "{\\\"label\\\":\\\"Webhook retries\\\",\\\"branch\\\":\\\"fix/webhook-retries\\\"," } }) + "\\n"); process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "{\\\"label\\\":\\\"Webhook retries\\\",\\\"branch\\\":\\\"fix/webhook-retries\\\",\\\"folder\\\":\\\"webhook-retries--wk_abcd\\\"}" }] } }) + "\\n"); process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n"); } });`;
 
@@ -41,6 +41,25 @@ describe("MetadataGenerator", () => {
     expect(result.branch).toBeDefined();
     expect(result.folder).toBeDefined();
     expect(worktreeSuggestionSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("sanitizes model output containing spaces (regression: 'fix/bad-overlap settings-tabs')", () => {
+    const fallback = deterministicSlugSuggestion("Bad Overlap on settings page tabs.");
+    const result = sanitizeSuggestion(
+      { label: "bad-overlap-settings-tabs", branch: "fix/bad-overlap settings-tabs", folder: "bad-overlap-settings-tabs--w0720xz" },
+      fallback,
+    );
+    expect(result.branch).toBe("fix/bad-overlap-settings-tabs");
+    expect(result.branch).not.toContain(" ");
+    expect(worktreeSuggestionSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("sanitizes branch and folder names without spaces", () => {
+    expect(sanitizeBranchName("fix/bad-overlap settings-tabs")).toBe("fix/bad-overlap-settings-tabs");
+    expect(sanitizeBranchName("Feature/My New Thing!")).toBe("feature/my-new-thing");
+    expect(sanitizeBranchName("")).toBe("");
+    expect(sanitizeFolderName("My Folder/Name Here")).not.toContain(" ");
+    expect(sanitizeFolderName("My Folder/Name Here")).not.toContain("/");
   });
 });
 

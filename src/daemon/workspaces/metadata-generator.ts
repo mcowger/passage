@@ -15,6 +15,83 @@ export const worktreeSuggestionSchema = z.object({
 export type WorktreeSuggestion = z.infer<typeof worktreeSuggestionSchema>;
 type MetadataGeneratorPiOptions = Pick<PiRpcOptions, "executable" | "executableArgs">;
 
+/** Normalize free-form model text: strip code fences, quotes, and
+ *  collapse whitespace. */
+function cleanText(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  let text = raw.trim();
+  const fence = text.match(/```(?:\w+)?\n([\s\S]*?)```/);
+  if (fence) text = fence[1].trim();
+  text = text.replace(/^[`"'“”‘’]+/, "").replace(/[`"'“”‘’]+$/, "").trim();
+  return text;
+}
+
+/** Sanitize one path component of a branch name: lowercase, hyphen-
+ *  separated, no spaces. Keeps alphanumerics plus `.`, `-`, `_`. */
+function sanitizeBranchComponent(part: string): string {
+  return part
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/\.+/g, ".")
+    .replace(/^[-.]+|[-.]+$/g, "");
+}
+
+/** Sanitize a full branch name, preserving `/` separators. Never returns
+ *  a value with whitespace. Returns "" when nothing usable remains. */
+export function sanitizeBranchName(raw: unknown): string {
+  const text = cleanText(raw).replace(/\\/g, "/");
+  if (!text) return "";
+  const parts = text
+    .split("/")
+    .map(sanitizeBranchComponent)
+    .filter((part) => part && part !== "." && part !== ".." && !part.endsWith(".lock"));
+  let branch = parts.join("/").replace(/\/\/+/g, "/").replace(/^\/+|\/+$/g, "");
+  // Git forbids `@{` sequences and `..` anywhere; flatten them.
+  branch = branch.replace(/@\{/g, "-").replace(/\.\./g, "-");
+  if (!branch || branch.includes(" ") || branch.includes("..")) return "";
+  return branch.slice(0, MAX_DOMAIN_PATH_LENGTH);
+}
+
+/** Sanitize a worktree folder name: single path segment, lowercase,
+ *  hyphen/underscore separated, no spaces or slashes. */
+export function sanitizeFolderName(raw: unknown): string {
+  const text = cleanText(raw).replace(/[\\/]+/g, "-");
+  if (!text) return "";
+  const folder = text
+    .toLowerCase()
+    .replace(/[\s]+/g, "-")
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-{3,}/g, "--")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    .slice(0, MAX_DOMAIN_LABEL_LENGTH);
+  if (!folder || /\s/.test(folder)) return "";
+  return folder;
+}
+
+/** Sanitize a workspace label: human-readable, single line. */
+export function sanitizeLabel(raw: unknown): string {
+  const text = cleanText(raw).replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  return text.slice(0, MAX_DOMAIN_LABEL_LENGTH);
+}
+
+/** Coerce raw model output into a valid suggestion. Model answers
+ *  frequently include spaces or punctuation in branch/folder names
+ *  (e.g. `fix/bad-overlap settings-tabs`); without this the validated
+ *  value passes the length schema but fails `git worktree add`. Falls
+ *  back to the deterministic suggestion when nothing usable remains. */
+export function sanitizeSuggestion(raw: unknown, fallback: WorktreeSuggestion): WorktreeSuggestion {
+  if (!raw || typeof raw !== "object") return fallback;
+  const record = raw as Record<string, unknown>;
+  const label = sanitizeLabel(record.label) || fallback.label;
+  const branch = sanitizeBranchName(record.branch) || fallback.branch;
+  const folder = sanitizeFolderName(record.folder) || fallback.folder;
+  const validated = worktreeSuggestionSchema.safeParse({ label, branch, folder });
+  if (validated.success) return validated.data;
+  return fallback;
+}
+
 export function deterministicSlugSuggestion(purpose: string): WorktreeSuggestion {
   const clean = purpose.trim().replace(/[\r\n]+/g, " ");
   const words = clean
@@ -73,11 +150,7 @@ export class MetadataGenerator {
       if (!jsonMatch) return fallback;
 
       const parsed = JSON.parse(jsonMatch[0]);
-      const validated = worktreeSuggestionSchema.safeParse(parsed);
-      if (validated.success) {
-        return validated.data;
-      }
-      return fallback;
+      return sanitizeSuggestion(parsed, fallback);
     } catch {
       return fallback;
     } finally {

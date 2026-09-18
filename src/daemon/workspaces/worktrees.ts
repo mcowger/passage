@@ -21,6 +21,18 @@ const markerName = ".passage-worktree.json";
 const id = () => crypto.randomUUID();
 const inside = (root: string, path: string) => { const r = relative(root, path); return r === "" || (!r.split(/[\\/]/).includes("..") && !resolve(path).startsWith("..")); };
 
+/** Conservative git branch validity check for new-branch mode. Rejects
+ *  whitespace and characters git refuses so the caller gets an
+ *  "invalid name" error instead of a misleading "ref not found". */
+export function isValidNewBranchName(ref: string): boolean {
+  if (!ref || ref !== ref.trim()) return false;
+  if (/[\s~^:?*[\\@{]/.test(ref)) return false;
+  if (ref.startsWith("-") || ref.startsWith("/") || ref.endsWith("/") || ref.endsWith(".") || ref.endsWith(".lock")) return false;
+  if (ref.includes("..") || ref.includes("//") || ref.includes("@{")) return false;
+  if (!/^[A-Za-z0-9._/-]+$/.test(ref)) return false;
+  return true;
+}
+
 export type CreateWorktreeResult = { workspace: Workspace; setup: WorkspaceActionRun | null };
 
 export class WorktreeService {
@@ -40,6 +52,7 @@ export class WorktreeService {
     const project = this.repositories.projects.get(projectId); if (!project || project.archivedAt) throw new WorktreeError("invalid-project", "Active project required");
     const location = this.repositories.worktreeLocations.get(locationId); if (!location || !location.enabled || (location.projectId && location.projectId !== projectId)) throw new WorktreeError("invalid-location", "An enabled worktree location is required. Configure one before creating a worktree.");
     if (!ref || ref.startsWith("-") || ref.includes("..")) throw new WorktreeError("invalid-ref", `Invalid Git ref "${ref}". Use an existing branch name, or choose "New branch" to create one.`);
+    if (options?.createBranch && !isValidNewBranchName(ref)) throw new WorktreeError("invalid-ref", `Invalid branch name "${ref}". Use lowercase letters, numbers, hyphens, dots, underscores, and slashes (e.g. fix/short-name), with no spaces.`);
     const parent = await realpath(location.canonicalRootPath); let name = (folder ?? label).trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "") || "worktree";
     let destination = join(parent, name); for (let n = 2; true; n++) { try { await realpath(destination); destination = join(parent, `${name}-${n}`); } catch { break; } }
     if (!inside(parent, destination)) throw new WorktreeError("outside-location", "Destination is outside the configured location");
@@ -308,6 +321,9 @@ export class WorktreeService {
       return new WorktreeError("git-failed", `Branch "${ref}" is already checked out in another worktree. Use "Existing branch" mode with a different branch, or create a new one.`);
     }
     if (/invalid reference|unknown revision|did not match|not a valid/i.test(detail) || creatingBranch) {
+      if (creatingBranch && /\s/.test(ref)) {
+        return new WorktreeError("invalid-ref", `Invalid branch name "${ref}". Use lowercase letters, numbers, hyphens, and slashes (e.g. fix/short-name), with no spaces.`);
+      }
       return new WorktreeError(creatingBranch ? "invalid-ref" : "ref-not-found", `Branch or ref "${ref}" was not found. Check the spelling, pick an existing ref, or use "New branch" mode with a valid base.`);
     }
     return new WorktreeError("git-failed", detail ? `Git worktree failed: ${detail}` : "Git worktree failed. Check the branch, base ref, and destination, then retry.");
