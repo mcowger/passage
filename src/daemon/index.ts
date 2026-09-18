@@ -1,11 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Hono } from "hono";
+import { z } from "zod";
 import { honoLogger } from "@logtape/hono";
 import { AgentError, AgentService } from "./agents/service.ts";
 import { AgentEventHub } from "./agents/events/index.ts";
 import { DaemonLifecycle } from "./lifecycle/index.ts";
 import { DaemonEventHub } from "./lifecycle/events.ts";
+import { runSafeShutdown } from "./lifecycle/shutdown.ts";
+import { HttpInputError, readJsonBody } from "./http/body.ts";
 import { createAgentRoutes } from "./http/agents.ts";
 import { createModelRoutes } from "./http/models.ts";
 import { createWorkspaceRoutes } from "./http/workspaces.ts";
@@ -67,6 +70,16 @@ const MAX_AGENT_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_WORKSPACE_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_INFLIGHT_COMMANDS = 256;
 const UNKNOWN_REQUEST_ID = "unknown";
+/** docs/BACKTOSQUAREONE.md step 6: `POST /api/daemon/shutdown` body. Bare
+ *  `{}`/empty body is the plain safe path; `force: true` is a separate,
+ *  clearly-labeled interruption; the identity fields are for a validated
+ *  commit against a drain the caller already observed reach `ready`. */
+const shutdownInputSchema = z.object({
+  force: z.boolean().optional(),
+  instanceId: z.string().min(1).max(64).optional(),
+  drainId: z.string().min(1).max(64).nullable().optional(),
+  readinessRevision: z.number().int().nonnegative().safe().optional(),
+}).strict();
 await configureLogging();
 const log = logger("daemon");
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
@@ -212,11 +225,44 @@ app.delete("/api/daemon/drain", async (context) => {
   lifecycle.cancelDrain();
   return context.json(await lifecycle.snapshot());
 });
+// docs/BACKTOSQUAREONE.md step 6: `force: true` interrupts active work
+// immediately (a separate, clearly-labeled action). Without it, this is a
+// safe request: begin/join a drain, wait for `ready`, and commit -- no
+// overall kill deadline, so this can take a while or (if the drain gets
+// cancelled) never happen at all. Supplying `instanceId`/`drainId`/
+// `readinessRevision` (the deploy tool holding a drain at `ready`) instead
+// synchronously validates and commits exactly that observed snapshot,
+// failing fast with 409 on a stale or not-yet-ready one rather than
+// silently accepting and doing nothing. Acknowledgement means accepted,
+// not "already shut down"; a dropped connection around the moment of
+// actual exit is not proof either way -- verify independently (health
+// check / port probe), not via this response.
 app.post("/api/daemon/shutdown", async (context) => {
-  // Respond before tearing down: shutdown() stops the server.
-  const payload = { ok: true as const };
-  context.executionCtx.waitUntil(shutdown().then(() => process.exit(0)));
-  return context.json(payload);
+  let body: unknown = {};
+  try {
+    body = await readJsonBody(context.req.raw, 1024);
+  } catch (cause) {
+    if (!(cause instanceof HttpInputError && cause.code === "invalid-json")) {
+      return context.json({ error: cause instanceof HttpInputError ? cause.code : "invalid-request" }, 400);
+    }
+  }
+  const parsed = shutdownInputSchema.safeParse(body);
+  if (!parsed.success) return context.json({ error: "invalid-request" }, 400);
+  const input = parsed.data;
+
+  if (input.force) {
+    void finishShutdown({ interrupted: true });
+    return context.json({ ok: true as const, accepted: true });
+  }
+  const hasIdentity = input.instanceId !== undefined || input.drainId !== undefined || input.readinessRevision !== undefined;
+  if (!hasIdentity) {
+    void finishShutdown({ interrupted: false });
+    return context.json({ ok: true as const, accepted: true });
+  }
+  const commitResult = await lifecycle.commit({ instanceId: input.instanceId, drainId: input.drainId, readinessRevision: input.readinessRevision });
+  if (!commitResult.committed) return context.json({ ok: false as const, error: commitResult.reason }, 409);
+  void finishShutdown({ interrupted: false, alreadyCommitted: true });
+  return context.json({ ok: true as const, accepted: true });
 });
 /** Stop everything bound to a workspace before it is archived/removed:
  *  running setup actions, PTY terminals (+ children), live Pi processes,
@@ -742,11 +788,49 @@ if (portPath) {
 log.warn("Passage has no application authentication; expose it only on a trusted network or behind an authenticated proxy/VPN.", { event: "daemon.authentication_disabled" });
 log.info("Passage listening", { event: "daemon.started", port: server.port });
 
-let shuttingDown = false;
-async function shutdown(): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  log.info("Passage shutdown started", { event: "daemon.shutdown_started" });
+// docs/BACKTOSQUAREONE.md step 6 teardown order: (1) admission is already
+// sealed by this point (lifecycle phase is draining/ready/stopping, which
+// closes AgentService.admissionGate); (2) stop Pi children while SQLite is
+// still open, so final diagnostics/status persist; (3) clean up remaining
+// owned resources, aggregating failures instead of abandoning later owners
+// after the first error; (4) dispose event hubs, stop HTTP/WS, close
+// SQLite only after callbacks that use them have finished; (5) remove this
+// daemon's PID/port artifacts last. Shutdown stops processes but does not
+// archive agent records, remove canvas tabs, delete history, or move
+// session files.
+let teardownRan = false;
+async function teardown(options: { interrupted: boolean }): Promise<void> {
+  if (teardownRan) return;
+  teardownRan = true;
+  log.info("Passage shutdown started", { event: "daemon.shutdown_started", interrupted: options.interrupted });
+
+  try {
+    await agentService.shutdown({ interrupted: options.interrupted });
+  } catch (error) {
+    log.warn("Agent shutdown failed", { event: "daemon.shutdown_agents_failed", ...errorFields(error) });
+  }
+
+  const cleanupResults = await Promise.allSettled([
+    previewManager.shutdown(),
+  ]);
+  for (const result of cleanupResults) {
+    if (result.status === "rejected") {
+      log.warn("Shutdown cleanup step failed", { event: "daemon.shutdown_cleanup_failed", ...errorFields(result.reason) });
+    }
+  }
+
+  agentEvents.dispose();
+  workspaceEvents.dispose();
+  daemonEvents.dispose();
+  // `server.stop(true)` force-closes active connections immediately,
+  // including the socket carrying this very shutdown request's own
+  // response. A brief pause lets that response actually reach the caller
+  // first; the caller must still treat a dropped connection as inconclusive
+  // and verify independently, not as proof either way.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await server.stop(true);
+  metadata.close();
+
   if (pidPath && existsSync(pidPath)) {
     try {
       if (readFileSync(pidPath, "utf8").trim() === String(process.pid)) {
@@ -757,15 +841,45 @@ async function shutdown(): Promise<void> {
       }
     } catch {}
   }
-  agentEvents.dispose();
-  workspaceEvents.dispose();
-  daemonEvents.dispose();
-  await previewManager.shutdown();
-  await agentService.shutdown();
-  await server.stop(true);
-  metadata.close();
-  log.info("Passage shutdown completed", { event: "daemon.shutdown_completed" });
+  log.info("Passage shutdown completed", { event: "daemon.shutdown_completed", interrupted: options.interrupted });
 }
 
-process.once("SIGINT", () => { void shutdown().finally(() => process.exit(0)); });
-process.once("SIGTERM", () => { void shutdown().finally(() => process.exit(0)); });
+// The daemon's one shutdown path (docs/BACKTOSQUAREONE.md step 6), safe by
+// default. Duplicate calls (repeated HTTP requests, a signal arriving
+// while another is already in flight) share this same in-flight promise
+// instead of racing a second teardown. A safe (non-force,
+// non-already-committed) attempt that gets cancelled -- the drain was
+// cancelled, or superseded by a fresh one -- leaves the daemon running and
+// clears the in-flight promise so a later call can try again.
+let finishShutdownPromise: Promise<void> | undefined;
+function finishShutdown(options: { interrupted: boolean; alreadyCommitted?: boolean }): Promise<void> {
+  if (finishShutdownPromise) return finishShutdownPromise;
+  finishShutdownPromise = (async () => {
+    try {
+      if (options.interrupted) {
+        lifecycle.forceStop();
+      } else if (!options.alreadyCommitted) {
+        const result = await runSafeShutdown(lifecycle);
+        if (!result.committed) {
+          log.warn("Safe shutdown was cancelled before commit; daemon remains running", { event: "daemon.shutdown_cancelled", reason: result.reason });
+          return;
+        }
+      }
+      await teardown({ interrupted: options.interrupted });
+      process.exit(0);
+    } finally {
+      finishShutdownPromise = undefined;
+    }
+  })();
+  return finishShutdownPromise;
+}
+
+// Safe by default; a second signal while the first is still waiting on an
+// idle boundary forces an immediate, clearly-labeled interruption instead
+// of falling through to Node/Bun's raw, teardown-skipping default handler.
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    void finishShutdown({ interrupted: false });
+    process.once(signal, () => { void finishShutdown({ interrupted: true }); });
+  });
+}

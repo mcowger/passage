@@ -138,4 +138,79 @@ describe("DaemonLifecycle", () => {
     expect(snapshot).toMatchObject({ phase: "running", drainId: null, blockedCount: 0, blockers: [], blockersTruncated: false });
     expect(calls).toBe(0);
   });
+
+  describe("commit (docs/BACKTOSQUAREONE.md step 6)", () => {
+    test("reports not-ready outside the ready phase, without sealing anything", async () => {
+      const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [], listBlockers: async () => [] });
+      expect(await lifecycle.commit()).toEqual({ committed: false, reason: "not-ready" });
+      expect(lifecycle.currentPhase).toBe("running");
+    });
+
+    test("seals ready to stopping once, with no blockers", async () => {
+      const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [], listBlockers: async () => [] });
+      lifecycle.beginDrain();
+      await Bun.sleep(0);
+      expect(lifecycle.currentPhase).toBe("ready");
+      expect(await lifecycle.commit()).toEqual({ committed: true });
+      expect(lifecycle.currentPhase).toBe("stopping");
+      // Not idempotent-successful: stopping is not ready.
+      expect(await lifecycle.commit()).toEqual({ committed: false, reason: "not-ready" });
+    });
+
+    test("rejects a stale identity without sealing", async () => {
+      const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [], listBlockers: async () => [] });
+      lifecycle.beginDrain();
+      await Bun.sleep(0);
+      expect(await lifecycle.commit({ drainId: "not-the-real-drain-id" })).toEqual({ committed: false, reason: "stale" });
+      expect(await lifecycle.commit({ instanceId: "not-the-real-instance" })).toEqual({ committed: false, reason: "stale" });
+      expect(await lifecycle.commit({ readinessRevision: 999 })).toEqual({ committed: false, reason: "stale" });
+      expect(lifecycle.currentPhase).toBe("ready");
+      expect(await lifecycle.commit({ drainId: lifecycle.drainId, instanceId: lifecycle.instanceId, readinessRevision: lifecycle.readinessRevision })).toEqual({ committed: true });
+    });
+
+    test("rechecks blockers and reverts to draining instead of committing over late activity", async () => {
+      const blockers = controlledBlockers();
+      const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [], listBlockers: blockers.fn });
+      lifecycle.beginDrain();
+      blockers.resolveWith([]);
+      await Bun.sleep(0);
+      expect(lifecycle.currentPhase).toBe("ready");
+      const commitPromise = lifecycle.commit();
+      // The recheck inside commit() is a fresh listBlockers() call; resolve
+      // it with a blocker that appeared after `ready` was reached.
+      blockers.resolveWith([{ agentId: "agt_late", reason: "running" }]);
+      expect(await commitPromise).toEqual({ committed: false, reason: "not-ready" });
+      expect(lifecycle.currentPhase).toBe("draining");
+    });
+  });
+
+  describe("forceStop", () => {
+    test("jumps to stopping from any phase and is idempotent", () => {
+      const phases: DaemonPhase[] = [];
+      const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [], listBlockers: async () => [], onPhaseChanged: (phase) => phases.push(phase) });
+      lifecycle.forceStop();
+      expect(lifecycle.currentPhase).toBe("stopping");
+      expect(lifecycle.isAdmissionOpen()).toBe(false);
+      lifecycle.forceStop();
+      expect(phases).toEqual(["stopping"]);
+    });
+
+    test("seals admission from draining just as it would from running", () => {
+      const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [{ agentId: "a", reason: "running" }], listBlockers: async () => [{ agentId: "a", reason: "running" }] });
+      lifecycle.beginDrain();
+      lifecycle.forceStop();
+      expect(lifecycle.currentPhase).toBe("stopping");
+    });
+  });
+
+  test("waitForNextPhaseChange resolves exactly once per phase change, event-driven with no polling", async () => {
+    const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [], listBlockers: async () => [] });
+    const waiter = lifecycle.waitForNextPhaseChange();
+    let resolved = false;
+    void waiter.then(() => { resolved = true; });
+    expect(resolved).toBe(false);
+    lifecycle.beginDrain();
+    await waiter;
+    expect(resolved).toBe(true);
+  });
 });

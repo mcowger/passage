@@ -76,12 +76,15 @@ describe("dev-stop", () => {
     }
   });
 
-  it("gracefully stops a running process and unlinks pidfile", async () => {
+  it("--force falls back to signal escalation when the lifecycle API port cannot be resolved", async () => {
     const testDir = join(tmpdir(), `dev-stop-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
     const pidFile = join(testDir, "test.pid");
 
-    // Spawn a long-running child process that responds to SIGTERM
+    // No sibling dev.port file is written, mirroring a stale/foreign pid
+    // record the lifecycle API can't be reached through -- --force must
+    // still stop it via SIGTERM/SIGKILL, same as this script always used
+    // to behave unconditionally.
     const child = Bun.spawn(
       [
         process.execPath,
@@ -98,15 +101,89 @@ describe("dev-stop", () => {
     expect(existsSync(pidFile)).toBe(true);
     expect(isProcessAlive(child.pid)).toBe(true);
 
-    const result = await stopDevServer(pidFile);
+    const result = await stopDevServer(pidFile, { force: true });
     expect(result.stopped).toBe(true);
     expect(result.pid).toBe(child.pid);
-    expect(result.message).toContain(`Stopped dev server (PID ${child.pid})`);
+    expect(result.message).toContain("Force stopped");
 
-    // Verify process is terminated and pidfile removed
     expect(isProcessAlive(child.pid)).toBe(false);
     expect(existsSync(pidFile)).toBe(false);
 
     rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it("default (safe) stop uses the lifecycle API, not a signal, and never touches the process directly", async () => {
+    const testDir = join(tmpdir(), `dev-stop-api-${Date.now()}`);
+    mkdirSync(testDir, { recursive: true });
+    const pidFile = join(testDir, "test.pid");
+    let sawSigterm = false;
+
+    // Grab a free ephemeral port, then release it immediately for the child
+    // (spawned below) to bind -- this test only needs a real port number,
+    // not a server in this process.
+    const portProbe = Bun.serve({ port: 0, fetch: () => new Response("") });
+    const port = portProbe.port;
+    portProbe.stop(true);
+
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        `
+        const server = Bun.serve({ port: ${port}, fetch(request) {
+          if (request.method === "POST" && new URL(request.url).pathname === "/api/daemon/shutdown") {
+            setTimeout(() => process.exit(0), 20);
+            return Response.json({ ok: true, accepted: true });
+          }
+          return new Response("not found", { status: 404 });
+        } });
+        process.on("SIGTERM", () => { process.stderr.write("unexpected SIGTERM\\n"); process.exit(1); });
+      `,
+      ],
+      { stdout: "ignore", stderr: "ignore" },
+    );
+    writeFileSync(pidFile, `${child.pid}\n`, "utf8");
+    writeFileSync(portFileForPidFile(pidFile), `${port}\n`, "utf8");
+    await Bun.sleep(50);
+    expect(isProcessAlive(child.pid)).toBe(true);
+
+    const originalKill = process.kill.bind(process);
+    const killSpy = (pid: number, signal?: string | number) => {
+      if (pid === child.pid && (signal === "SIGTERM" || signal === "SIGKILL")) sawSigterm = true;
+      return originalKill(pid, signal);
+    };
+    (process as unknown as { kill: typeof process.kill }).kill = killSpy as typeof process.kill;
+
+    try {
+      const result = await stopDevServer(pidFile);
+      expect(result.stopped).toBe(true);
+      expect(result.pid).toBe(child.pid);
+    } finally {
+      process.kill = originalKill;
+    }
+
+    expect(sawSigterm).toBe(false);
+    expect(isProcessAlive(child.pid)).toBe(false);
+    expect(existsSync(pidFile)).toBe(false);
+
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it("default (safe) stop refuses to guess a port and never signals when none is recorded", async () => {
+    const testDir = join(tmpdir(), `dev-stop-noport-${Date.now()}`);
+    mkdirSync(testDir, { recursive: true });
+    const pidFile = join(testDir, "test.pid");
+    const child = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 1000);"], { stdout: "ignore", stderr: "ignore" });
+    writeFileSync(pidFile, `${child.pid}\n`, "utf8");
+
+    try {
+      const result = await stopDevServer(pidFile);
+      expect(result.stopped).toBe(false);
+      expect(result.message).toContain("refusing to guess");
+      expect(isProcessAlive(child.pid)).toBe(true);
+    } finally {
+      child.kill("SIGKILL");
+      rmSync(testDir, { recursive: true, force: true });
+    }
   });
 });

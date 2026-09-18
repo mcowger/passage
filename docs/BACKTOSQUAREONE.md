@@ -2,7 +2,10 @@
 
 ## Decision and scope
 
-Status: implementation plan, not implemented by this document.
+Status: steps 1-6 implemented (see AGENTS.md for the current-state summary
+and file pointers). This document remains the plan of record for the
+acceptance bar each step was built against; it does not itself track
+implementation status beyond this line.
 
 Remove the per-agent Pi holders. Keep the pinned Pi CLI and its existing
 stdio RPC integration. One Passage daemon owns each Pi child for that

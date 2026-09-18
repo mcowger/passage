@@ -814,12 +814,32 @@ export class AgentService {
     return stopped;
   }
 
-  async shutdown(): Promise<void> {
+  /** `options.interrupted` distinguishes step 6's two shutdown paths:
+   *  - Safe (default): every agent here was already verified idle by the
+   *    drain that reached `ready` (see DaemonLifecycle.commit), so there
+   *    is nothing meaningful to reconcile from stopping it. Detach first,
+   *    same as before -- an intentional, already-idle stop must not get
+   *    flagged as an error by the ordinary crash-handling path.
+   *  - Interrupted (explicit force): active work may really be getting cut
+   *    off. Keep each process's lifecycle listener attached while it is
+   *    stopped, so a forced exit still runs the ordinary onLifecycle
+   *    handling (final diagnostics, status, transcript error row) instead
+   *    of being silently dropped by an early detach, and await any
+   *    in-flight event/lifecycle reconciliation that stop triggered --
+   *    all while SQLite is still open. */
+  async shutdown(options?: { interrupted?: boolean }): Promise<void> {
     // Let create()'s background boots finish (they clean up their own map
     // entries) so they never write to a closed database after this returns.
     await Promise.allSettled([...this.pendingStarts.values()]);
     this.pendingStarts.clear();
-    for (const agentId of this.subscriptions.keys()) this.detach(agentId);
+    if (options?.interrupted) {
+      await this.manager.shutdown();
+      await Promise.allSettled([...this.eventChains.values()]);
+      for (const agentId of this.subscriptions.keys()) this.detach(agentId);
+    } else {
+      for (const agentId of this.subscriptions.keys()) this.detach(agentId);
+      await this.manager.shutdown();
+    }
     this.listeners.clear();
     this.previousRevisions.clear();
     this.leaves.clear();
@@ -830,7 +850,6 @@ export class AgentService {
     this.transcripts.clear();
     this.transcriptSeeds.clear();
     this.transcriptEpochs.clear();
-    await this.manager.shutdown();
   }
 
   private attach(agentId: string, process: PiProcessHandle): void {

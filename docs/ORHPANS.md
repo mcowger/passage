@@ -11,10 +11,11 @@ Retain the original design below until this reference is explicitly deleted.
 The replacement direction is daemon-owned Pi CLI RPC processes, accepting
 interruption on crashes and adding safe draining for planned shutdowns. The
 holder implementation described below has been removed (`BACKTOSQUAREONE.md`
-steps 1-3); this inventory is kept only to identify what was reversed. The
-safe-drain and shutdown mechanism (steps 4-6) is still planned, not
-implemented. Follow `BACKTOSQUAREONE.md` for migration order, safeguards, and
-acceptance tests.
+steps 1-3); this inventory is kept only to identify what was reversed. Restart
+recovery, drain mode, and the safe shutdown/deploy mechanism
+(`BACKTOSQUAREONE.md` steps 4-6) are implemented; see AGENTS.md for a
+current-state summary. Follow `BACKTOSQUAREONE.md` for the acceptance bar
+those steps were built against.
 
 Historical implementation inventory:
 

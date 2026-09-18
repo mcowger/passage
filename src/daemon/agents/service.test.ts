@@ -597,6 +597,29 @@ describe("drain admission gate (docs/BACKTOSQUAREONE.md step 5)", () => {
     g.store.close();
   });
 
+  test("interrupted shutdown reports a forced stop honestly; safe shutdown leaves an already-idle agent alone", async () => {
+    const f = await make();
+    const idleAgent = await f.service.create("w");
+    await f.service.prompt(idleAgent.id, "hi");
+    await Bun.sleep(20);
+    expect(f.service.snapshot(idleAgent.id).lastKnownStatus).toBe("idle");
+    await f.service.shutdown();
+    expect(f.repos.agents.get(idleAgent.id)?.lastKnownStatus).toBe("idle");
+    f.store.close();
+
+    const runningScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);const data=r.type==='get_state'?{isStreaming:true}:{};if(r.type==='prompt')process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n');process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+    const g = await make(10, ["-e", runningScript]);
+    const agent = await g.service.create("w");
+    await g.service.prompt(agent.id, "keep going");
+    await Bun.sleep(20);
+    expect(g.service.snapshot(agent.id).lastKnownStatus).toBe("running");
+    // Interrupted: the forced stop's lifecycle event is still observed
+    // (not silently dropped by an early detach) and honestly reported.
+    await g.service.shutdown({ interrupted: true });
+    expect(g.repos.agents.get(agent.id)?.lastKnownStatus).toBe("error");
+    g.store.close();
+  });
+
   test("listQuickBlockers reports needs-attention for an outstanding extension question", async () => {
     const attentionScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');if(r.type==='get_entries')setTimeout(()=>process.stdout.write(JSON.stringify({type:'extension_ui_request',id:'q-1',method:'select',title:'Pick',options:['One','Two']})+'\\n'),5)}})`;
     const f = await make(10, ["-e", attentionScript]);
