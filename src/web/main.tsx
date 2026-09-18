@@ -376,7 +376,7 @@ function App() {
 
   // Daemon build identity for the sidebar footer + deploy verification,
   // plus lifecycle phase/blockers (docs/BACKTOSQUAREONE.md step 5).
-  // Best-effort: the sidebar falls back to the static version when unknown
+  // Best-effort: the sidebar falls back to dev when unknown
   // and hides the drain control entirely when the phase is unknown.
   const refreshDaemon = useCallback(async () => {
     try {

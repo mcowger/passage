@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
 import type { WorkspaceSnapshot } from "../../shared/domain/workspaces.ts";
+import { formatBuildDate } from "../../shared/build-info.ts";
 
 // Tooltips require a provider and portal, which SSR cannot render. Stub them so
 // the sidebar markup (including action class names) is observable.
@@ -70,7 +71,7 @@ describe("Sidebar", () => {
     expect(touchVisibleCount).toBe(3);
   });
 
-  test("footer shows the injected build next to the bun version", () => {
+  test("footer shows the build date and commit", () => {
     const html = ReactDOMServer.renderToString(
       React.createElement(Sidebar, {
         data: snapshot,
@@ -89,8 +90,9 @@ describe("Sidebar", () => {
       })
     );
 
-    expect(html).toContain("v1.4.0");
+    expect(html).toContain(formatBuildDate("2026-01-01T00:00:00.000Z"));
     expect(html).toContain("abc1234");
+    expect(html).not.toContain("v1.4.0");
   });
 
   test("shows a begin-drain control while running and a cancel control with truthful blockers while draining", () => {

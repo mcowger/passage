@@ -167,7 +167,7 @@ export function Sidebar({
             className="muted"
             title={build ? formatBuildDetail(build) : undefined}
           >
-            {build ? formatBuildLabel(build) : "v1.4.0"}
+            {build ? formatBuildLabel(build) : "dev"}
           </span>
           <Tooltip>
             <TooltipTrigger asChild>
