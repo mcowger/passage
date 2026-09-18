@@ -145,4 +145,21 @@ describe("Sidebar", () => {
     );
     expect(noDaemonHtml).not.toContain("daemon-drain-status");
   });
+
+  test("the WS health indicator reflects real transport status, defaulting to checking rather than a false Connected", () => {
+    const base = { data: snapshot, open: false, onClose: () => {}, onSelect: () => {}, onNewProject: () => {}, agents: [] };
+
+    const noHealthHtml = ReactDOMServer.renderToString(React.createElement(Sidebar, base));
+    expect(noHealthHtml).toContain("Reconnecting\u2026");
+    expect(noHealthHtml).not.toContain(">Connected<");
+
+    const onlineHtml = ReactDOMServer.renderToString(React.createElement(Sidebar, { ...base, wsHealth: "online" }));
+    expect(onlineHtml).toContain("Connected");
+    expect(onlineHtml).not.toContain("ws-offline");
+    expect(onlineHtml).not.toContain("ws-checking");
+
+    const offlineHtml = ReactDOMServer.renderToString(React.createElement(Sidebar, { ...base, wsHealth: "offline" }));
+    expect(offlineHtml).toContain("Disconnected");
+    expect(offlineHtml).toContain("ws-offline");
+  });
 });

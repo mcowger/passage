@@ -14,10 +14,12 @@ import { createWorkspaceApi, friendlyApiError } from "./api.ts";
 import type { BuildInfo } from "../shared/build-info.ts";
 import { subscribeWorkspace, subscribeWorkspaces } from "./workspaceSocket.ts";
 import { subscribeDaemon } from "./daemonSocket.ts";
+import type { ConnectionHealth } from "./socketLifecycle.ts";
 import type { DaemonLifecycleSnapshot } from "./api.ts";
 import type { WorkspaceActionRun } from "../shared/domain/workspace-actions.ts";
 import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
+import { WsHealthIndicator } from "./components/WsHealthIndicator.tsx";
 import { WorkspaceDetailsModal } from "./components/WorkspaceDetailsModal.tsx";
 import { ExplorerPanel } from "./components/ExplorerPanel.tsx";
 import { ChangesPanel } from "./components/ChangesPanel.tsx";
@@ -386,6 +388,11 @@ function App() {
   // drain phase must never linger silently.
   const refreshDaemonRef = useRef(refreshDaemon);
   refreshDaemonRef.current = refreshDaemon;
+  // Real WS transport health for the sidebar's connection indicator, not a
+  // hardcoded label (docs/IOSWEBSOCKETS.md): the daemon socket is the one
+  // always-mounted `/ws` connection, so its heartbeat status stands in for
+  // overall reachability.
+  const [wsHealth, setWsHealth] = useState<ConnectionHealth>("checking");
   useEffect(() => {
     let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
     const subscription = subscribeDaemon(
@@ -397,6 +404,7 @@ function App() {
         }, 300);
       },
       async () => { void refreshDaemonRef.current(); },
+      setWsHealth,
     );
     return () => {
       if (invalidateTimer) clearTimeout(invalidateTimer);
@@ -1252,9 +1260,15 @@ function App() {
         </div>
       )}
 
-      <button className="mobile-nav" onClick={() => setDrawerOpen(true)} aria-label="Open navigation">
-        <span aria-hidden="true">☰</span> Navigate
-      </button>
+      <div className="mobile-topbar">
+        <button className="mobile-nav" onClick={() => setDrawerOpen(true)} aria-label="Open navigation">
+          <span aria-hidden="true">☰</span> Navigate
+        </button>
+        {/* The sidebar footer's indicator is inside a drawer, hidden by
+         *  default on mobile -- this is the always-visible mobile home for
+         *  the same real WS heartbeat status (docs/IOSWEBSOCKETS.md). */}
+        <WsHealthIndicator health={wsHealth} />
+      </div>
 
       {snapshot ? (
         <Sidebar
@@ -1274,6 +1288,7 @@ function App() {
           build={build}
           daemon={daemonLifecycle}
           daemonBusy={drainBusy}
+          wsHealth={wsHealth}
           onBeginDrain={handleBeginDrain}
           onCancelDrain={handleCancelDrain}
           onDiscoverWorktrees={(projId) => {

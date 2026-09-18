@@ -18,6 +18,8 @@ import { cn } from "../lib/utils.ts";
 import type { BuildInfo } from "../../shared/build-info.ts";
 import { formatBuildDetail, formatBuildLabel } from "../../shared/build-info.ts";
 import type { DaemonLifecycleSnapshot } from "../api.ts";
+import type { ConnectionHealth } from "../socketLifecycle.ts";
+import { WsHealthIndicator } from "./WsHealthIndicator.tsx";
 import { AGENT_STATUS_LABEL, getWorkspaceStatusKind } from "./agentStatus.ts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
 import {
@@ -51,6 +53,10 @@ export type SidebarProps = {
   daemonBusy?: boolean;
   onBeginDrain?: () => void;
   onCancelDrain?: () => void;
+  /** Real `/ws` heartbeat status (docs/IOSWEBSOCKETS.md), not assumed
+   *  connected. Absent renders the same as "checking" -- never a false
+   *  "Connected" before the first heartbeat lands. */
+  wsHealth?: ConnectionHealth;
 };
 
 const DAEMON_PHASE_LABEL: Record<DaemonLifecycleSnapshot["phase"], string> = {
@@ -124,6 +130,7 @@ export function Sidebar({
   daemonBusy,
   onBeginDrain,
   onCancelDrain,
+  wsHealth,
 }: SidebarProps) {
   const activeProjects = data.projects.filter((project) => !project.archivedAt);
   const [pendingRemove, setPendingRemove] = useState<Project | null>(null);
@@ -153,7 +160,7 @@ export function Sidebar({
       </div>
       {activeProjects.length === 0 && <p className="muted side-empty">No active projects registered yet.</p>}
       <footer>
-        <span className="footer-status"><span className="connected-dot" aria-hidden="true" /> Connected</span>
+        <WsHealthIndicator health={wsHealth} />
         {daemon && <DaemonDrainControl daemon={daemon} busy={daemonBusy} onBeginDrain={onBeginDrain} onCancelDrain={onCancelDrain} />}
         <span className="flex items-center gap-1">
           <span

@@ -35,7 +35,7 @@
 input { width: 100%; min-height: 28px; padding: 4px 6px; color: var(--foreground); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; }
 .form-help { color: var(--muted); font-size: 11px; line-height: 1.35; }
 .form-actions { justify-content: flex-end; margin-top: 16px; }
-.mobile-nav, .mobile-only, .drawer-scrim { display: none; }
+.mobile-nav, .mobile-only, .drawer-scrim, .mobile-topbar { display: none; }
 
 /* Toasts (sonner) — pin toast text to the app tokens so the title and
 description always hold contrast against the toast card, even if sonner's

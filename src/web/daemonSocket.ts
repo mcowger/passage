@@ -6,23 +6,17 @@ import {
   snapshotRequiredSchema,
   type EventEnvelope,
 } from "../shared/protocol/index.ts";
+import {
+  createHeartbeat,
+  generateRequestId,
+  pingEnvelope,
+  RESUME_PROBE_DEAD_AFTER_MS,
+  watchForegroundResume,
+  webSocketUrl,
+  type ConnectionHealth,
+} from "./socketLifecycle.ts";
 
 const RECONNECT_DELAY_MS = 800;
-
-function generateRequestId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  }
-  return "req_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
-}
 
 export type DaemonSocketState = {
   sequence: number;
@@ -82,12 +76,22 @@ export type DaemonSocket = { close: () => void };
 export function subscribeDaemon(
   onInvalidate: (value: EventEnvelope) => void,
   onReconcile: () => Promise<void>,
+  onHealthChange?: (health: ConnectionHealth) => void,
 ): DaemonSocket {
   let socket: WebSocket | undefined;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let reconciling = false;
+  let generation = 0;
   let state: DaemonSocketState = { sequence: 0, connected: false, snapshotRequired: false };
+
+  const setHealth = (health: ConnectionHealth) => onHealthChange?.(health);
+
+  const heartbeat = createHeartbeat({
+    sendPing: (requestId) => socket?.send(JSON.stringify(pingEnvelope(requestId))),
+    onAlive: () => setHealth("online"),
+    onDead: () => forceReconnect(),
+  });
 
   const scheduleReconnect = () => {
     if (stopped || reconnectTimer) return;
@@ -99,14 +103,21 @@ export function subscribeDaemon(
 
   const connect = () => {
     if (stopped || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
-    socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
-    socket.addEventListener("open", () => {
+    const myGeneration = ++generation;
+    setHealth("checking");
+    const current = new WebSocket(webSocketUrl());
+    socket = current;
+    current.addEventListener("open", () => {
+      if (generation !== myGeneration) return;
       state = { ...state, connected: true, snapshotRequired: false };
-      socket?.send(JSON.stringify(subscribeEnvelope(state.sequence)));
+      current.send(JSON.stringify(subscribeEnvelope(state.sequence)));
+      heartbeat.start();
     });
-    socket.addEventListener("message", (message) => {
+    current.addEventListener("message", (message) => {
+      if (generation !== myGeneration) return;
       try {
         const value = JSON.parse(String(message.data));
+        heartbeat.handleMessage(value);
         if (reconciling) return;
         const next = parseDaemonMessage(value, state);
         const changed = next !== state;
@@ -126,9 +137,12 @@ export function subscribeDaemon(
         }
       } catch {}
     });
-    socket.addEventListener("close", () => {
+    current.addEventListener("close", () => {
+      if (generation !== myGeneration) return;
+      heartbeat.stop();
       state = { ...state, connected: false };
       socket = undefined;
+      setHealth("offline");
       if (!stopped) {
         void onReconcile().catch(() => undefined);
         scheduleReconnect();
@@ -136,23 +150,37 @@ export function subscribeDaemon(
     });
   };
 
+  const forceReconnect = () => {
+    if (stopped) return;
+    heartbeat.stop();
+    const stale = socket;
+    socket = undefined;
+    setHealth("offline");
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = undefined; }
+    connect();
+    stale?.close();
+  };
+
   const reconnectFromBrowserState = () => {
-    if (document.visibilityState === "visible" && navigator.onLine) {
-      void onReconcile().catch(() => undefined);
-      if (!socket || socket.readyState === WebSocket.CLOSED) connect();
+    if (document.visibilityState !== "visible" || !navigator.onLine) return;
+    void onReconcile().catch(() => undefined);
+    if (!socket || socket.readyState === WebSocket.CLOSED) {
+      connect();
+    } else if (socket.readyState === WebSocket.OPEN) {
+      heartbeat.probeNow(RESUME_PROBE_DEAD_AFTER_MS);
     }
   };
 
-  window.addEventListener("online", reconnectFromBrowserState);
-  document.addEventListener("visibilitychange", reconnectFromBrowserState);
+  const disposeResumeWatcher = watchForegroundResume(reconnectFromBrowserState);
   connect();
 
   return {
     close() {
       stopped = true;
+      generation += 1;
+      heartbeat.stop();
       if (reconnectTimer) clearTimeout(reconnectTimer);
-      window.removeEventListener("online", reconnectFromBrowserState);
-      document.removeEventListener("visibilitychange", reconnectFromBrowserState);
+      disposeResumeWatcher();
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(unsubscribeEnvelope()));
       socket?.close();
     },

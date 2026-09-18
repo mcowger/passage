@@ -2,7 +2,9 @@
 @media (max-width: 768px) {
   .app { display: flex; flex-direction: column; }
   .main { height: auto; flex: 1; min-height: 0; }
-  .mobile-nav { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 0 12px; color: var(--foreground); background: var(--surface); border: 0; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 12.5px; }
+  .mobile-topbar { display: flex; align-items: center; width: 100%; min-height: 40px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .mobile-nav { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; height: 100%; padding: 0 12px; color: var(--foreground); background: transparent; border: 0; font-weight: 600; font-size: 12.5px; }
+  .mobile-topbar .footer-status { flex: none; padding: 0 12px; font-size: 11px; color: var(--muted); }
   .mobile-only { display: block; }
   .sidebar { position: fixed; inset: 0 auto 0 0; width: min(80vw, 280px); transform: translateX(-105%); transition: transform 150ms ease; }
   .sidebar.drawer-open { transform: translateX(0); }

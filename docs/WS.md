@@ -106,13 +106,32 @@ Copy these shapes, do not reinvent:
 
 ## 5. Reconnect / heartbeat / presence / backpressure
 
-- Reconnect: fixed 800ms timer + `online`/`visibilitychange`
-  reconciliation (mobile suspend is expected). Exponential backoff with
+- Reconnect: fixed 800ms timer for a real `close` + `online`/`pageshow`/
+  `visibilitychange` reconciliation (mobile suspend is expected). A
+  foreground return also force-replaces a connection that still reports
+  `OPEN`/`CONNECTING` if a heartbeat probe against it doesn't ack within
+  `RESUME_PROBE_DEAD_AFTER_MS` -- iOS Safari suspends backgrounded sockets
+  without firing `close` (docs/IOSWEBSOCKETS.md), so `OPEN` does not mean
+  alive. Every physical socket has a generation counter; callbacks from a
+  socket a reconnect has superseded are ignored. Exponential backoff with
   jitter SHOULD be added only when reconnect storms are observed --
   single-user fixed delay is intentional.
-- Heartbeat: `daemon/ping` exists; terminal liveness is PTY output +
-  socket close. A server ping interval MUST NOT be added speculatively
-  (only if idle LAN proxies prove to kill sockets).
+- Heartbeat: every `/ws` client (`src/web/socketLifecycle.ts`) sends a
+  `daemon/ping` probe with a fresh request id once per second
+  (`PING_INTERVAL_MS`) and declares the connection dead after
+  `PING_DEAD_AFTER_MS` (~4 missed probes) with no ack, triggering a forced
+  reconnect. This is deliberately more aggressive than typical proxy-driven
+  heartbeat advice (25-30s): Passage is single-user and LAN-trusted
+  (AGENTS.md), so 1/sec pings are cheap, and the trigger is observed
+  evidence of iOS silently killing backgrounded sockets
+  (docs/IOSWEBSOCKETS.md), not speculation. A stale ack for a superseded
+  probe MUST NOT satisfy a newer one. Terminal liveness is still PTY output
+  + socket close (unchanged). A server-initiated ping interval remains
+  unnecessary.
+- Client health: each `/ws` client reports `"online" | "checking" |
+  "offline"` (`ConnectionHealth`) from its heartbeat. The sidebar's
+  connection indicator (`Sidebar.tsx`) reflects the always-mounted daemon
+  socket's real status rather than an assumed-connected label.
 - Presence: none in v1 (single-user). The terminal size-lease
   (`lease_change`) is the only control signal and stays terminal-scoped.
 - Backpressure: coalesce terminal chunks without crossing
