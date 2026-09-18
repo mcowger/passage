@@ -43,6 +43,12 @@ const COMPACT_TIMEOUT_MS = 300_000;
 const COMPACTION_TOO_SHORT_PATTERN = /nothing to compact/i;
 /** Matches Pi's "already compacted" compact refusal. */
 const COMPACTION_ALREADY_DONE_PATTERN = /already compacted/i;
+/** Matches Pi's documented rejection of a bare `prompt` sent while it is
+ *  already streaming (see rpc.md "During streaming"): benign and
+ *  recoverable via steer/follow-up, not a crash. A race between the client
+ *  believing the agent is idle (e.g. a stale WebSocket) and Pi actually
+ *  still running can reach this even past Passage's own busy guard. */
+const PI_ALREADY_STREAMING_PATTERN = /already (processing|streaming)/i;
 /** Upper bound on the tool payload text scanned for a `git commit` invocation. */
 const MAX_GIT_SCAN_BYTES = 8192;
 /** Matches a `git commit` invocation inside a shell command (allowing global
@@ -530,6 +536,14 @@ export class AgentService {
     try {
       await process.request({ type: "prompt", message: withFileRefs(text, fileRefs), ...(validatedImages?.length ? { images: validatedImages } : {}) });
     } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      if (PI_ALREADY_STREAMING_PATTERN.test(message)) {
+        // Pi rejected the prompt before acceptance because it's genuinely
+        // still streaming; the run in progress is untouched. Leave status
+        // as running and report a normal, retryable conflict instead of a
+        // fatal agent crash.
+        throw new AgentError("invalid-input", "agent is active; use steer or follow-up, or wait for cancellation");
+      }
       logger("agent").error("Agent prompt failed", { event: "agent.prompt_failed", agentId, generation: process.generation, ...errorFields(cause) });
       this.updateStatus(agentId, "error", "attention", process.generation, String(cause));
       throw cause;

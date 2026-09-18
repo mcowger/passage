@@ -215,6 +215,24 @@ test("keeps an agent stopping until Pi confirms cancellation", async () => {
   f.store.close();
 });
 
+test("treats Pi's already-streaming prompt rejection as a recoverable conflict, not a crash", async () => {
+  const f = await make();
+  const alreadyStreamingScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){process.stdout.write(JSON.stringify({type:'response',id:r.id,success:false,error:"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."})+'\\n');continue}const data=r.type==='get_state'?{isStreaming:true,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+  const service = new AgentService(f.repos, {
+    sessionsRoot: join(f.root, "already-streaming-sessions"),
+    manager: new PiRpcManager(1),
+    pi: { executable: process.execPath, executableArgs: ["-e", alreadyStreamingScript] },
+  });
+  const agent = await service.create("w");
+  await expect(service.prompt(agent.id, "stale-client race")).rejects.toMatchObject({ code: "invalid-input" });
+  // Not a fatal crash: status stays running (matches the synchronous
+  // busy-guard rejection), and the agent keeps working -- it needs no
+  // "hit an error and stopped responding" banner or manual retry.
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+  await service.shutdown();
+  f.store.close();
+});
+
 test("reports cancellation failure without claiming an agent is idle", async () => {
   const f = await make();
   const hangingAbortScript = `let streaming=false;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n')}if(r.type==='abort')continue;const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
