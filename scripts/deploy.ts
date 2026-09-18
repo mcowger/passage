@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-/** Deploy: compile the binary -> stop the service -> copy the binary ->
+/** Deploy: build -> compile the binary -> stop the service -> copy the binary ->
  *  start the service. Nothing else -- no drain handshake, no health
  *  check, no rollback, no polling. `systemctl stop`/`start` already
  *  block until the unit reports the requested state (or the unit's own
@@ -22,6 +22,7 @@ function run(command: string[]): void {
   }
 }
 
+run([process.execPath, "run", "build"]);
 run([process.execPath, "run", "package"]);
 run(["systemctl", "--user", "stop", unit]);
 run(["cp", "-f", "./dist/passage", installed]);
