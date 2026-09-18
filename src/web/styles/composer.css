@@ -213,6 +213,25 @@
   .composer-editor {
     font-size: 16px;
   }
+  /* 44px minimum touch targets (Apple HIG): the desktop 26px send / steer
+     / queue / stop / attach buttons are hard to hit mid-shift on a phone,
+     and a miss while the keyboard is open reads as another swallowed tap. */
+  .composer-toolbar .send-btn,
+  .composer-toolbar .composer-action-btn,
+  .composer-toolbar .composer-attach-btn {
+    height: 44px;
+    min-height: 44px;
+    max-height: 44px;
+    min-width: 44px;
+  }
+  .composer-toolbar .send-btn {
+    min-width: 72px;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+  .composer-toolbar .composer-action-btn {
+    padding: 0 12px;
+  }
 }
 .composer-card textarea {
   resize: vertical;

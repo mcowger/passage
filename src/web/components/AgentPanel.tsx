@@ -259,6 +259,24 @@ export function isComposerLocked(status: AgentSummary["status"]): boolean {
   return status === "stopping";
 }
 
+/**
+ * iOS single-tap send: tapping a composer commit button (Send / Steer /
+ * Queue / Stop) while the contentEditable editor holds focus blurs it,
+ * which dismisses the iOS keyboard, collapses `--kb-inset`, and shifts the
+ * composer ~300px between touchstart and click -- Safari then delivers the
+ * tap as a dismiss-only gesture and the message needs a second tap.
+ * Preventing the pointerdown default keeps focus (and the keyboard) in the
+ * editor, so the click lands on a stable layout and sends on the first
+ * tap. Unlike touchstart preventDefault it does not cancel the click
+ * itself, and keyboard activation (Enter/Space -> click, no pointerdown)
+ * is unaffected. The action then blurs the editor after dispatching,
+ * restoring the familiar post-send keyboard dismissal -- same end state as
+ * before, minus the swallowed first tap.
+ */
+export function retainComposerFocusOnTap(event: { preventDefault: () => void }): void {
+  event.preventDefault();
+}
+
 /** Same relevance rule as the Changes panel: a non-main branch with commits ahead of main. */
 export function isComposerMergeRelevant(status: GitStatus | null | undefined): boolean {
   if (!status) return false;
@@ -1510,6 +1528,10 @@ function AgentComposerInner({
       true,
       false,
     );
+    // Dismiss the iOS keyboard now that the message is away: focus was held
+    // through pointerdown so this tap sent on the first try, and releasing
+    // it here restores the familiar post-send dismissal.
+    composerInputRef.current?.blur();
   };
 
   /**
@@ -1530,6 +1552,7 @@ function AgentComposerInner({
     reservedImageCount.current = 0;
     reservedFileCount.current = 0;
     setComposerError("");
+    composerInputRef.current?.blur();
   };
 
   const retractQueued = (id: string) => {
@@ -1983,6 +2006,7 @@ function AgentComposerInner({
                 <Button
                   size="xs"
                   className="composer-action-btn"
+                  onPointerDown={retainComposerFocusOnTap}
                   onClick={() => send("steer")}
                   disabled={busy || loading}
                   title={isMobileComposer ? "Steer now (⌘+Enter)" : "Steer now (Enter)"}
@@ -1994,6 +2018,7 @@ function AgentComposerInner({
                   variant="secondary"
                   size="xs"
                   className="composer-action-btn"
+                  onPointerDown={retainComposerFocusOnTap}
                   onClick={queueFollowUp}
                   disabled={busy || loading}
                   title="Queue follow-up — stays attached to the composer until this run settles"
@@ -2005,7 +2030,11 @@ function AgentComposerInner({
                   variant="destructive"
                   size="xs"
                   className="composer-action-btn"
-                  onClick={() => void run(() => api.abort(agentId))}
+                  onPointerDown={retainComposerFocusOnTap}
+                  onClick={() => {
+                    void run(() => api.abort(agentId));
+                    composerInputRef.current?.blur();
+                  }}
                   disabled={busy}
                   title="Stop agent execution"
                   aria-label="Stop agent execution"
@@ -2017,6 +2046,7 @@ function AgentComposerInner({
               <Button
                 size="xs"
                 className="send-btn"
+                onPointerDown={retainComposerFocusOnTap}
                 onClick={() => send("prompt")}
                 disabled={busy || loading || (!draft.trim() && images.length === 0 && uploadFiles.length === 0)}
               >

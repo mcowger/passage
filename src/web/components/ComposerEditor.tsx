@@ -48,6 +48,7 @@ export function shouldSubmitOnEnter(
 
 export type ComposerEditorHandle = {
   focus: () => void;
+  blur: () => void;
   setCaret: (position: number) => void;
 };
 
@@ -532,6 +533,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
 
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.focus(),
+    blur: () => editorRef.current?.blur(),
     setCaret: updateSelection,
   }), []);
 
