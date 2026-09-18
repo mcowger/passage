@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { createQueuedFollowUp, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, resolveComposerGitOptions, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
+import { createQueuedFollowUp, extractLatestThinkingSummary, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, resolveComposerGitOptions, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 
@@ -45,10 +45,40 @@ describe("formatDuration", () => {
 });
 
 describe("formatThinkingPreview", () => {
-  test("removes balanced bold markers from consecutive thinking summaries", () => {
+  test("follows the latest bold summary line", () => {
     expect(formatThinkingPreview("**Summary Line**\n\n**Another Summary Line**")).toBe(
-      "Summary Line Another Summary Line",
+      "Another Summary Line",
     );
+  });
+
+  test("tracks summaries across detail blocks and newline variations", () => {
+    expect(
+      formatThinkingPreview("**Thinking Summary 1**\n\nThinking detail goes here\n\n**Thinking Summary 2**\n\nMore detail"),
+    ).toBe("Thinking Summary 2");
+    // Back-to-back summaries, single newline.
+    expect(formatThinkingPreview("**Thinking Summary 1**\n**Thinking Summary 2**")).toBe(
+      "Thinking Summary 2",
+    );
+    // Back-to-back summaries, blank line between.
+    expect(formatThinkingPreview("**Thinking Summary 1**\n\n**Thinking Summary 2**")).toBe(
+      "Thinking Summary 2",
+    );
+  });
+
+  test("shows a summary while its closing marker is still streaming in", () => {
+    expect(formatThinkingPreview("**Thinking Summary 1**\n\nDetail\n\n**Thinking Summary 2")).toBe(
+      "Thinking Summary 2",
+    );
+  });
+
+  test("ignores inline bold prose and falls back to flattened text", () => {
+    expect(extractLatestThinkingSummary("Thinking about **foo** here")).toBeUndefined();
+    expect(formatThinkingPreview("Just plain thinking text")).toBe("Just plain thinking text");
+    expect(formatThinkingPreview("**bold** and more prose")).toBe("bold and more prose");
+  });
+
+  test("supports __ markers and strips inline code in summaries", () => {
+    expect(formatThinkingPreview("__Summary `one`__\n\n__Summary two__")).toBe("Summary two");
   });
 });
 

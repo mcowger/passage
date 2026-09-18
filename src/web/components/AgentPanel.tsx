@@ -1058,7 +1058,35 @@ export function formatIdleSinceLastFrame(idleSeconds: number | null): string {
   return formatDuration(idleSeconds);
 }
 
+/** Latest full-line bold heading (e.g. `**Thinking Summary 2**`) in thinking
+ *  text, if any. Models that structure thinking with bold summary lines get a
+ *  live status in the collapsed row: as new summaries stream in, the preview
+ *  follows the most recent one instead of showing the start of the text.
+ *  Lines with inline bold mid-sentence do not count -- the whole trimmed line
+ *  must be a single bold span. A missing closing marker is tolerated so a
+ *  summary still shows while it is streaming in. */
+export function extractLatestThinkingSummary(text: string): string | undefined {
+  let latest: string | undefined;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    for (const marker of ["**", "__"]) {
+      if (!line.startsWith(marker)) continue;
+      let inner = line.slice(marker.length);
+      if (inner.endsWith(marker)) inner = inner.slice(0, -marker.length);
+      // Inline bold elsewhere on the line means this is prose, not a heading.
+      if (!inner || inner.includes(marker)) break;
+      const cleaned = inner.replace(/`([^`]+)`/g, "$1").replace(/\s+/g, " ").trim();
+      if (cleaned) latest = cleaned;
+      break;
+    }
+  }
+  return latest;
+}
+
 export function formatThinkingPreview(text: string, maxLength = 70): string {
+  const summary = extractLatestThinkingSummary(text);
+  if (summary) return summary.slice(0, maxLength);
   return text
     .replace(/^(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)/gm, "")
     .replace(/(\*\*|__|~~)(?=\S)([\s\S]*?\S)\1/g, "$2")
@@ -2086,7 +2114,7 @@ export const TimelineRow = memo(function TimelineRow({
         <summary className="thinking-summary">
           <span className="thinking-icon">⚙</span>
           <span className="thinking-label">Thinking</span>
-          <span className="thinking-preview">{preview}…</span>
+          {!isExpanded && <span className="thinking-preview">{preview}…</span>}
         </summary>
         <div className="thinking-body">
           <Streamdown className="text-[12.5px] leading-relaxed text-muted-foreground italic">

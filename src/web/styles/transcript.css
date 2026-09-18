@@ -660,6 +660,7 @@ button.tool-row-summary {
 .thinking-icon { font-size: 12px; }
 .thinking-label { font-weight: 500; color: var(--foreground); }
 .thinking-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--muted); font-style: italic; }
+.thinking-row[open] .thinking-preview { display: none; }
 .thinking-body { padding: 4px 10px 4px 22px; color: var(--muted); font-size: 12.5px; line-height: 1.48; font-style: italic; border-left: 2px solid var(--border); margin: 2px 0 3px 6px; }
 
 
