@@ -56,6 +56,7 @@ import {
   PencilSparkles,
   GraduationCap,
   GitMerge,
+  RotateCwFadingClock,
   X,
 } from "lucide-react";
 import { Spinner } from "./ui/spinner.tsx";
@@ -593,7 +594,7 @@ export function AgentPanel({
   const [streamPhase, setStreamPhase] = useState<StreamPhase | null>(null);
   const [receiving, setReceiving] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [streamFrames, setStreamFrames] = useState(0);
+  const [streamIdleSeconds, setStreamIdleSeconds] = useState<number | null>(null);
   const [streamBytes, setStreamBytes] = useState(0);
 
   // The interval is the pill's only render driver, so the elapsed timer keeps
@@ -606,7 +607,7 @@ export function AgentPanel({
       setStreamPhase(null);
       setReceiving(false);
       setElapsedSeconds(0);
-      setStreamFrames(0);
+      setStreamIdleSeconds(null);
       setStreamBytes(0);
       return;
     }
@@ -624,8 +625,8 @@ export function AgentPanel({
       const activity = activityRef.current;
       setStreamPhase(activity.phase);
       setReceiving(activity.lastFrameAt > 0 && now - activity.lastFrameAt < RECEIVING_ACTIVITY_WINDOW_MS);
-      setStreamFrames(activity.frames);
       setStreamBytes(activity.bytes);
+      setStreamIdleSeconds(activity.lastFrameAt > 0 ? Math.max(0, (now - activity.lastFrameAt) / 1000) : null);
     };
     tick();
     const interval = setInterval(tick, STREAMING_STATS_INTERVAL_MS);
@@ -854,7 +855,7 @@ export function AgentPanel({
         streamPhase={streamPhase}
         receiving={receiving}
         elapsedSeconds={elapsedSeconds}
-        streamFrames={streamFrames}
+        streamIdleSeconds={streamIdleSeconds}
         streamBytes={streamBytes}
         capabilities={capabilities}
         api={api}
@@ -902,6 +903,12 @@ export function formatDuration(seconds: number): string {
   return `${mins}m ${remSecs}s`;
 }
 
+export function formatIdleSinceLastFrame(idleSeconds: number | null): string {
+  if (idleSeconds == null || !Number.isFinite(idleSeconds) || idleSeconds < 0) return "\u2014";
+  if (idleSeconds < 60) return `${idleSeconds.toFixed(1)}s`;
+  return formatDuration(idleSeconds);
+}
+
 export function formatThinkingPreview(text: string, maxLength = 70): string {
   return text
     .replace(/^(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)/gm, "")
@@ -943,20 +950,26 @@ const LiveStreamPhase = memo(function LiveStreamPhase({
 });
 
 const LiveStreamTraffic = memo(function LiveStreamTraffic({
-  frames,
   bytes,
+  idleSeconds,
 }: {
-  frames: number;
   bytes: number;
+  idleSeconds: number | null;
 }) {
-  const label = `${formatByteCount(bytes)} · ${frames} frame${frames === 1 ? "" : "s"}`;
+  const idleText = formatIdleSinceLastFrame(idleSeconds);
+  const title =
+    idleSeconds == null
+      ? `${bytes.toLocaleString()} bytes this run (live wire traffic), waiting for first frame`
+      : `${bytes.toLocaleString()} bytes this run (live wire traffic), last frame ${idleText} ago`;
   return (
-    <span
-      className="composer-status-traffic"
-      aria-hidden="true"
-      title={`${bytes.toLocaleString()} bytes across ${frames} frame${frames === 1 ? "" : "s"} this run (live wire traffic)`}
-    >
-      · {label}
+    <span className="composer-status-traffic" aria-hidden="true" title={title}>
+      <span aria-hidden="true">·</span>
+      <span>{formatByteCount(bytes)}</span>
+      <span aria-hidden="true">·</span>
+      <span className="composer-status-idle">
+        <RotateCwFadingClock size={11} aria-hidden="true" />
+        <span>{idleText}</span>
+      </span>
     </span>
   );
 });
@@ -972,7 +985,7 @@ type AgentComposerProps = {
   streamPhase: StreamPhase | null;
   receiving: boolean;
   elapsedSeconds: number;
-  streamFrames: number;
+  streamIdleSeconds: number | null;
   streamBytes: number;
   capabilities?: AgentCapabilities;
   api: WorkspaceApi;
@@ -1064,7 +1077,7 @@ function AgentComposerInner({
   streamPhase,
   receiving,
   elapsedSeconds,
-  streamFrames,
+  streamIdleSeconds,
   streamBytes,
   capabilities,
   api,
@@ -1526,7 +1539,7 @@ function AgentComposerInner({
               <span className="pulse-dot" />
               <span className="composer-status-duration">{formatDuration(elapsedSeconds)}</span>
               <LiveStreamPhase phase={streamPhase} receiving={receiving} />
-              <LiveStreamTraffic frames={streamFrames} bytes={streamBytes} />
+              <LiveStreamTraffic bytes={streamBytes} idleSeconds={streamIdleSeconds} />
             </div>
           )}
         </div>

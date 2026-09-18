@@ -45,10 +45,19 @@
   font-size: 11px;
 }
 .composer-status-traffic {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   font-size: 11px;
+}
+.composer-status-idle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
 }
 .agent-change-summary { display: flex; align-items: center; gap: 7px; padding: 0; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
 .agent-change-files { display: inline-flex; align-items: center; gap: 4px; color: var(--foreground); font-family: var(--font-ui); }
