@@ -185,7 +185,7 @@ const toolActivitySchema = z.object({
 }).strict();
 
 const timelineItemSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("user"), id: z.string(), text: z.string(), images: z.array(userImageRefSchema).max(2).optional(), files: z.array(userFileRefSchema).max(5).optional(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("user"), id: z.string(), text: z.string(), images: z.array(userImageRefSchema).max(10).optional(), files: z.array(userFileRefSchema).max(5).optional(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
   z.object({ kind: z.enum(["assistant", "thinking"]), id: z.string(), text: z.string(), lazy: z.boolean().optional(), error: z.string().optional() }).strict(),
   toolActivitySchema,
   z.object({ kind: z.literal("summary"), id: z.string(), summaryType: z.enum(["compaction", "branch"]), text: z.string(), tokensBefore: z.number().int().nonnegative().optional(), compactionReason: z.enum(["manual", "auto"]).optional() }).strict(),

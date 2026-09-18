@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const MAX_AGENT_MESSAGE_BYTES = 64 * 1024;
 export const MAX_AGENT_SETTING_LENGTH = 256;
-export const MAX_AGENT_IMAGES = 2;
+export const MAX_AGENT_IMAGES = 10;
 export const MAX_AGENT_IMAGE_DATA_BYTES = 2 * 1024 * 1024;
 export const MAX_AGENT_IMAGE_DATA_CHARACTERS = Math.ceil(MAX_AGENT_IMAGE_DATA_BYTES * 4 / 3);
 export const MAX_AGENT_FILES = 5;
