@@ -247,14 +247,12 @@ export class WebPreviewManager {
     const record = this.recordFor(id);
     if (!record) return null;
     return this.serialize(record, async () => {
-      if (record.runtime.status === "ready" || record.runtime.status === "starting") return this.snapshot(record);
+      const running = record.runtime.status === "ready" && record.runtime.streamPort !== null;
+      if (running || record.runtime.status === "starting") return this.snapshot(record);
       record.runtime.status = "starting";
       record.runtime.lastError = null;
       try {
-        await this.navigateSession(record, record.meta.targetUrl);
-        await this.applyViewport(record);
-        const port = await this.discoverStreamPort(record);
-        record.runtime.streamPort = port;
+        await this.ensureStream(record, record.meta.targetUrl);
         record.runtime.status = "ready";
         record.runtime.currentUrl = record.meta.targetUrl;
       } catch (cause) {
@@ -300,11 +298,19 @@ export class WebPreviewManager {
     if (!record) return null;
     return this.serialize(record, async () => {
       const target = normalizePreviewUrl(url);
-      await this.navigateSession(record, target);
+      try {
+        await this.ensureStream(record, target);
+      } catch (cause) {
+        record.runtime.lastError = cause instanceof Error ? cause.message.slice(0, 512) : "Navigation failed";
+        logger("preview").error("Preview navigation failed", { event: "preview.navigate_failed", previewId: record.meta.id, ...errorFields(cause) });
+        // A failed navigation leaves the previous page (and its stream) intact,
+        // so keep the runtime state rather than marking a running preview dead.
+        throw cause;
+      }
       record.meta.targetUrl = target;
       record.meta.updatedAt = now();
+      record.runtime.status = "ready";
       record.runtime.currentUrl = target;
-      if (record.runtime.status !== "ready") record.runtime.status = "ready";
       this.persist(record);
       return this.snapshot(record);
     });
@@ -331,6 +337,15 @@ export class WebPreviewManager {
       if (result.exitCode !== 0) throw new Error(bounded(result.stderr || "Preview command failed", 512));
       return this.snapshot(record);
     });
+  }
+
+  /** Navigate the browser to `target`, apply the viewport, and (re)discover the
+   *  loopback stream port. Keeps `status` and `streamPort` consistent so a
+   *  preview is never advertised as ready without a reachable stream. */
+  private async ensureStream(record: PreviewRecord, target: string): Promise<void> {
+    await this.navigateSession(record, target);
+    await this.applyViewport(record);
+    record.runtime.streamPort = await this.discoverStreamPort(record);
   }
 
   private async navigateSession(record: PreviewRecord, url: string): Promise<void> {
@@ -376,13 +391,14 @@ export class WebPreviewManager {
     return this.previews.get(id)?.runtime.streamPort ?? null;
   }
 
-  /** Try to reattach to a disconnected preview's surviving agent-browser
-   *  session. Returns true when the stream is usable again. */
+  /** Try to reattach to a preview's surviving agent-browser session and recover
+   *  its loopback stream port. Also repairs a `ready` record whose port was lost
+   *  (for example after a daemon restart), so the relay never rejects a preview
+   *  the snapshot still calls ready. Returns true when the stream is usable. */
   async rediscover(id: string): Promise<boolean> {
     const record = this.recordFor(id);
-    if (!record || (record.runtime.status !== "disconnected" && record.runtime.status !== "error")) {
-      return record?.runtime.status === "ready";
-    }
+    if (!record) return false;
+    if (record.runtime.status === "ready" && record.runtime.streamPort !== null) return true;
     return this.serialize(record, async () => {
       try {
         const status = await this.runner.run(["--session", sessionNameFor(record.meta.id), "stream", "status", "--json"]);

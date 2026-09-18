@@ -190,8 +190,12 @@ export function subscribeAgent(
       heartbeat.stop();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       disposeResumeWatcher();
-      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(unsubscribeEnvelope(agentId)));
-      socket?.close();
+      // Capture the current socket: the close listener clears the closure
+      // variable, so reading it twice can race with the reconnect handler.
+      const active = socket;
+      socket = undefined;
+      if (active && active.readyState === WebSocket.OPEN) active.send(JSON.stringify(unsubscribeEnvelope(agentId)));
+      active?.close();
     },
   };
 }

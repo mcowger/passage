@@ -342,9 +342,10 @@ function sendPreviewError(socket: Bun.ServerWebSocket<SocketData>, message: stri
 
 async function attachPreviewUpstream(socket: Bun.ServerWebSocket<SocketData>, previewId: string): Promise<void> {
   const previewLog = logger("preview").with({ previewId });
-  // A disconnected preview may still have a live agent-browser session;
-  // reattach to it so a suspended client resumes at the newest frame.
-  if (previewManager.previewStatus(previewId) !== "ready") {
+  // A disconnected (or portless) preview may still have a live agent-browser
+  // session; reattach to it so a suspended client resumes at the newest frame.
+  let streamPort = previewManager.streamPortFor(previewId);
+  if (streamPort === null) {
     const reattached = await previewManager.rediscover(previewId);
     if (!reattached) {
       previewLog.warn("Preview could not be rediscovered", { event: "preview.rediscover_failed" });
@@ -352,8 +353,8 @@ async function attachPreviewUpstream(socket: Bun.ServerWebSocket<SocketData>, pr
       socket.close(1011, "preview is not running");
       return;
     }
+    streamPort = previewManager.streamPortFor(previewId);
   }
-  const streamPort = previewManager.streamPortFor(previewId);
   if (streamPort === null) {
     previewLog.warn("Preview stream port is unavailable", { event: "preview.stream_unavailable" });
     sendPreviewError(socket, "Preview is not running");

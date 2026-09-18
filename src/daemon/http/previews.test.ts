@@ -69,6 +69,65 @@ describe("preview URL validation", () => {
 });
 
 describe("previews HTTP API", () => {
+  test("navigating a stopped preview starts the session and discovers its stream", async () => {
+    const calls: string[] = [];
+    const f = await fixture(fakeRunner({
+      run: async (args) => {
+        calls.push(args.join(" "));
+        if (args.includes("stream") && args.includes("status")) {
+          return { stdout: JSON.stringify({ success: true, data: { port: 45678 } }), stderr: "", exitCode: 0 };
+        }
+        return { stdout: JSON.stringify({ success: true }), stderr: "", exitCode: 0 };
+      },
+    }));
+    const createRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/previews`, {
+      method: "POST",
+      body: JSON.stringify({ targetUrl: "http://localhost:3000/" }),
+    }));
+    const created = await createRes.json() as { id: string };
+    expect(f.manager.streamPortFor(created.id)).toBeNull();
+
+    // Without an explicit Start, entering a URL must launch the session and
+    // leave the preview genuinely streamable rather than "ready" with no port.
+    const navRes = await f.app.fetch(request(`/api/previews/${created.id}/navigate`, {
+      method: "POST",
+      body: JSON.stringify({ url: "http://127.0.0.1:5173/app" }),
+    }));
+    expect(navRes.status).toBe(200);
+    const navigated = await navRes.json() as { status: string; currentUrl: string | null };
+    expect(navigated.status).toBe("ready");
+    expect(navigated.currentUrl).toBe("http://127.0.0.1:5173/app");
+    expect(f.manager.streamPortFor(created.id)).toBe(45678);
+    expect(calls.some((line) => line.includes("open --json http://127.0.0.1:5173/app"))).toBe(true);
+    expect(calls.some((line) => line.includes("set viewport"))).toBe(true);
+    f.store.close();
+  });
+
+  test("rediscover repairs a ready preview whose stream port was lost", async () => {
+    const f = await fixture();
+    const createRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/previews`, {
+      method: "POST",
+      body: JSON.stringify({ targetUrl: "http://localhost:3000/" }),
+    }));
+    const created = await createRes.json() as { id: string };
+    await f.app.fetch(request(`/api/previews/${created.id}/open`, { method: "POST" }));
+    expect(f.manager.streamPortFor(created.id)).toBe(41234);
+
+    // Simulate an in-memory port loss (for example a daemon restart) while the
+    // agent-browser session, and therefore the stream, is still alive. The
+    // record stays "ready", so the old early-return skipped recovery entirely.
+    const record = (f.manager as unknown as {
+      recordFor(id: string): { runtime: { streamPort: number | null } } | null;
+    }).recordFor(created.id);
+    expect(record).not.toBeNull();
+    record!.runtime.streamPort = null;
+
+    expect(await f.manager.rediscover(created.id)).toBe(true);
+    expect(f.manager.streamPortFor(created.id)).toBe(41234);
+    expect(f.manager.previewStatus(created.id)).toBe("ready");
+    f.store.close();
+  });
+
   test("creates, opens, navigates, and stops a preview", async () => {
     const f = await fixture();
     const createRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/previews`, {

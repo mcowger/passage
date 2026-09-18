@@ -170,11 +170,18 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
 
   const handleOpen = useCallback(async () => {
     setStreamState("starting");
-    const updated = await mutate(() => api.openPreview(preview.id), "Failed to start preview");
+    const target = address.trim();
+    const current = preview.currentUrl ?? preview.targetUrl;
+    // The address field is the source of truth: honoring it here means a typed
+    // URL is opened instead of silently starting the previously stored target.
+    const start = target && target !== current
+      ? () => api.navigatePreview(preview.id, target)
+      : () => api.openPreview(preview.id);
+    const updated = await mutate(start, "Failed to start preview");
     if (updated?.status === "ready") connect();
     else if (updated) setStreamState(updated.status === "error" ? "browser-crashed" : "target-unavailable");
     else setStreamState("target-unavailable");
-  }, [api, preview.id, mutate, connect]);
+  }, [api, preview.id, preview.currentUrl, preview.targetUrl, address, mutate, connect]);
 
   const handleStop = useCallback(async () => {
     socketRef.current?.close();
@@ -187,8 +194,11 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
 
   const handleNavigate = useCallback(async () => {
     const updated = await mutate(() => api.navigatePreview(preview.id, address), "Navigation failed");
-    if (updated?.status === "error") setStreamState("target-unavailable");
-  }, [api, preview.id, address, mutate]);
+    // Navigating a stopped preview starts it; attach the stream the same way
+    // Start does, otherwise the pane stays "ready" with no frames. Failures
+    // surface as a notice and leave the previous page streaming.
+    if (updated?.status === "ready" && !socketRef.current) connect();
+  }, [api, preview.id, address, mutate, connect]);
 
   const handleTakeControl = useCallback(async () => {
     const socket = socketRef.current;
