@@ -56,6 +56,7 @@ const FRIENDLY_API_ERRORS: Record<string, string> = {
   "invalid-location": "That worktree location is not valid. Choose another location.",
   "invalid-path": "That path is not valid. Check it and try again.",
   "invalid-id": "Invalid identifier. Refresh and try again.",
+  "invalid-input": "The agent's state changed. It was refreshed \u2014 try again.",
   "invalid-cursor": "The listing expired. Refresh and try again.",
   "body-too-large": "The request was too large.",
   "conflict": "That conflicts with the current state. Refresh and try again.",

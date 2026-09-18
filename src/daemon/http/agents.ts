@@ -49,7 +49,7 @@ function errorResponse(error: unknown): Response {
         : error.code === "limit" ? 429
           : error.code === "draining" ? 503
             : 400;
-    return success({ error: error.code }, status);
+    return success({ error: error.code, message: error.message }, status);
   }
   return success({ error: "agent-operation-failed" }, 502);
 }

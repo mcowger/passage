@@ -1065,8 +1065,13 @@ export class AgentService {
     const { process, generation } = cancellation;
     try {
       const clearQueue = process.request({ type: "clear_queue" }, this.abortTimeoutMs);
+      // A foreground daemon (e.g. `bun run dev` without `&`) holds the turn
+      // inside a bash tool call that `abort` alone does not kill -- Pi
+      // exposes `abort_bash` for exactly that. Best-effort: it rejects when
+      // no bash command is running, which must not fail an otherwise clean stop.
+      const abortBash = process.request({ type: "abort_bash" }, this.abortTimeoutMs).catch(() => undefined);
       const abort = process.request({ type: "abort" }, this.abortTimeoutMs);
-      await Promise.all([clearQueue, abort]);
+      await Promise.all([clearQueue, abortBash, abort]);
       if (this.manager.get(agentId) !== process || process.generation !== generation) return;
       await this.enqueue(agentId, () => this.reconcile(agentId, true));
     } catch (cause) {

@@ -236,6 +236,56 @@ test("keeps an agent stopping until Pi confirms cancellation", async () => {
   f.store.close();
 });
 
+test("tolerates abort_bash rejection when no bash command is running", async () => {
+  const f = await make();
+  const abortScript = `let streaming=false;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n')}const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};if(r.type==='abort')setTimeout(()=>{streaming=false;process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n')},20);else if(r.type==='abort_bash')process.stdout.write(JSON.stringify({type:'response',id:r.id,success:false,error:'No bash command is running'})+'\\n');else process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+  const service = new AgentService(f.repos, {
+    sessionsRoot: join(f.root, "abort-bash-rejected-sessions"),
+    manager: new PiRpcManager(1),
+    abortTimeoutMs: 100,
+    pi: { executable: process.execPath, executableArgs: ["-e", abortScript] },
+  });
+  const agent = await service.create("w");
+  await service.prompt(agent.id, "keep running");
+  await Bun.sleep(10);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+
+  await service.abort(agent.id);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("stopping");
+
+  await Bun.sleep(100);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  await service.shutdown();
+  f.store.close();
+});
+
+test("frees a run stuck in a bash tool call via abort_bash", async () => {
+  const f = await make();
+  // `abort` acknowledges but never settles the turn (the foreground bash
+  // child holds it); only `abort_bash` frees it. Without that request this
+  // would escalate to a process kill and land on error, as in the
+  // hanging-abort test below.
+  const stuckBashScript = `let streaming=false;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n')}const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};if(r.type==='abort'){process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');continue}if(r.type==='abort_bash'){streaming=false;process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');continue}process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+  const service = new AgentService(f.repos, {
+    sessionsRoot: join(f.root, "stuck-bash-sessions"),
+    manager: new PiRpcManager(1),
+    abortTimeoutMs: 100,
+    pi: { executable: process.execPath, executableArgs: ["-e", stuckBashScript] },
+  });
+  const agent = await service.create("w");
+  await service.prompt(agent.id, "run a foreground daemon");
+  await Bun.sleep(10);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+
+  await service.abort(agent.id);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("stopping");
+
+  await Bun.sleep(150);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  await service.shutdown();
+  f.store.close();
+});
+
 test("treats Pi's already-streaming prompt rejection as a recoverable conflict, not a crash", async () => {
   const f = await make();
   const alreadyStreamingScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){process.stdout.write(JSON.stringify({type:'response',id:r.id,success:false,error:"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."})+'\\n');continue}const data=r.type==='get_state'?{isStreaming:true,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;

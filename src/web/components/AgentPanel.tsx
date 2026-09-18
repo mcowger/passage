@@ -4,7 +4,7 @@ import type { AgentCapabilities, AgentHistory, AgentSummary, SlashCommand, Timel
 import type { WorkspaceSettings, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
 import { DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
 import { MAX_AGENT_FILES, MAX_AGENT_FILE_DATA_BYTES, MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentFile, type AgentImage } from "../../shared/protocol/agents.ts";
-import { friendlyApiError, type WorkspaceApi } from "../api.ts";
+import { WorkspaceApiError, friendlyApiError, type WorkspaceApi } from "../api.ts";
 import { toast } from "sonner";
 import { subscribeWorkspace } from "../workspaceSocket.ts";
 import type { GitStatus } from "../../shared/domain/git.ts";
@@ -999,6 +999,7 @@ export function AgentPanel({
         workspaceId={agent.workspaceId}
         running={running}
         stopping={stopping}
+        loading={loading}
         idle={agent.status === "idle"}
         streamActive={streamActive}
         streamPhase={streamPhase}
@@ -1156,6 +1157,8 @@ type AgentComposerProps = {
   workspaceId: string;
   running: boolean;
   stopping: boolean;
+  /** Agent summary/history still loading: the true status is unknown, so sending is disabled until it settles. */
+  loading: boolean;
   /** True only when the agent status is exactly `idle`: the settle signal that drains the attached queue. */
   idle: boolean;
   streamActive: boolean;
@@ -1249,6 +1252,7 @@ function AgentComposerInner({
   workspaceId,
   running,
   stopping,
+  loading,
   idle,
   streamActive,
   streamPhase,
@@ -1439,7 +1443,13 @@ function AgentComposerInner({
       }
       if (refreshAfter) await onRefresh();
     } catch (cause) {
-      setComposerError(cause instanceof Error ? cause.message : "Agent command failed");
+      setComposerError(friendlyApiError(cause, "Agent command failed"));
+      // A stale client (missed WS events across a disconnect) sends the wrong
+      // verb -- prompt while running, or anything while stopping -- and the
+      // server rejects it as invalid-input. Resync immediately so the composer
+      // shows the true status and the retry uses the right verb instead of
+      // failing the same way until a manual reload.
+      if (cause instanceof WorkspaceApiError && cause.code === "invalid-input") void onRefresh();
     } finally {
       setBusy(false);
     }
@@ -1509,7 +1519,7 @@ function AgentComposerInner({
    */
   const queueFollowUp = () => {
     const value = draft.trim();
-    if ((!value && images.length === 0 && uploadFiles.length === 0) || stopping) return;
+    if ((!value && images.length === 0 && uploadFiles.length === 0) || stopping || loading) return;
     const label = value || (images.length > 0 ? "Attached image" : `Attached file: ${uploadFiles.map((file) => file.name).join(", ")}`);
     setQueue((current) => [...current, createQueuedFollowUp(label, images, uploadFiles)]);
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -1585,14 +1595,15 @@ function AgentComposerInner({
         } catch (cause) {
           const failedIndex = pending.indexOf(item);
           setQueue((current) => [...pending.slice(failedIndex), ...current]);
-          setComposerError(cause instanceof Error ? cause.message : "Agent command failed");
+          setComposerError(friendlyApiError(cause, "Agent command failed"));
+          if (cause instanceof WorkspaceApiError && cause.code === "invalid-input") void onRefresh();
           break;
         }
       }
       setBusy(false);
       dispatchingRef.current = false;
     })();
-  }, [idle, stopping, busy, queue, agentId, api, onOptimisticMessage, setBusy]);
+  }, [idle, stopping, busy, queue, agentId, api, onOptimisticMessage, onRefresh, setBusy]);
 
   const readAsBase64 = (file: File): Promise<string> =>
     new Promise<string>((resolve, reject) => {
@@ -1721,7 +1732,12 @@ function AgentComposerInner({
           )}
         </div>
       )}
-      <QueuedFollowUpList queue={queue} disabled={busy || stopping} onRetract={retractQueued} onClear={clearQueued} />
+      <QueuedFollowUpList queue={queue} disabled={busy || stopping || loading} onRetract={retractQueued} onClear={clearQueued} />
+      {streamActive && streamBytes === 0 && elapsedSeconds >= 60 && (
+        <div className="composer-notice-alert composer-notice-info" role="status">
+          <span>ⓘ No output for {formatDuration(elapsedSeconds)} — the command may be stuck. Stop also kills the running command.</span>
+        </div>
+      )}
       <div className="composer-card composer-autocomplete-anchor">
         <ComposerAutocomplete
           open={suggestionOpen}
@@ -1785,13 +1801,15 @@ function AgentComposerInner({
               // ComposerEditor); only Cmd/Ctrl+Enter submits there.
               if (currentViewportIsMobileComposer() && !event.metaKey && !event.ctrlKey) return;
               event.preventDefault();
-              if (stopping) return;
+              if (stopping || loading) return;
               if (running) send("steer");
-              else if (!busy) send("prompt");
+              else if (!busy && !loading) send("prompt");
             }
           }}
           placeholder={
-            stopping
+            loading
+              ? "Loading agent status…"
+              : stopping
               ? "Stopping agent execution…"
               : running
               ? isMobileComposer
@@ -1799,7 +1817,7 @@ function AgentComposerInner({
                 : "Steer now (Enter) or queue follow-up…"
               : "@ for files; / for commands"
           }
-          disabled={stopping}
+          disabled={stopping || loading}
         />
         {composerError && (
           <div className="composer-error-alert" role="alert">
@@ -1966,7 +1984,7 @@ function AgentComposerInner({
                   size="xs"
                   className="composer-action-btn"
                   onClick={() => send("steer")}
-                  disabled={busy}
+                  disabled={busy || loading}
                   title={isMobileComposer ? "Steer now (⌘+Enter)" : "Steer now (Enter)"}
                   aria-label="Steer now"
                 >
@@ -1977,7 +1995,7 @@ function AgentComposerInner({
                   size="xs"
                   className="composer-action-btn"
                   onClick={queueFollowUp}
-                  disabled={busy}
+                  disabled={busy || loading}
                   title="Queue follow-up — stays attached to the composer until this run settles"
                   aria-label="Queue follow-up"
                 >
@@ -2000,7 +2018,7 @@ function AgentComposerInner({
                 size="xs"
                 className="send-btn"
                 onClick={() => send("prompt")}
-                disabled={busy || (!draft.trim() && images.length === 0 && uploadFiles.length === 0)}
+                disabled={busy || loading || (!draft.trim() && images.length === 0 && uploadFiles.length === 0)}
               >
                 {isMobileComposer ? "Send" : "Send ↵"}
               </Button>
