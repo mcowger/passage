@@ -351,7 +351,7 @@ function ProjectRow({
                       title={statusLabel}
                     />
                     {workspace.kind === "worktree" ? (
-                      <GitBranch className="w-3 h-3 text-primary/90 shrink-0" />
+                      <GitBranch className="w-3 h-3 text-muted-foreground/70 shrink-0" />
                     ) : (
                       <Folder className="w-3 h-3 text-muted-foreground/70 shrink-0" />
                     )}

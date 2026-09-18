@@ -205,4 +205,66 @@ describe("Sidebar", () => {
     expect(expandedHtml).toContain('aria-expanded="true"');
     expect(expandedHtml).toContain("workspace-list");
   });
+  test("selected worktree keeps state-driven dot color and adds no green icon tint", () => {
+    const agents = [
+      {
+        id: "agt-1",
+        workspaceId: "wsp-1",
+        title: "Idle agent",
+        status: "idle" as const,
+        modelPreference: null,
+        thinkingPreference: null,
+        live: false,
+        persisted: true,
+      },
+    ];
+    const html = ReactDOMServer.renderToString(
+      React.createElement(Sidebar, {
+        data: snapshot,
+        selected: "wsp-1",
+        open: false,
+        onClose: () => {},
+        onSelect: () => {},
+        onNewProject: () => {},
+        agents,
+      })
+    );
+
+    // Selection shading applies...
+    expect(html).toContain("workspace-row");
+    expect(html).toContain("selected");
+    // ...but the dot stays purely agent-state driven (idle/gray, not green)...
+    expect(html).toContain("status-dot shrink-0 idle");
+    expect(html).not.toContain("status-dot shrink-0 active");
+    // ...and the worktree icon carries no green/state tint.
+    expect(html).not.toContain("text-primary");
+  });
+
+  test("selected worktree still shows active dot when its agent is running", () => {
+    const agents = [
+      {
+        id: "agt-1",
+        workspaceId: "wsp-1",
+        title: "Running agent",
+        status: "running" as const,
+        modelPreference: null,
+        thinkingPreference: null,
+        live: true,
+        persisted: true,
+      },
+    ];
+    const html = ReactDOMServer.renderToString(
+      React.createElement(Sidebar, {
+        data: snapshot,
+        selected: "wsp-1",
+        open: false,
+        onClose: () => {},
+        onSelect: () => {},
+        onNewProject: () => {},
+        agents,
+      })
+    );
+
+    expect(html).toContain("status-dot shrink-0 active");
+  });
 });
