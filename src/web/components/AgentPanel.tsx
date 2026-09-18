@@ -262,19 +262,29 @@ export function isComposerLocked(status: AgentSummary["status"]): boolean {
 /**
  * iOS single-tap send: tapping a composer commit button (Send / Steer /
  * Queue / Stop) while the contentEditable editor holds focus blurs it,
- * which dismisses the iOS keyboard, collapses `--kb-inset`, and shifts the
- * composer ~300px between touchstart and click -- Safari then delivers the
- * tap as a dismiss-only gesture and the message needs a second tap.
- * Preventing the pointerdown default keeps focus (and the keyboard) in the
- * editor, so the click lands on a stable layout and sends on the first
- * tap. Unlike touchstart preventDefault it does not cancel the click
- * itself, and keyboard activation (Enter/Space -> click, no pointerdown)
- * is unaffected. The action then blurs the editor after dispatching,
- * restoring the familiar post-send keyboard dismissal -- same end state as
- * before, minus the swallowed first tap.
+ * which dismisses the iOS keyboard and shifts the composer between
+ * touchstart and click -- Safari then delivers the tap as a dismiss-only
+ * gesture and the click never lands, so the message needs a second tap.
+ *
+ * `pointerdown` preventDefault does NOT fix this on iOS Safari (verified
+ * on-device): the blur/layout shift happens outside the pointerdown
+ * default action, so the click is still swallowed.
+ *
+ * The pattern that works per web reports (SO 71513013, Julo, tested on
+ * iOS; Ionic forum touchstart/touchend threads) is handling `touchend`
+ * directly: `preventDefault()` there suppresses the synthetic mouse/click
+ * sequence and we dispatch the action immediately instead of waiting for
+ * the click that will never arrive. Desktop mouse and keyboard activation
+ * (Enter/Space -> click, no touch) keep using `onClick`. The `touchend`
+ * dispatch stamps a timestamp so the trailing synthetic click (if one
+ * slips through) is ignored -- see `shouldSuppressComposerClick`.
+ * (React attaches touchstart as passive, so its preventDefault is a
+ * no-op; touchend is not passive, so preventDefault works here.)
  */
-export function retainComposerFocusOnTap(event: { preventDefault: () => void }): void {
-  event.preventDefault();
+export const COMPOSER_TOUCH_SEND_SUPPRESS_MS = 700;
+
+export function shouldSuppressComposerClickAfterTouch(lastTouchMs: number | null, nowMs: number): boolean {
+  return lastTouchMs !== null && nowMs - lastTouchMs < COMPOSER_TOUCH_SEND_SUPPRESS_MS;
 }
 
 /** Same relevance rule as the Changes panel: a non-main branch with commits ahead of main. */
@@ -1310,6 +1320,7 @@ function AgentComposerInner({
   const [ctxDetailsOpen, setCtxDetailsOpen] = useState(false);
   const ctxDetailsRef = useRef<HTMLDivElement>(null);
   const composerInputRef = useRef<ComposerEditorHandle>(null);
+  const lastComposerTouchSendRef = useRef<number | null>(null);
   const reservedImageCount = useRef(0);
   const reservedFileCount = useRef(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2006,8 +2017,15 @@ function AgentComposerInner({
                 <Button
                   size="xs"
                   className="composer-action-btn"
-                  onPointerDown={retainComposerFocusOnTap}
-                  onClick={() => send("steer")}
+                  onTouchEnd={(event) => {
+                    event.preventDefault();
+                    lastComposerTouchSendRef.current = Date.now();
+                    send("steer");
+                  }}
+                  onClick={() => {
+                    if (shouldSuppressComposerClickAfterTouch(lastComposerTouchSendRef.current, Date.now())) return;
+                    send("steer");
+                  }}
                   disabled={busy || loading}
                   title={isMobileComposer ? "Steer now (⌘+Enter)" : "Steer now (Enter)"}
                   aria-label="Steer now"
@@ -2018,8 +2036,15 @@ function AgentComposerInner({
                   variant="secondary"
                   size="xs"
                   className="composer-action-btn"
-                  onPointerDown={retainComposerFocusOnTap}
-                  onClick={queueFollowUp}
+                  onTouchEnd={(event) => {
+                    event.preventDefault();
+                    lastComposerTouchSendRef.current = Date.now();
+                    queueFollowUp();
+                  }}
+                  onClick={() => {
+                    if (shouldSuppressComposerClickAfterTouch(lastComposerTouchSendRef.current, Date.now())) return;
+                    queueFollowUp();
+                  }}
                   disabled={busy || loading}
                   title="Queue follow-up — stays attached to the composer until this run settles"
                   aria-label="Queue follow-up"
@@ -2030,8 +2055,14 @@ function AgentComposerInner({
                   variant="destructive"
                   size="xs"
                   className="composer-action-btn"
-                  onPointerDown={retainComposerFocusOnTap}
+                  onTouchEnd={(event) => {
+                    event.preventDefault();
+                    lastComposerTouchSendRef.current = Date.now();
+                    void run(() => api.abort(agentId));
+                    composerInputRef.current?.blur();
+                  }}
                   onClick={() => {
+                    if (shouldSuppressComposerClickAfterTouch(lastComposerTouchSendRef.current, Date.now())) return;
                     void run(() => api.abort(agentId));
                     composerInputRef.current?.blur();
                   }}
@@ -2046,8 +2077,15 @@ function AgentComposerInner({
               <Button
                 size="xs"
                 className="send-btn"
-                onPointerDown={retainComposerFocusOnTap}
-                onClick={() => send("prompt")}
+                onTouchEnd={(event) => {
+                  event.preventDefault();
+                  lastComposerTouchSendRef.current = Date.now();
+                  send("prompt");
+                }}
+                onClick={() => {
+                  if (shouldSuppressComposerClickAfterTouch(lastComposerTouchSendRef.current, Date.now())) return;
+                  send("prompt");
+                }}
                 disabled={busy || loading || (!draft.trim() && images.length === 0 && uploadFiles.length === 0)}
               >
                 {isMobileComposer ? "Send" : "Send ↵"}

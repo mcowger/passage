@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { createQueuedFollowUp, extractLatestThinkingSummary, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, resolveComposerGitOptions, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, retainComposerFocusOnTap, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
+import { createQueuedFollowUp, extractLatestThinkingSummary, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, resolveComposerGitOptions, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, shouldSuppressComposerClickAfterTouch, COMPOSER_TOUCH_SEND_SUPPRESS_MS, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 
@@ -652,10 +652,12 @@ describe("resolveActiveQuestionRequest", () => {
   });
 });
 
-describe("retainComposerFocusOnTap", () => {
-  test("prevents the pointerdown default so the tap keeps editor focus", () => {
-    let prevented = false;
-    retainComposerFocusOnTap({ preventDefault: () => { prevented = true; } });
-    expect(prevented).toBe(true);
+describe("shouldSuppressComposerClickAfterTouch", () => {
+  test("suppresses the trailing click right after a touchend send", () => {
+    expect(shouldSuppressComposerClickAfterTouch(1000, 1000 + COMPOSER_TOUCH_SEND_SUPPRESS_MS - 1)).toBe(true);
+  });
+  test("allows clicks with no recent touch and after the window expires", () => {
+    expect(shouldSuppressComposerClickAfterTouch(null, 1000)).toBe(false);
+    expect(shouldSuppressComposerClickAfterTouch(1000, 1000 + COMPOSER_TOUCH_SEND_SUPPRESS_MS + 1)).toBe(false);
   });
 });
