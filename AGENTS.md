@@ -47,7 +47,7 @@ Authority: `docs/DESIGN.md` (architecture/security/scope), `docs/UI.md` (UI/a11y
 
 ## Git
 
-- "Rebase on main" means local `main` by default, not `origin/main`. Don't fetch or use the remote tracking branch unless explicitly asked.
+- CRITICAL: "Rebase on main" means local `main` by default, not `origin/main`. Don't fetch or use the remote tracking branch unless explicitly asked.
 
 ## Checks
 
