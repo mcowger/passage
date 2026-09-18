@@ -14,7 +14,7 @@ type StatusInput = Pick<AgentSummary, "status"> & {
  */
 export function getAgentStatusKind(agent: StatusInput): AgentStatusKind {
   if (agent.pendingUiRequest != null) return "attention";
-  if (agent.status === "needs-attention" || agent.status === "error") return "attention";
+  if (agent.status === "needs-attention" || agent.status === "error" || agent.status === "interrupted") return "attention";
   if (agent.status === "running" || agent.status === "stopping" || agent.status === "initializing") {
     return "active";
   }

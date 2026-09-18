@@ -97,12 +97,13 @@ test("recovers a stale running status left behind by a daemon restart", async ()
   await f.service.capabilities(agent.id);
   await f.service.stop(agent.id);
   f.repos.agents.updateStatus(agent.id, "running");
-  // Reads report (and persist) the existing error/attention presentation --
-  // interrupted work must not look idle (invented completion) or still
-  // active (stale spinner) -- so the UI stops showing "generation in
-  // flight" on reload/new systems.
-  expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("error");
-  expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("error");
+  // Reads report (and persist) the dedicated `interrupted` state -- Pi
+  // reported nothing wrong, so this is not `error`; interrupted work must
+  // not look idle (invented completion) or still active (stale spinner)
+  // either -- so the UI stops showing "generation in flight" on
+  // reload/new systems.
+  expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("interrupted");
+  expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("interrupted");
   // A stale `running` with no live process must not force the client onto
   // `steer` (a silent no-op when idle); `prompt` starts a fresh run.
   f.repos.agents.updateStatus(agent.id, "running");
@@ -120,12 +121,12 @@ test("normalizes every stale-active status left behind by a daemon restart, not 
   await f.service.stop(agent.id);
   for (const status of ["initializing", "stopping", "needs-attention"] as const) {
     f.repos.agents.updateStatus(agent.id, status);
-    expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("error");
-    expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("error");
+    expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("interrupted");
+    expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("interrupted");
   }
   // list() applies the same correction as snapshot().
   f.repos.agents.updateStatus(agent.id, "running");
-  expect(f.service.list("w").find((row) => row.id === agent.id)?.lastKnownStatus).toBe("error");
+  expect(f.service.list("w").find((row) => row.id === agent.id)?.lastKnownStatus).toBe("interrupted");
   await f.service.shutdown();
   f.store.close();
 });
@@ -148,7 +149,7 @@ test("reconcileAfterRestart normalizes stale-active agents on boot without touch
   const restarted = new AgentService(f.repos, { sessionsRoot: join(f.root, "sessions"), manager: new PiRpcManager(4), pi: { executable: process.execPath, executableArgs: ["-e", script] } });
   const result = await restarted.reconcileAfterRestart();
   expect(result.interrupted).toEqual([active.id]);
-  expect(f.repos.agents.get(active.id)?.lastKnownStatus).toBe("error");
+  expect(f.repos.agents.get(active.id)?.lastKnownStatus).toBe("interrupted");
   expect(f.repos.agents.get(idle.id)?.lastKnownStatus).toBe("idle");
   expect(f.repos.agents.get(archived.id)?.lastKnownStatus).toBe("archived");
   await restarted.shutdown();

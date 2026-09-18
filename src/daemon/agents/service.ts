@@ -216,14 +216,14 @@ export class AgentService {
     // in-memory run state (runStartedAt, subscriptions, event chains,
     // pending questions) is gone after a daemon restart, and no further
     // socket event will ever correct it. Whatever the agent was doing was
-    // interrupted, not completed, so report (and persist) it through the
-    // existing error/attention presentation rather than inventing an idle
-    // or still-active state. While a boot is pending the status is
-    // genuinely unknown, so leave it alone.
+    // interrupted, not completed and not a Pi/process error, so report
+    // (and persist) the dedicated `interrupted` attention state rather than
+    // inventing an idle, still-active, or genuinely-erroring state. While a
+    // boot is pending the status is genuinely unknown, so leave it alone.
     let baseStatus = agent.lastKnownStatus;
     if (!process && !this.pendingStarts.has(agentId) && this.isStaleActiveStatus(baseStatus)) {
       this.markInterrupted(agentId, baseStatus);
-      baseStatus = "error";
+      baseStatus = "interrupted";
     }
     const diagnostic = this.diagnostics.get(agentId);
     const pendingUiRequest = baseStatus === "stopping"
@@ -257,7 +257,7 @@ export class AgentService {
       const process = this.manager.get(agent.id);
       if (!process && !this.pendingStarts.has(agent.id) && this.isStaleActiveStatus(lastKnownStatus)) {
         this.markInterrupted(agent.id, lastKnownStatus);
-        lastKnownStatus = "error";
+        lastKnownStatus = "interrupted";
       }
       return {
         ...agent,
@@ -276,24 +276,28 @@ export class AgentService {
     return status === "running" || status === "stopping" || status === "initializing" || status === "needs-attention";
   }
 
-  /** Persists `error` for a status a daemon restart interrupted (no live
-   *  process, no boot in flight) and records why, without touching the Pi
-   *  transcript: nothing this honest can say Pi itself produced that row.
-   *  Never overwrites an already-recorded diagnostic (e.g. a real crash
-   *  reported by onLifecycle earlier in this daemon's life). */
+  /** Persists `interrupted` -- distinct from `error`: Pi reported nothing
+   *  wrong, Passage simply lost track of in-flight work (no live process,
+   *  no boot in flight), most commonly because of a daemon restart. Records
+   *  why without touching the Pi transcript: nothing this honest can say Pi
+   *  itself produced that row. Never overwrites an already-recorded
+   *  diagnostic (e.g. a real crash reported by onLifecycle earlier in this
+   *  daemon's life). */
   private markInterrupted(agentId: string, previousStatus: string): void {
     if (!this.diagnostics.has(agentId)) {
       this.diagnostics.set(agentId, { generation: 0, exitStatus: `interrupted (${previousStatus})`, stderr: [], stderrTruncated: false });
       while (this.diagnostics.size > MAX_RUNTIME_DIAGNOSTICS) this.diagnostics.delete(this.diagnostics.keys().next().value!);
     }
-    try { this.repositories.agents.updateStatus(agentId, "error"); } catch {}
+    this.runStartedAt.delete(agentId);
+    try { this.repositories.agents.updateStatus(agentId, "interrupted"); } catch {}
   }
 
   /** One-time boot sweep, before serving agent commands: every agent still
    *  persisted as running/stopping/initializing/needs-attention belonged to
-   *  a Pi process this fresh daemon does not own -- normalize it to the
-   *  existing error/attention presentation instead of leaving a stale
-   *  spinner or an unanswerable pending question. Never throws. */
+   *  a Pi process this fresh daemon does not own -- normalize it to
+   *  `interrupted` (not `error`: Pi reported nothing wrong) instead of
+   *  leaving a stale spinner or an unanswerable pending question. Never
+   *  throws. */
   async reconcileAfterRestart(): Promise<{ interrupted: string[] }> {
     const interrupted: string[] = [];
     let agents: Agent[];
@@ -1018,7 +1022,7 @@ export class AgentService {
   }
 
   private updateStatus(agentId: string, status: AgentStatus, type: AgentServiceEvent["type"], generation?: number, error?: string, payload?: Record<string, unknown>): void {
-    if (status === "idle" || status === "error" || status === "archived") this.endRun(agentId);
+    if (status === "idle" || status === "error" || status === "interrupted" || status === "archived") this.endRun(agentId);
     this.repositories.agents.updateStatus(agentId, status);
     const runStartedAt = this.runStartedAt.get(agentId);
     const eventPayload = { ...(payload ?? {}), ...(runStartedAt !== undefined ? { runStartedAt } : {}) };

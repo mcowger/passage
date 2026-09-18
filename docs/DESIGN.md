@@ -325,10 +325,14 @@ updates the path mapping after the first durable flush.
 
 Agent statuses (`agentStatusSchema`): `initializing → idle ⇄ running →
 stopping → idle`, plus `needs-attention` (user input, permission, extension
-question card, process failure, unaddressed error) and `error`; any
-non-archived state may transition to `archived`. Summaries additionally carry
-`live`, `persisted`, `generation`, `runStartedAt`, and optional
-`pendingUiRequest`.
+question card, process failure, unaddressed error) and `error` (Pi/the
+process actually failed). `interrupted` is distinct from `error`: Passage
+lost track of in-flight work with no fault reported by Pi itself -- normally
+a daemon restart landing on an agent that was still
+initializing/running/stopping/needs-attention (see
+[BACKTOSQUAREONE.md](BACKTOSQUAREONE.md) step 4). Any non-archived state may
+transition to `archived`. Summaries additionally carry `live`, `persisted`,
+`generation`, `runStartedAt`, and optional `pendingUiRequest`.
 
 `stopping` means Passage accepted a cancellation request but has not yet
 confirmed that Pi is idle. It blocks further agent commands and locks the

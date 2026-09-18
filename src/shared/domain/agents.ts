@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { protocolPayloadSchema, type JsonValue } from "../protocol/index.ts";
 
-export const agentStatusSchema = z.enum(["initializing", "idle", "running", "stopping", "needs-attention", "error", "archived"]);
+// `interrupted` is distinct from `error`: it means Passage lost track of
+// in-flight work (most commonly a daemon restart) while Pi itself reported
+// nothing wrong. `error` is reserved for Pi/the process actually failing.
+export const agentStatusSchema = z.enum(["initializing", "idle", "running", "stopping", "needs-attention", "error", "interrupted", "archived"]);
 export type AgentStatus = z.infer<typeof agentStatusSchema>;
 
 export const agentSummarySchema = z.object({

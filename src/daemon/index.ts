@@ -119,8 +119,8 @@ const agentService = new AgentService(repositories, {
 // Boot-time restart recovery, before serving agent commands: any agent
 // still persisted as running/stopping/initializing/needs-attention belonged
 // to a Pi process this fresh daemon does not own (see
-// docs/BACKTOSQUAREONE.md step 4). Normalize it to the existing
-// error/attention presentation instead of a stale spinner or an
+// docs/BACKTOSQUAREONE.md step 4). Normalize it to `interrupted` (not
+// `error`: Pi reported nothing wrong) instead of a stale spinner or an
 // unanswerable pending question.
 try {
   const restart = await agentService.reconcileAfterRestart();

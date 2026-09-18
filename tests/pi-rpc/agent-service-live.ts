@@ -11,8 +11,8 @@ async function waitForSettled(service: AgentService, agentId: string): Promise<v
   const deadline = Date.now() + SETTLEMENT_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const snapshot = service.snapshot(agentId);
-    if (snapshot.persisted && ["idle", "error", "needs-attention"].includes(snapshot.lastKnownStatus)) return;
-    if (snapshot.lastKnownStatus === "error" || snapshot.lastKnownStatus === "needs-attention") {
+    if (snapshot.persisted && ["idle", "error", "interrupted", "needs-attention"].includes(snapshot.lastKnownStatus)) return;
+    if (snapshot.lastKnownStatus === "error" || snapshot.lastKnownStatus === "interrupted" || snapshot.lastKnownStatus === "needs-attention") {
       throw new Error(`Pi agent ${agentId} requires attention before session persistence`);
     }
     await Bun.sleep(POLL_INTERVAL_MS);
@@ -201,8 +201,8 @@ export async function runAgentServiceRestartRecoveryAcceptance(): Promise<void> 
         throw new Error("Restart reconciliation did not report the interrupted agent");
       }
       const recovered = after.snapshot(agent.id);
-      if (recovered.lastKnownStatus !== "error") {
-        throw new Error(`Interrupted agent reported ${recovered.lastKnownStatus}, not the error/attention presentation`);
+      if (recovered.lastKnownStatus !== "interrupted") {
+        throw new Error(`Interrupted agent reported ${recovered.lastKnownStatus}, not the dedicated interrupted state`);
       }
       if (recovered.live) {
         throw new Error("Recovered agent falsely reports a live Pi process");

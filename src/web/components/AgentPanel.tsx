@@ -549,10 +549,14 @@ export function AgentPanel({
   // itself reporting a stopped/errored Pi process (e.g. it never booted, or
   // crashed mid-run). Nothing retries this automatically -- capabilities and
   // model info stay stuck ("model unavailable") until the user retries --
-  // so it needs its own visible, actionable banner.
+  // so it needs its own visible, actionable banner. `interrupted` is not a
+  // Pi failure: Passage lost track of in-flight work (most commonly a
+  // daemon restart), so it gets its own, non-blaming wording.
   const statusErrorMessage = agent.status === "error"
     ? "This agent hit an error and stopped responding. Retry to reconnect."
-    : "";
+    : agent.status === "interrupted"
+      ? "This agent's work was interrupted (for example, by a Passage restart) before it finished. Retry to continue."
+      : "";
   const bannerMessage = error || statusErrorMessage;
   const [sessionExpansion, setSessionExpansion] = useState<TimelineExpansionSettings>(
     () => settings?.timelineExpansion ?? DEFAULT_TIMELINE_EXPANSION
