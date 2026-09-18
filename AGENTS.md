@@ -8,6 +8,12 @@ Authority: `docs/DESIGN.md` (architecture/security/scope), `docs/UI.md` (UI/a11y
 - Pi is the only agent runtime (pinned CLI `0.85.1`). No Node, Vite, Pi SDK, ACP, provider abstractions, or multi-provider support.
 - Daemon owns FS/Git/worktrees/SQLite/PTYs/Pi/HTTP/WS. Browser is an attachable view; browser close/suspend must not stop daemon work.
 
+## Pi holder rollback
+
+- Follow [docs/BACKTOSQUAREONE.md](docs/BACKTOSQUAREONE.md) for the staged rollback to daemon-owned CLI RPC processes, ending with safe draining shutdown. Crash interruption is accepted; never automatically resend an uncertain prompt.
+- [docs/ORHPANS.md](docs/ORHPANS.md) is deprecated historical reference for what to reverse, not implementation authority. Retain it until explicitly asked to delete it; do not extend the holder architecture.
+- The rollback and safe shutdown are planned, not implemented. Preserve Pi JSONL files/paths and resource-loading policy; verify old holders and their Pi children have exited before starting direct writers against the same sessions.
+
 ## Pi invariants
 
 - One `pi --mode rpc` per agent, owned solely by `PiRpcManager` (framing, correlation, replay, event normalization).

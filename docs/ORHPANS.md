@@ -1,12 +1,20 @@
-# Surviving daemon restarts: per-agent Pi holders (plan)
+# Deprecated: per-agent Pi holders (historical plan)
 
 ## Status
 
-Implemented (holder-default). This document is the plan of record for keeping
-Passage agents alive across daemon restarts (deploy, `bun --watch` reload,
-crash) while preserving a guaranteed way to shut Pi children down.
+**Deprecated. Superseded by [BACKTOSQUAREONE.md](BACKTOSQUAREONE.md).**
 
-What landed:
+Keep this document as a historical reference for identifying and reversing the
+holder changes. It is no longer a plan of record or guidance for new work.
+Retain the original design below until this reference is explicitly deleted.
+
+The replacement direction is daemon-owned Pi CLI RPC processes, accepting
+interruption on crashes and adding safe draining for planned shutdowns. The
+holder implementation is still present; this deprecation does not mean the
+rollback or safe shutdown mechanism has been implemented. Follow
+`BACKTOSQUAREONE.md` for migration order, safeguards, and acceptance tests.
+
+Historical implementation inventory:
 
 - Same-binary dispatch (`passage pi-holder <agentId> …`, `passage
   shutdown-holders`, `passage pi-status [agentId]`) in `src/daemon/index.ts`,
