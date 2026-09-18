@@ -137,10 +137,11 @@
   justify-content: space-between;
   gap: 12px;
   min-height: 42px;
-  max-height: calc(42px + env(safe-area-inset-top, 0px));
+  max-height: calc(42px + min(env(safe-area-inset-top, 0px), 64px));
   /* Top inset clears the PWA status bar / Dynamic Island (viewport-fit=cover
-     + black-translucent paints content behind it); 0px elsewhere. */
-  padding: env(safe-area-inset-top, 0px) 16px 0;
+     + black-translucent paints content behind it); 0px elsewhere. Capped:
+     real hardware tops out ~59px, larger is a cold-start misreport. */
+  padding: min(env(safe-area-inset-top, 0px), 64px) 16px 0;
   background: var(--background);
   border-bottom: 1px solid var(--border);
   flex: none;

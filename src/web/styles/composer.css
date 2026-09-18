@@ -3,11 +3,14 @@
   position: sticky;
   bottom: 0;
   /* Paint edge-to-edge (background bleeds into home-indicator zone);
-     inset *content* via padding. Bottom padding is max(breathing-room,
-     safe-area) — NOT calc(breathing + safe-area), which double-stacks
-     whitespace and floats the card too high on PWA. margin-bottom rides
-     above the iOS keyboard via --kb-inset (visualViewport polyfill). */
-  padding: 6px 16px max(10px, env(safe-area-inset-bottom, 0px));
+     inset *content* via padding. Bottom padding clears the home indicator
+     when the keyboard is closed but collapses to breathing room when open:
+     margin-bottom already lifts the bar above the keys via --kb-inset, so
+     keeping the full safe-area padding would leave a blank band between
+     the composer and the keyboard. Top inset is capped: real hardware tops
+     out at ~59px (Dynamic Island portrait), so anything larger is a
+     cold-start misreport that would shove content down the screen. */
+  padding: 6px 16px max(8px, calc(env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px)));
   margin-bottom: var(--kb-inset, 0px);
   background: var(--background);
   flex: none;

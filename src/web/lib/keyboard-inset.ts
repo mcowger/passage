@@ -60,8 +60,12 @@ function readViewport() {
  * (toolbar collapse changes the layout height without touching the visual
  * viewport), with the resize read deferred to rAF because the first
  * post-focus reading is stale. Cold-start recovery re-reads after settle
- * (WebKit 254868 under-reports until the viewport is exercised). Returns a
- * cleanup.
+ * (WebKit 254868 under-reports until the viewport is exercised). Safari's
+ * dismiss pan sometimes sticks (fractional offset survives keyboard close,
+ * blurring/shifting crisp top bars), so the open→closed transition,
+ * focusout, and cold-start settle all reset the page pan via scrollTo — the
+ * page itself never scrolls (shell is overflow-hidden), this only releases
+ * Safari's pan. Returns a cleanup.
  */
 export function initKeyboardInset(): () => void {
   const root = document.documentElement;
@@ -72,11 +76,28 @@ export function initKeyboardInset(): () => void {
   if (!vv) return () => {};
 
   let frame = 0;
+  let lastInset = 0;
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
+  const resetPan = () => {
+    try {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    } catch {
+      // Non-visual environment (tests): nothing to reset.
+    }
+  };
+  const resetPanSoon = () => {
+    resetPan();
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(resetPan, 120);
+  };
   const sync = () => {
     const inset = computeKeyboardInset(window.innerHeight, vv.height, vv.offsetTop);
     root.style.setProperty("--kb-inset", `${inset}px`);
     root.style.setProperty("--app-height", `${computeAppHeight(window.innerHeight)}px`);
+    if (lastInset > 0 && inset === 0) resetPanSoon();
+    lastInset = inset;
   };
   const syncSoon = () => {
     cancelAnimationFrame(frame);
@@ -88,21 +109,30 @@ export function initKeyboardInset(): () => void {
     if (settleTimer) clearTimeout(settleTimer);
     settleTimer = setTimeout(sync, 250);
   };
+  const onFocusOut = () => {
+    // Keyboard closing (or focus hopping between inputs): release any pan.
+    resetPan();
+  };
 
   sync();
   vv.addEventListener("resize", syncSoon);
   vv.addEventListener("scroll", sync);
   window.addEventListener("resize", syncSoon);
   window.addEventListener("orientationchange", onOrientation);
-  // Cold-start recovery: first readings under-report per WebKit 254868.
-  const coldTimer = setTimeout(sync, 500);
+  window.addEventListener("focusout", onFocusOut);
+  // Cold-start recovery: first readings under-report per WebKit 254868, and
+  // the launch pan (if any) needs releasing once the viewport is exercised.
+  const coldTimer = setTimeout(() => { sync(); resetPan(); }, 500);
+  const coldTimerLate = setTimeout(sync, 1500);
   return () => {
     cancelAnimationFrame(frame);
     clearTimeout(coldTimer);
+    clearTimeout(coldTimerLate);
     if (settleTimer) clearTimeout(settleTimer);
     vv.removeEventListener("resize", syncSoon);
     vv.removeEventListener("scroll", sync);
     window.removeEventListener("resize", syncSoon);
     window.removeEventListener("orientationchange", onOrientation);
+    window.removeEventListener("focusout", onFocusOut);
   };
 }

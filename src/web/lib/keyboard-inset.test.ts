@@ -15,6 +15,10 @@ describe("computeKeyboardInset", () => {
     expect(computeKeyboardInset(852, 703, 0)).toBe(0);
   });
 
+  test("honors the threshold boundary", () => {
+    expect(computeKeyboardInset(852, 702, 0)).toBe(150);
+  });
+
   test("measures the covered height while open", () => {
     expect(computeKeyboardInset(852, 500, 0)).toBe(352);
   });
