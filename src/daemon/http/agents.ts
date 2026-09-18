@@ -201,6 +201,16 @@ export function createAgentRoutes(service: AgentService): Hono {
     try { await service.archive(id(context.req.param("agentId"))); return success(okResponseSchema.parse({ ok: true })); }
     catch (error) { return errorResponse(error); }
   });
+  app.get("/api/workspaces/:workspaceId/agents/archived", (context) => {
+    try {
+      const limit = integer(context.req.query("limit"), 100, 100);
+      return success(service.listArchived(id(context.req.param("workspaceId")), limit).map(publicSnapshot));
+    } catch (error) { return errorResponse(error); }
+  });
+  app.post("/api/agents/:agentId/reopen", async (context) => {
+    try { return success(publicSnapshot(await service.reopen(id(context.req.param("agentId"))))); }
+    catch (error) { return errorResponse(error); }
+  });
 
   return app;
 }

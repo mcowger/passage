@@ -36,6 +36,27 @@ test("archives separately and rejects archived agents", async () => {
   const f = await make(); const a = await f.service.create("w"); await f.service.archive(a.id); expect(f.repos.agents.get(a.id)?.lastKnownStatus).toBe("archived"); expect(() => f.service.snapshot(a.id)).toThrow("archived"); f.store.close();
 });
 
+test("lists archived agents and reopens them back to active", async () => {
+  const f = await make();
+  const a = await f.service.create("w", "keep");
+  const b = await f.service.create("w", "restore-me");
+  await f.service.archive(b.id);
+  expect(f.service.list("w").map((agent) => agent.id)).toEqual([a.id]);
+  const archived = f.service.listArchived("w");
+  expect(archived.map((agent) => agent.id)).toEqual([b.id]);
+  expect(archived[0]?.persisted).toBe(false);
+  const reopened = await f.service.reopen(b.id);
+  expect(reopened.lastKnownStatus).toBe("idle");
+  expect(f.repos.agents.get(b.id)?.archivedAt).toBeNull();
+  expect(f.service.list("w").map((agent) => agent.id).sort()).toEqual([a.id, b.id].sort());
+  expect(f.service.listArchived("w")).toHaveLength(0);
+  // The restored session accepts new work again.
+  await f.service.prompt(b.id, "hello again");
+  await expect(f.service.reopen(a.id)).rejects.toMatchObject({ code: "invalid-input" });
+  await f.service.shutdown();
+  f.store.close();
+});
+
 test("listener failures do not break service operation", async () => {
   const f = await make(); f.service.subscribe(() => { throw new Error("listener"); }); const a = await f.service.create("w"); expect(a.id).toStartWith("agt_"); await f.service.shutdown(); f.store.close();
 });

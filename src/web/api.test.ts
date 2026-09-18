@@ -135,6 +135,23 @@ test("client searches workspace files and compacts agents", async () => {
   expect(calls[1]).toContain("/api/agents/agent-1/compact");
 });
 
+test("client lists archived agents and reopens them", async () => {
+  const calls: string[] = [];
+  const agent = {
+    id: "agent-1", workspaceId: "workspace-1", title: "Agent", status: "archived" as const,
+    modelPreference: null, thinkingPreference: null, live: false, persisted: true,
+  };
+  const api = createWorkspaceApi(async (input) => {
+    calls.push(String(input));
+    if (String(input).endsWith("/agents/archived")) return Response.json([agent]);
+    return Response.json({ ...agent, status: "idle", live: false });
+  });
+  expect(await api.listArchivedAgents("workspace-1")).toEqual([agent]);
+  expect(calls[0]).toContain("/api/workspaces/workspace-1/agents/archived");
+  await expect(api.reopenAgent("agent-1")).resolves.toMatchObject({ status: "idle" });
+  expect(calls[1]).toContain("/api/agents/agent-1/reopen");
+});
+
 test("client rejects malformed successful command responses", async () => {
   const api = createWorkspaceApi(async () => Response.json({ accepted: false }));
   await expect(api.prompt("agent-1", "Hello")).rejects.toThrow();

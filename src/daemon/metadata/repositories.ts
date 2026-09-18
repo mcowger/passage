@@ -66,6 +66,7 @@ export class AgentRepository {
   updateModelPreference(id: string, model: string): void { this.db.query("UPDATE agents SET model_preference=? WHERE id=?").run(model, id); }
   updateThinkingPreference(id: string, thinking: string): void { this.db.query("UPDATE agents SET thinking_preference=? WHERE id=?").run(thinking, id); }
   archive(id: string, archivedAt: string): void { this.db.query("UPDATE agents SET archived_at=? WHERE id=?").run(archivedAt, id); }
+  unarchive(id: string): void { this.db.query("UPDATE agents SET archived_at=NULL WHERE id=?").run(id); }
 }
 
 export class AppSettingsRepository {

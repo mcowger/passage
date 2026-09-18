@@ -1,4 +1,5 @@
-import { Bot, FolderOpen, GitBranch, Globe, Plus, Terminal as TerminalIcon } from "lucide-react";
+import { useState } from "react";
+import { Archive, ArchiveRestore, Bot, FolderOpen, GitBranch, Globe, Plus, Terminal as TerminalIcon } from "lucide-react";
 import type { AgentSummary } from "../../shared/domain/agents.ts";
 import type { TerminalSummary } from "../../shared/domain/terminals.ts";
 import type { WebPreview } from "../../shared/domain/previews.ts";
@@ -20,6 +21,8 @@ export type WorkspaceOverviewProps = {
   autoStartingAgent?: boolean;
   onNewAgent: () => void;
   onOpenAgent: (id: string) => void;
+  onListArchivedAgents: () => Promise<AgentSummary[]>;
+  onReopenAgent: (id: string) => Promise<AgentSummary>;
   onNewTerminal: () => void;
   onOpenFiles: () => void;
   onOpenChanges: () => void;
@@ -37,12 +40,47 @@ export function WorkspaceOverview({
   autoStartingAgent,
   onNewAgent,
   onOpenAgent,
+  onListArchivedAgents,
+  onReopenAgent,
   onNewTerminal,
   onOpenFiles,
   onOpenChanges,
   onNewPreview,
 }: WorkspaceOverviewProps) {
   const showStarting = autoStartingAgent && agents.length === 0;
+  const [archivedOpen, setArchivedOpen] = useState(false);
+  const [archivedAgents, setArchivedAgents] = useState<AgentSummary[] | null>(null);
+  const [archivedLoading, setArchivedLoading] = useState(false);
+  const [archivedError, setArchivedError] = useState("");
+  const [reopeningId, setReopeningId] = useState<string | null>(null);
+
+  const toggleArchived = () => {
+    if (archivedOpen) {
+      setArchivedOpen(false);
+      return;
+    }
+    setArchivedOpen(true);
+    // Always refetch on open: agents archived elsewhere (e.g. closing a
+    // canvas tab) must show up without a page reload.
+    setArchivedLoading(true);
+    setArchivedError("");
+    void onListArchivedAgents()
+      .then((next) => setArchivedAgents(next))
+      .catch((cause) => setArchivedError(cause instanceof Error ? cause.message : "Unable to load archived agents"))
+      .finally(() => setArchivedLoading(false));
+  };
+
+  const handleReopen = (agentId: string) => {
+    setReopeningId(agentId);
+    setArchivedError("");
+    void onReopenAgent(agentId)
+      .then(() => {
+        setArchivedAgents((current) => current?.filter((agent) => agent.id !== agentId) ?? current);
+        onOpenAgent(agentId);
+      })
+      .catch((cause) => setArchivedError(cause instanceof Error ? cause.message : "Unable to restore agent"))
+      .finally(() => setReopeningId(null));
+  };
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto p-6" aria-label="Workspace overview">
@@ -135,6 +173,56 @@ export function WorkspaceOverview({
             {agents.length > 5 && (
               <p className="text-[11px] text-muted-foreground">+ {agents.length - 5} more in the sidebar</p>
             )}
+            <div className="mt-1 border-t border-border pt-1.5">
+              <button
+                type="button"
+                onClick={toggleArchived}
+                aria-expanded={archivedOpen}
+                aria-label={archivedOpen ? "Hide archived agents" : "View archived agents"}
+                className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-xs text-muted-foreground hover:bg-surface-hover hover:text-foreground"
+              >
+                <Archive className="size-3.5" aria-hidden="true" />
+                {archivedOpen ? "Hide archived agents" : "View archived agents"}
+              </button>
+              {archivedOpen && (
+                <div className="flex flex-col gap-1.5 px-1 pt-1.5">
+                  {archivedLoading && (
+                    <p className="flex items-center gap-2 px-1.5 py-1 text-xs text-muted-foreground">
+                      <Spinner className="size-3.5" aria-hidden="true" />
+                      <span role="status">Loading archived agents…</span>
+                    </p>
+                  )}
+                  {archivedError && (
+                    <p role="alert" className="rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-destructive">{archivedError}</p>
+                  )}
+                  {!archivedLoading && !archivedError && archivedAgents?.length === 0 && (
+                    <p className="px-1.5 py-1 text-xs text-muted-foreground">No archived agents in this workspace.</p>
+                  )}
+                  {archivedAgents?.map((agent) => (
+                    <div
+                      key={agent.id}
+                      className="flex items-center justify-between gap-2 rounded-md border border-border px-2.5 py-1.5 text-xs"
+                    >
+                      <span className="min-w-0 flex-1 truncate font-medium text-foreground" title={agent.title}>{agent.title}</span>
+                      <Button
+                        size="xs"
+                        variant="secondary"
+                        disabled={reopeningId !== null}
+                        onClick={() => handleReopen(agent.id)}
+                        aria-label={`Restore agent ${agent.title}`}
+                      >
+                        {reopeningId === agent.id ? (
+                          <Spinner className="size-3" aria-hidden="true" />
+                        ) : (
+                          <ArchiveRestore className="size-3" aria-hidden="true" />
+                        )}
+                        Restore
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
 

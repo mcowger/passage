@@ -954,6 +954,24 @@ function App() {
     }
   };
 
+  // Promoting an archived agent back to active: the daemon flips the
+  // metadata row to `idle` (same Pi session resumes lazily), then the
+  // active list reloads and the restored session opens in the canvas.
+  const reopenAgent = useCallback(async (agentId: string) => {
+    if (!selectedWorkspaceId) throw new Error("No workspace selected");
+    const restored = await api.reopenAgent(agentId);
+    setAgents((current) => (current.some((agent) => agent.id === restored.id) ? current : [...current, restored]));
+    setSelectedAgentId(restored.id);
+    setActiveTab("agent");
+    openPaneTab({
+      id: `agent-${restored.id}`,
+      kind: "agent",
+      title: restored.title,
+      targetId: restored.id,
+    });
+    return restored;
+  }, [api, selectedWorkspaceId, openPaneTab]);
+
   const closeAgentTab = useCallback(async (tabId: string) => {
     if (!tabId.startsWith("agent-") || !selectedWorkspaceId) return;
     const agentId = tabId.slice("agent-".length);
@@ -1151,6 +1169,8 @@ function App() {
             autoStartingAgent={autoAgentPending}
             onNewAgent={() => void createAgent()}
             onOpenAgent={handleSelectAgent}
+            onListArchivedAgents={() => (workspace ? api.listArchivedAgents(workspace.id) : Promise.resolve([]))}
+            onReopenAgent={reopenAgent}
             onNewTerminal={() => void createTerminal()}
             onOpenFiles={() => {
               captureMobileReturn();

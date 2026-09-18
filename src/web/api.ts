@@ -308,6 +308,10 @@ export function createWorkspaceApi(
     async setModel(id: string, provider: string, modelId: string): Promise<AgentSummary> { return agentSummarySchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/model`, { method: "POST", body: JSON.stringify({ provider, modelId }) })); },
     async setThinking(id: string, level: string): Promise<AgentSummary> { return agentSummarySchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/thinking`, { method: "POST", body: JSON.stringify({ level }) })); },
     async archiveAgent(id: string): Promise<void> { okResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/archive`, { method: "POST" })); },
+    async listArchivedAgents(workspaceId: string): Promise<AgentSummary[]> {
+      return agentSummarySchema.array().parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents/archived`));
+    },
+    async reopenAgent(id: string): Promise<AgentSummary> { return agentSummarySchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/reopen`, { method: "POST" })); },
     async listTerminals(workspaceId: string): Promise<TerminalSummary[]> {
       return terminalSummarySchema.array().parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/terminals`));
     },

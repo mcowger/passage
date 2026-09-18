@@ -139,6 +139,23 @@ describe("agent HTTP API", () => {
     expect((await app.fetch(request(`/api/agents/${created.id}/prompt`, { method: "POST", body: JSON.stringify({ message: "No" }) }))).status).toBe(409);
   });
 
+  test("lists archived agents and reopens them", async () => {
+    const { app } = await fixture();
+    const created = await json(await app.fetch(request("/api/workspaces/workspace-1/agents", { method: "POST", body: "{}" })));
+    const agentId = String(created.id);
+    expect((await app.fetch(request(`/api/agents/${agentId}/archive`, { method: "POST" }))).status).toBe(200);
+    const archived = await (await app.fetch(request("/api/workspaces/workspace-1/agents/archived"))).json() as unknown[];
+    expect(archived).toHaveLength(1);
+    const reopened = await app.fetch(request(`/api/agents/${agentId}/reopen`, { method: "POST" }));
+    expect(reopened.status).toBe(200);
+    expect(((await reopened.json()) as { status: string }).status).toBe("idle");
+    const archivedAfter = await (await app.fetch(request("/api/workspaces/workspace-1/agents/archived"))).json() as unknown[];
+    expect(archivedAfter).toHaveLength(0);
+    // Reopening an active agent is rejected.
+    expect((await app.fetch(request(`/api/agents/${agentId}/reopen`, { method: "POST" }))).status).toBe(400);
+    expect((await app.fetch(request("/api/agents/missing-agent-1/reopen", { method: "POST" }))).status).toBe(404);
+  });
+
   test("rejects missing agents, malformed JSON, and oversized bodies", async () => {
     const { app } = await fixture();
     expect((await app.fetch(request("/api/agents/missing"))).status).toBe(404);

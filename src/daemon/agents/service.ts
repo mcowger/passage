@@ -791,6 +791,36 @@ export class AgentService {
     this.emit({ agentId, type: "status", status: "archived" });
   }
 
+  /** Archived agents for a workspace, newest archival last in `id` order.
+   *  Read-only: unlike list(), this stays available even when the workspace
+   *  itself is archived, so the overview can always surface what was kept. */
+  listArchived(workspaceId: string, limit = this.listLimit): AgentSnapshot[] {
+    if (!ID.test(workspaceId)) throw new AgentError("invalid-input", "invalid workspace id");
+    if (!this.repositories.workspaces.get(workspaceId)) throw new AgentError("not-found", "workspace not found");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > this.listLimit) throw new AgentError("invalid-input", "invalid list limit");
+    return this.repositories.agents.listForWorkspace(workspaceId, limit, true).map((agent) => ({
+      ...agent,
+      live: false,
+      persisted: agent.piSessionPath !== null,
+    }));
+  }
+
+  /** Promote an archived agent back to active. The Pi session (same
+   *  piSessionId/sessionDir) resumes lazily on the next prompt/steer, so
+   *  this is a metadata-only flip to `idle` -- no Pi spawn, no admission
+   *  gate. Rejects archived workspaces via requireWorkspace. */
+  async reopen(agentId: string): Promise<AgentSnapshot> {
+    if (!ID.test(agentId)) throw new AgentError("invalid-input", "invalid agent id");
+    const agent = this.repositories.agents.get(agentId);
+    if (!agent) throw new AgentError("not-found", "agent not found");
+    if (!agent.archivedAt) throw new AgentError("invalid-input", "agent is not archived");
+    this.requireWorkspace(agent.workspaceId);
+    this.repositories.agents.unarchive(agentId);
+    this.repositories.agents.updateStatus(agentId, "idle");
+    this.emit({ agentId, type: "status", status: "idle" });
+    return this.snapshot(agentId);
+  }
+
   async stop(agentId: string): Promise<void> {
     this.requireAgent(agentId);
     this.detach(agentId);
