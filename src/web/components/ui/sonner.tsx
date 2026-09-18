@@ -44,6 +44,13 @@ const Toaster = ({ ...props }: ToasterProps) => {
       theme={theme}
       position="top-center"
       className="toaster group"
+      // PWA edge-to-edge (black-translucent): top-center toasts paint under
+      // the status bar / Dynamic Island frost without this. Offset (not
+      // layout padding) moves only the toast layer, so the safe-area
+      // geometry is untouched. mobileOffset applies to narrow viewports
+      // (the phone); offset keeps desktop at its current distance.
+      offset={{ top: "16px" }}
+      mobileOffset={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,
