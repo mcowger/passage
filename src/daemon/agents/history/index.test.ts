@@ -254,11 +254,10 @@ describe("Pi history projection", () => {
     expect((await readPiHistory(path, { previousRevision: first.revision })).rewritten).toBe(true);
   });
 
-  test("bounds records and pages projected history", () => {
+  test("pages projected history", () => {
     const source = `${line(header)}${line({ type: "message", id: "u1", parentId: null, timestamp: "t", message: { role: "user", content: "One" } })}${line({ type: "message", id: "u2", parentId: "u1", timestamp: "t", message: { role: "user", content: "Two" } })}`;
     const history = parsePiJsonl(source, revision(source));
     expect(pageHistory(history, history.timeline.length, 1)).toMatchObject({ nextBefore: 1, history: { timeline: [{ kind: "user", text: "Two" }] } });
-    expect(() => parsePiJsonl(source, revision(source), { maxRecords: 1 })).toThrow("record limit");
   });
 
   test("projects a deterministic write, bash, and read tool sequence", () => {

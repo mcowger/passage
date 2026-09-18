@@ -104,6 +104,11 @@ test("recovers a stale running status left behind by a daemon restart", async ()
   // reload/new systems.
   expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("interrupted");
   expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("interrupted");
+  // Regression: an interrupted agent's diagnostic placeholder must never
+  // surface as `generation: 0` -- the public AgentSummary schema requires
+  // `generation` to be a positive integer when present, so it must be
+  // omitted entirely here, not defaulted to 0.
+  expect(f.service.snapshot(agent.id).generation).toBeUndefined();
   // A stale `running` with no live process must not force the client onto
   // `steer` (a silent no-op when idle); `prompt` starts a fresh run.
   f.repos.agents.updateStatus(agent.id, "running");

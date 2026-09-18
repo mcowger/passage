@@ -18,7 +18,7 @@ Authority: `docs/DESIGN.md` (architecture/security/scope), `docs/UI.md` (UI/a11y
 ## Pi invariants
 
 - One `pi --mode rpc` per agent, owned solely by `PiRpcManager` (framing, correlation, replay, event normalization).
-- Pi JSONL is the only agent history. SQLite holds metadata/indexes only — never transcripts or usage totals. `PiSessionHistoryReader` is the sole parser: read-only, bounded, preserve unknowns, never hand-write/repair.
+- Pi JSONL is the only agent history. SQLite holds metadata/indexes only — never transcripts or usage totals. `PiSessionHistoryReader` is the sole parser: read-only, preserve unknowns, never hand-write/repair, and never refuses a legitimate session with an unevidenced size/record cap — a real session (e.g. one carrying a large embedded image) previously hit exactly this and got permanently bricked into `error` with no self-healing path. Bound what gets paged to the client (see `docs/DESIGN.md` Backpressure and limits), not what gets read from Pi's own source of truth; a genuine resource failure should surface with its own honest cause instead.
 - Browser speaks a minimal versioned Passage protocol, never raw Pi records or free-form Pi JSON. `prompt` success = admission, not completion: hold subscriptions through finalization, `agent_end`, compaction, reconnect, reconciliation.
 - PTYs are separate from Pi `bash`/`abort_bash`. Terminal bytes go over binary WS frames with a single-client size lease.
 - All protocol payloads: Zod, versioned, request IDs + per-subject sequences, bounded reads/pages/diffs/output. Mutations return fresh HTTP snapshots + `/ws` invalidations per `docs/WS.md` — never push content, new transports, or duplicate hub logic.

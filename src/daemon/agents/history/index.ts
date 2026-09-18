@@ -9,12 +9,6 @@ import type {
   ToolActivity,
 } from "../../../shared/domain/agents.ts";
 
-export type HistoryLimits = {
-  maxBytes?: number;
-  maxRecords?: number;
-  maxRecordBytes?: number;
-};
-
 export type HistoryPage = {
   history: AgentHistory;
   nextBefore?: number;
@@ -28,11 +22,6 @@ type ParsedSession = {
   partialTail: boolean;
   invalidUtf8Count: number;
 };
-
-const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
-const DEFAULT_MAX_RECORDS = 20_000;
-const DEFAULT_MAX_RECORD_BYTES = 1024 * 1024;
-const encoder = new TextEncoder();
 
 function object(value: unknown): ObjectValue | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -327,8 +316,7 @@ function project(entries: ObjectValue[], leafId?: string): Omit<AgentHistory, "s
   };
 }
 
-function parseRecords(source: string, limits: Required<HistoryLimits>): ParsedSession {
-  if (encoder.encode(source).byteLength > limits.maxBytes) throw new Error("Pi JSONL exceeds byte limit");
+function parseRecords(source: string): ParsedSession {
   const lines = source.split("\n");
   const tail = lines.pop() ?? "";
   let partialTail = false;
@@ -338,7 +326,6 @@ function parseRecords(source: string, limits: Required<HistoryLimits>): ParsedSe
   const parseLine = (line: string, tailLine = false) => {
     const clean = line.endsWith("\r") ? line.slice(0, -1) : line;
     if (!clean.trim()) return;
-    if (encoder.encode(clean).byteLength > limits.maxRecordBytes) throw new Error("Pi JSONL record exceeds byte limit");
     try {
       const record = object(JSON.parse(clean));
       if (record) records.push(record);
@@ -347,7 +334,6 @@ function parseRecords(source: string, limits: Required<HistoryLimits>): ParsedSe
       if (tailLine) partialTail = true;
       else malformedRecordCount += 1;
     }
-    if (records.length > limits.maxRecords) throw new Error("Pi JSONL exceeds record limit");
   };
 
   for (const line of lines) parseLine(line);
@@ -361,13 +347,8 @@ function contentHash(bytes: Uint8Array): string {
   return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
 }
 
-export function parsePiJsonl(source: string, revision: AgentHistoryRevision, options: HistoryLimits & { leafId?: string; invalidUtf8Count?: number } = {}): AgentHistory {
-  const limits = {
-    maxBytes: options.maxBytes ?? DEFAULT_MAX_BYTES,
-    maxRecords: options.maxRecords ?? DEFAULT_MAX_RECORDS,
-    maxRecordBytes: options.maxRecordBytes ?? DEFAULT_MAX_RECORD_BYTES,
-  };
-  const parsed = parseRecords(source, limits);
+export function parsePiJsonl(source: string, revision: AgentHistoryRevision, options: { leafId?: string; invalidUtf8Count?: number } = {}): AgentHistory {
+  const parsed = parseRecords(source);
   const inferred = options.leafId === undefined;
   const leafId = options.leafId ?? string(parsed.entries.at(-1)?.id);
   const projection = project(parsed.entries, leafId);
@@ -390,13 +371,11 @@ export function parsePiJsonl(source: string, revision: AgentHistoryRevision, opt
   };
 }
 
-export async function readPiHistory(path: string, options: HistoryLimits & { previousRevision?: AgentHistoryRevision; leafId?: string } = {}): Promise<AgentHistory> {
-  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+export async function readPiHistory(path: string, options: { previousRevision?: AgentHistoryRevision; leafId?: string } = {}): Promise<AgentHistory> {
   const file = await open(path, "r");
   try {
     const before = await file.stat();
     if (!before.isFile()) throw new Error("Pi history path is not a file");
-    if (before.size > maxBytes) throw new Error("Pi JSONL exceeds byte limit");
     const bytes = new Uint8Array(before.size);
     const { bytesRead } = await file.read(bytes, 0, before.size, 0);
     const after = await file.stat();

@@ -517,6 +517,23 @@ the newest frame and reconciles via HTTP snapshots.
 - Centralize Git/process concurrency and timeouts; callers never execute an
   arbitrary shell string through an HTTP endpoint (workspace actions accept an
   action id, never a command string).
+- No arbitrary limit that can hard-fail and permanently break a session over
+  otherwise-legitimate data. A limit picked by guessing a round number, with no
+  evidence it protects against a real observed failure, is over-engineering,
+  not safety — it just trades a working feature for an invented one. Concretely:
+  a per-record byte cap on reading Pi's own JSONL once threw and permanently
+  flipped a real agent (carrying one large embedded image) to `error` with no
+  retry/self-healing path, even though the agent and its Pi process were fine.
+  It was removed rather than raised, because raising a made-up number is still
+  a made-up number. Prefer letting the operation fail honestly on its own
+  terms (OOM, timeout, an actual downstream schema/size rejection) over an
+  invented ceiling that misreports a healthy resource as broken. Where a bound
+  is genuinely needed, size it against real measured data (actual file sizes,
+  actual record counts, actual payloads observed in the wild), not a guess, and
+  document the evidence next to the constant. This is distinct from bounding
+  what is served to the client (history pages, diffs, wire payload sizes
+  above) — those bounds protect the browser/wire, not the read of the
+  underlying source of truth, and stay.
 
 ## Pi integration and agent experience
 

@@ -60,7 +60,11 @@ type RuntimeSubscription = {
 };
 
 type RuntimeDiagnostic = {
-  generation: number;
+  // Absent for `interrupted` (no real Pi process/generation ever existed for
+  // this record) -- present and positive for an actual observed process
+  // exit. Never a placeholder 0: the public AgentSummary schema requires
+  // `generation` to be a positive integer when present.
+  generation?: number;
   exitStatus: string;
   stderr: string[];
   stderrTruncated: boolean;
@@ -308,7 +312,7 @@ export class AgentService {
    *  daemon's life). */
   private markInterrupted(agentId: string, previousStatus: string): void {
     if (!this.diagnostics.has(agentId)) {
-      this.diagnostics.set(agentId, { generation: 0, exitStatus: `interrupted (${previousStatus})`, stderr: [], stderrTruncated: false });
+      this.diagnostics.set(agentId, { exitStatus: `interrupted (${previousStatus})`, stderr: [], stderrTruncated: false });
       while (this.diagnostics.size > MAX_RUNTIME_DIAGNOSTICS) this.diagnostics.delete(this.diagnostics.keys().next().value!);
     }
     this.runStartedAt.delete(agentId);
