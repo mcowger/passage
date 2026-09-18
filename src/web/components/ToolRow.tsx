@@ -143,17 +143,17 @@ export function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): T
   switch (item.name) {
     case "read":
     case "readFile":
-      return fileToolSummary("read", "Read File", input);
+      return fileToolSummary("read", "Read", input);
     case "edit":
     case "editFile":
     case "multiedit":
     case "apply_patch":
-      return fileToolSummary("edit", "Edit File", input);
+      return fileToolSummary("edit", "Edit", input);
     case "write":
     case "writeFile":
-      return fileToolSummary("write", "Write File", input);
+      return fileToolSummary("write", "Write", input);
     case "bash":
-      return { icon: "command", title: "Shell Command", subtitle: String(input.command ?? "") };
+      return { icon: "command", title: "Shell", subtitle: String(input.command ?? "") };
     case "find":
     case "glob":
     case "ls":
@@ -161,12 +161,12 @@ export function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): T
     case "list_dir":
       return {
         icon: "search",
-        title: item.name === "glob" || item.name === "find" ? "Find Files" : "List Directory",
+        title: item.name === "glob" || item.name === "find" ? "Find" : "List",
         subtitle: String(input.pattern ?? input.path ?? ""),
         isPath: !input.pattern && Boolean(input.path),
       };
     case "grep":
-      return { icon: "search", title: "Search Files", subtitle: String(input.pattern ?? "") };
+      return { icon: "search", title: "Search", subtitle: String(input.pattern ?? "") };
     default:
       return { icon: "other", title: item.name, subtitle: "" };
   }

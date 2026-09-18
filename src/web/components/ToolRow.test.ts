@@ -15,7 +15,7 @@ describe("getToolSummary", () => {
     };
     const summary = getToolSummary(item);
     expect(summary.icon).toBe("command");
-    expect(summary.title).toBe("Shell Command");
+    expect(summary.title).toBe("Shell");
     expect(summary.subtitle).toBe("bun test");
   });
 
@@ -29,7 +29,7 @@ describe("getToolSummary", () => {
     };
     const summary = getToolSummary(item);
     expect(summary.icon).toBe("search");
-    expect(summary.title).toBe("Search Files");
+    expect(summary.title).toBe("Search");
     expect(summary.subtitle).toBe("const foo");
   });
 
@@ -43,7 +43,7 @@ describe("getToolSummary", () => {
     };
     const summary = getToolSummary(item);
     expect(summary.icon).toBe("read");
-    expect(summary.title).toBe("Read File");
+    expect(summary.title).toBe("Read");
     expect(summary.subtitle).toBe("/tmp/test.ts");
   });
 
@@ -57,7 +57,7 @@ describe("getToolSummary", () => {
     };
     const summary = getToolSummary(item);
     expect(summary.icon).toBe("edit");
-    expect(summary.title).toBe("Edit File");
+    expect(summary.title).toBe("Edit");
     expect(summary.subtitle).toBe("src/web/App.tsx");
     expect(summary.isPath).toBe(true);
   });
@@ -72,7 +72,7 @@ describe("getToolSummary", () => {
     };
     const summary = getToolSummary(item);
     expect(summary.icon).toBe("search");
-    expect(summary.title).toBe("Find Files");
+    expect(summary.title).toBe("Find");
     expect(summary.subtitle).toBe("src/web/components/*.tsx");
   });
 });
@@ -123,7 +123,7 @@ describe("ToolRow component", () => {
     expect(html).toContain("tool-floating-copy");
   });
 
-  test("renders Edit File with visual diff card", () => {
+  test("renders edit with visual diff card", () => {
     const item: Extract<TimelineItem, { kind: "tool" }> = {
       id: "tool-edit",
       kind: "tool",
@@ -151,7 +151,7 @@ describe("ToolRow component", () => {
     expect(html).toContain("tool-diff-line removed");
   });
 
-  test("renders Read File with line gutter and syntax highlighted body", () => {
+  test("renders read with line gutter and syntax highlighted body", () => {
     const item: Extract<TimelineItem, { kind: "tool" }> = {
       id: "tool-read",
       kind: "tool",
