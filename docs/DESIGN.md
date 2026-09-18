@@ -741,17 +741,19 @@ Four builtin themes ship (`passage-light` default warm light,
 (`background`/`surface*`/`border*`/`accent*`/`muted`,
 `statusRunning/Idle/Error/Warning`, `userCard*`, `composer*`,
 `chip*`/`secondary*`, `diffAdd/Remove/Hunk*`,
-`terminalBackground/Foreground`, `editorBackground`). Three builtin font packs
-ship (`system-default`, `fira-code`, `jetbrains-mono`) as font-family strings
-only — no remote stylesheets. Per-workspace settings (`workspaceSettingsSchema`
-v1): `themeId`, `fontId`, `toolRendererPackId`,
+`terminalBackground/Foreground`, `editorBackground`). A bundled font catalog
+(`AVAILABLE_FONTS`: 5 sans UI fonts, 9 Nerd Font Mono families served over
+`GET /api/customization/font-options`) backs per-workspace settings
+(`workspaceSettingsSchema` v1): `themeId`, `fonts` (per-surface mapping of
+`ui`/`mono`/`editor`/`xterm` to catalog ids), `toolRendererPackId`,
 `notificationsEnabled`, `editorWordWrap`
 (default true), `editorTabSize` (default 2), `terminalFontSize` (default 13),
 `suggestModel` (empty = Pi default), `timelineExpansion`
 (thinking/tools-baseline/otherTools, each `always`/`latest`/`none`, defaults
 `latest`). There is no density setting and no custom-pack upload; theme
 application sets `data-theme-mode` + CSS vars, fonts set `--font-ui`/
-`--font-mono`, and a terminal font change triggers a safe fit.
+`--font-mono`/`--font-editor`/`--font-xterm` (editor panes and xterm read
+their own vars, and a terminal font change triggers a safe fit).
 
 ## PWA and LAN operation
 

@@ -217,7 +217,7 @@
 .editor-path { color: #ecebe8; font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dirty-indicator { padding: 1px 4px; background: #d97706; color: white; border-radius: 3px; font-size: 8.5px; font-weight: 700; text-transform: uppercase; }
 .editor-container { flex: 1; overflow: hidden; height: 100%; }
-.editor-container .cm-editor { height: 100%; font-family: var(--font-mono); font-size: 12.5px; }
+.editor-container .cm-editor { height: 100%; font-family: var(--font-editor, var(--font-mono)); font-size: 12.5px; }
 .editor-container .cm-scroller { overflow: auto; }
 
 /* Terminal Panel */

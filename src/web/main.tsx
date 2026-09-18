@@ -8,8 +8,8 @@ import type { PaneTab, WorkspaceLayout, LayoutNode } from "../shared/domain/layo
 import { addTabToGroup, countTabsOfKind, createDefaultLayout, findFirstDeadTerminalTab, findTab, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs, setActiveTabInTree, updateTabInTree } from "../shared/domain/layout.ts";
 import type { WorkspaceSettings } from "../shared/domain/settings.ts";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
-import type { ThemePack, FontPack } from "../shared/domain/customization.ts";
-import { BUILTIN_THEMES, BUILTIN_FONTS } from "../shared/domain/customization.ts";
+import type { ThemePack, FontMapping, FontOption } from "../shared/domain/customization.ts";
+import { BUILTIN_THEMES, AVAILABLE_FONTS, resolveFontFamilies } from "../shared/domain/customization.ts";
 import { createWorkspaceApi, friendlyApiError } from "./api.ts";
 import type { BuildInfo } from "../shared/build-info.ts";
 import { subscribeWorkspace, subscribeWorkspaces } from "./workspaceSocket.ts";
@@ -81,11 +81,14 @@ function applyThemeTokens(theme?: ThemePack) {
   }
 }
 
-function applyFontTokens(font?: FontPack) {
-  if (!font || typeof document === "undefined") return;
+function applyFontTokens(mapping: FontMapping | undefined, options: FontOption[]) {
+  if (typeof document === "undefined") return;
+  const families = resolveFontFamilies(options, mapping);
   const root = document.documentElement;
-  root.style.setProperty("--font-ui", font.uiFontFamily);
-  root.style.setProperty("--font-mono", font.monoFontFamily);
+  root.style.setProperty("--font-ui", families.ui);
+  root.style.setProperty("--font-mono", families.mono);
+  root.style.setProperty("--font-editor", families.editor);
+  root.style.setProperty("--font-xterm", families.xterm);
 }
 
 type FormKind = "project" | "worktree";
@@ -200,7 +203,7 @@ function App() {
   const [layout, setLayout] = useState<WorkspaceLayout>();
   const [settings, setSettings] = useState<WorkspaceSettings>(DEFAULT_WORKSPACE_SETTINGS);
   const [themes, setThemes] = useState<ThemePack[]>(BUILTIN_THEMES);
-  const [fonts, setFonts] = useState<FontPack[]>(BUILTIN_FONTS);
+  const [fontOptions, setFontOptions] = useState<FontOption[]>(AVAILABLE_FONTS);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [workspaceDetailsOpen, setWorkspaceDetailsOpen] = useState(false);
@@ -335,23 +338,22 @@ function App() {
 
   const loadLayoutAndSettings = useCallback(async (workspaceId: string) => {
     try {
-      const [fetchedLayout, fetchedSettings, fetchedThemes, fetchedFonts] = await Promise.all([
+      const [fetchedLayout, fetchedSettings, fetchedThemes, fetchedFontOptions] = await Promise.all([
         api.getLayout(workspaceId)
           .then((l) => ({ ...l, root: replaceOverviewTabs(l.root) }))
           .catch(() => createDefaultLayout(workspaceId)),
         api.getSettings(workspaceId).catch(() => DEFAULT_WORKSPACE_SETTINGS),
         api.getThemes().catch(() => BUILTIN_THEMES),
-        api.getFonts().catch(() => BUILTIN_FONTS),
+        api.getFontOptions().catch(() => AVAILABLE_FONTS),
       ]);
       setLayout(fetchedLayout);
       setSettings(fetchedSettings);
       setThemes(fetchedThemes);
-      setFonts(fetchedFonts);
+      setFontOptions(fetchedFontOptions);
 
       const activeTheme = fetchedThemes.find((t) => t.id === fetchedSettings.themeId) ?? fetchedThemes[0];
-      const activeFont = fetchedFonts.find((f) => f.id === fetchedSettings.fontId) ?? fetchedFonts[0];
       applyThemeTokens(activeTheme);
-      applyFontTokens(activeFont);
+      applyFontTokens(fetchedSettings.fonts, fetchedFontOptions);
     } catch {}
   }, [api]);
 
@@ -524,11 +526,10 @@ function App() {
         await api.saveSettings(selectedWorkspaceId, nextSettings);
       }
       const activeTheme = themes.find((t) => t.id === nextSettings.themeId) ?? themes[0];
-      const activeFont = fonts.find((f) => f.id === nextSettings.fontId) ?? fonts[0];
       applyThemeTokens(activeTheme);
-      applyFontTokens(activeFont);
+      applyFontTokens(nextSettings.fonts, fontOptions);
     },
-    [api, selectedWorkspaceId, themes, fonts]
+    [api, selectedWorkspaceId, themes, fontOptions]
   );
 
   const openPaneTab = useCallback(
@@ -1035,6 +1036,7 @@ function App() {
       }
 
       case "terminal": {
+        const terminalFamilies = resolveFontFamilies(fontOptions, settings.fonts);
         return (
           <TerminalTabPane
             key={tab.id}
@@ -1043,6 +1045,8 @@ function App() {
             terminals={terminals}
             terminalsLoaded={terminalsLoaded}
             api={api}
+            terminalFontFamily={terminalFamilies.xterm}
+            terminalFontSize={settings.terminalFontSize}
             onClose={() => {
               closeTabNow(tab.id);
               setActiveTab("overview");
@@ -1530,7 +1534,7 @@ function App() {
         settings={settings}
         onSaveSettings={handleSaveSettings}
         themes={themes}
-        fonts={fonts}
+        fontOptions={fontOptions}
         api={api}
         projects={snapshot?.projects ?? []}
         locations={snapshot?.locations ?? []}

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import type { ThemePack, FontPack } from "../../shared/domain/customization.ts";
-import { BUILTIN_THEMES, BUILTIN_FONTS } from "../../shared/domain/customization.ts";
+import type { ThemePack, FontMapping, FontOption, FontRole } from "../../shared/domain/customization.ts";
+import { BUILTIN_THEMES, AVAILABLE_FONTS, fontOptionsForRole, resolveFontFamilies } from "../../shared/domain/customization.ts";
 import type { WorkspaceSettings, BaselineTool, ExpandMode, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
 import { baselineTools, DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
 import type { AgentCapabilities } from "../../shared/domain/agents.ts";
@@ -190,13 +190,80 @@ export function OutputExpansionSection({
   );
 }
 
+const FONT_ROLE_META: { role: FontRole; label: string; description: string }[] = [
+  { role: "ui", label: "Interface", description: "App chrome, chat prose, buttons and menus." },
+  { role: "mono", label: "Monospace", description: "Inline code, diffs, paths and metadata." },
+  { role: "editor", label: "Editor", description: "File editor panes." },
+  { role: "xterm", label: "Terminal", description: "Terminal (xterm) panes." },
+];
+
+export interface FontMappingSectionProps {
+  mapping: FontMapping;
+  options: FontOption[];
+  onMappingChange: (next: FontMapping) => void;
+}
+
+export function FontMappingSection({ mapping, options, onMappingChange }: FontMappingSectionProps) {
+  const families = resolveFontFamilies(options, mapping);
+  return (
+    <section className="flex flex-col gap-3" aria-label="Fonts">
+      <div>
+        <h3 className="text-sm font-semibold">Fonts</h3>
+        <p className="text-xs text-muted-foreground">
+          Choose a font for each surface. The preview below updates as you pick.
+        </p>
+      </div>
+
+      {FONT_ROLE_META.map(({ role, label, description }) => (
+        <div key={role} className="flex flex-col gap-1.5">
+          <Label htmlFor={`settings-font-${role}`}>{label}</Label>
+          <Select
+            value={mapping[role]}
+            onValueChange={(value) => onMappingChange({ ...mapping, [role]: value })}
+          >
+            <SelectTrigger id={`settings-font-${role}`} className="w-full">
+              <SelectValue placeholder={`Select a ${label.toLowerCase()} font`} />
+            </SelectTrigger>
+            <SelectContent>
+              {fontOptionsForRole(options, role).map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  <span style={{ fontFamily: option.family }}>{option.name}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <small className="text-xs font-normal text-muted-foreground">{description}</small>
+        </div>
+      ))}
+
+      <div className="flex flex-col gap-2 rounded-md border border-border/50 p-2.5 bg-muted/20" aria-label="Font preview">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Live preview</span>
+        <p className="text-sm" style={{ fontFamily: families.ui }}>
+          Interface — Pack my box with five dozen liquor jugs. 0123456789
+        </p>
+        <pre className="text-xs whitespace-pre-wrap" style={{ fontFamily: families.mono }}>
+          Monospace — const ready = items.filter((i) =&gt; i.done).length; /* -&gt; != &gt;= === */
+        </pre>
+        <pre className="text-xs whitespace-pre-wrap" style={{ fontFamily: families.editor }}>
+          Editor — function shipIt(input: string) &#123; return input.trim(); &#125; // ffi -&gt; =&gt;
+        </pre>
+        <div className="rounded px-2 py-1.5 text-xs" style={{ fontFamily: families.xterm, background: "#191c1e", color: "#ecebe8" }}>
+          <div>$ passage deploy --target prod</div>
+          <div style={{ color: "#4ade80" }}>✓ deployed in 4.2s</div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
   settings: WorkspaceSettings;
   onSaveSettings: (settings: WorkspaceSettings) => Promise<void>;
   themes?: ThemePack[];
-  fonts?: FontPack[];
+  /** Individually selectable fonts for each surface. Defaults to the bundled catalog. */
+  fontOptions?: FontOption[];
   api?: WorkspaceApi;
   projects?: Project[];
   locations?: WorktreeLocation[];
@@ -209,7 +276,7 @@ export function SettingsModal({
   settings,
   onSaveSettings,
   themes = BUILTIN_THEMES,
-  fonts = BUILTIN_FONTS,
+  fontOptions = AVAILABLE_FONTS,
   api,
   projects = [],
   locations: initialLocations = [],
@@ -258,6 +325,14 @@ export function SettingsModal({
   }, [open, api, initialLocations, projects]);
 
   const expansion = currentSettings.timelineExpansion ?? DEFAULT_TIMELINE_EXPANSION;
+  const fontMapping = currentSettings.fonts;
+
+  const handleFontMappingChange = (next: FontMapping) => {
+    setCurrentSettings((prev) => ({
+      ...prev,
+      fonts: next,
+    }));
+  };
 
   const handleUpdateExpansion = (next: TimelineExpansionSettings) => {
     setCurrentSettings((prev) => ({
@@ -386,24 +461,11 @@ export function SettingsModal({
             </Select>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="settings-font">Font Family</Label>
-            <Select
-              value={currentSettings.fontId}
-              onValueChange={(value) => setCurrentSettings({ ...currentSettings, fontId: value })}
-            >
-              <SelectTrigger id="settings-font" className="w-full">
-                <SelectValue placeholder="Select a font" />
-              </SelectTrigger>
-              <SelectContent>
-                {fonts.map((font) => (
-                  <SelectItem key={font.id} value={font.id}>
-                    {font.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <FontMappingSection
+            mapping={fontMapping}
+            options={fontOptions}
+            onMappingChange={handleFontMappingChange}
+          />
 
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between gap-2">

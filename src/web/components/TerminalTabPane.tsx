@@ -25,6 +25,8 @@ export interface TerminalTabPaneProps {
   onClose: () => void;
   onTerminated: () => void;
   onTerminalAttached: (oldTabId: string, created: TerminalSummary) => void;
+  terminalFontFamily?: string;
+  terminalFontSize?: number;
 }
 
 export function TerminalTabPane({
@@ -36,6 +38,8 @@ export function TerminalTabPane({
   onClose,
   onTerminated,
   onTerminalAttached,
+  terminalFontFamily,
+  terminalFontSize,
 }: TerminalTabPaneProps) {
   const currentTerm = tab.targetId
     ? terminals.find((t) => t.id === tab.targetId)
@@ -72,6 +76,8 @@ export function TerminalTabPane({
         key={currentTerm.id}
         terminal={currentTerm}
         onClose={onClose}
+        fontFamily={terminalFontFamily}
+        fontSize={terminalFontSize}
       />
     );
   }

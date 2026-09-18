@@ -1,8 +1,31 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { OutputExpansionSection } from "./SettingsModal.tsx";
+import { FontMappingSection, OutputExpansionSection } from "./SettingsModal.tsx";
+import { DEFAULT_FONT_MAPPING } from "../../shared/domain/customization.ts";
+import { AVAILABLE_FONTS } from "../../shared/domain/customization.ts";
 import { DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
+
+describe("FontMappingSection", () => {
+  test("renders a selector per font role with a live preview", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(FontMappingSection, {
+        mapping: { ...DEFAULT_FONT_MAPPING, mono: "jetbrains-mono", xterm: "fira-code" },
+        options: AVAILABLE_FONTS,
+        onMappingChange: () => {},
+      }),
+    );
+
+    expect(html).toContain("settings-font-ui");
+    expect(html).toContain("settings-font-mono");
+    expect(html).toContain("settings-font-editor");
+    expect(html).toContain("settings-font-xterm");
+    expect(html).toContain("Font preview");
+    // The preview renders the selected families inline.
+    expect(html).toContain("JetBrains Mono");
+    expect(html).toContain("Fira Code");
+  });
+});
 
 describe("OutputExpansionSection", () => {
   test("renders Output & Tool Expansion section with all baseline tools and thinking", () => {

@@ -13,7 +13,7 @@ import { agentCapabilitiesSchema, agentHistoryResponseSchema, agentHistorySchema
 import { terminalSummarySchema, type CreateTerminalInput, type TerminalSummary } from "../shared/domain/terminals.ts";
 import { workspaceLayoutSchema, type WorkspaceLayout } from "../shared/domain/layout.ts";
 import { workspaceSettingsSchema, type WorkspaceSettings } from "../shared/domain/settings.ts";
-import { themePackSchema, fontPackSchema, toolRendererPackSchema, type ThemePack, type FontPack, type ToolRendererPack } from "../shared/domain/customization.ts";
+import { themePackSchema, fontOptionSchema, toolRendererPackSchema, type ThemePack, type FontOption, type ToolRendererPack } from "../shared/domain/customization.ts";
 import type { AgentFile, AgentImage } from "../shared/protocol/agents.ts";
 import { z } from "zod";
 import { filesSearchResponseSchema, directorySuggestResponseSchema } from "../shared/protocol/workspace.ts";
@@ -319,8 +319,8 @@ export function createWorkspaceApi(
     async getThemes(): Promise<ThemePack[]> {
       return themePackSchema.array().parse(await request("/api/customization/themes"));
     },
-    async getFonts(): Promise<FontPack[]> {
-      return fontPackSchema.array().parse(await request("/api/customization/fonts"));
+    async getFontOptions(): Promise<FontOption[]> {
+      return fontOptionSchema.array().parse(await request("/api/customization/font-options"));
     },
     async getToolRenderers(): Promise<ToolRendererPack> {
       return toolRendererPackSchema.parse(await request("/api/customization/tool-renderers"));

@@ -52,14 +52,166 @@ export const themePackSchema = z.object({
 });
 export type ThemePack = z.infer<typeof themePackSchema>;
 
-export const fontPackSchema = z.object({
+/** Per-surface font roles. Each role maps to one entry in the font catalog. */
+export const FONT_ROLES = ["ui", "mono", "editor", "xterm"] as const;
+export type FontRole = (typeof FONT_ROLES)[number];
+
+export const fontOptionSchema = z.object({
   id: z.string().min(1).max(64).regex(/^[a-z0-9-]+$/),
   name: z.string().min(1).max(64),
-  uiFontFamily: z.string().min(1).max(256),
-  monoFontFamily: z.string().min(1).max(256),
-  editorFontFamily: z.string().min(1).max(256),
+  /** CSS font-family value (includes fallbacks). */
+  family: z.string().min(1).max(256),
+  category: z.enum(["ui", "mono"]),
 });
-export type FontPack = z.infer<typeof fontPackSchema>;
+export type FontOption = z.infer<typeof fontOptionSchema>;
+
+export const fontMappingSchema = z.object({
+  ui: z.string().min(1).max(64),
+  mono: z.string().min(1).max(64),
+  editor: z.string().min(1).max(64),
+  xterm: z.string().min(1).max(64),
+});
+export type FontMapping = z.infer<typeof fontMappingSchema>;
+
+/**
+ * Individually selectable fonts. Every entry is self-hosted under
+ * src/web/fonts with @font-face declarations in src/web/styles/fonts.css,
+ * so builds and the standalone binary serve them with no webfont CDN.
+ * `family` values must match the @font-face family names in fonts.css.
+ */
+export const AVAILABLE_FONTS: FontOption[] = [
+  // UI (sans) fonts
+  {
+    id: "system-ui",
+    name: "System Default",
+    family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    category: "ui",
+  },
+  {
+    id: "inter",
+    name: "Inter",
+    family: "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif",
+    category: "ui",
+  },
+  {
+    id: "ibm-plex-sans",
+    name: "IBM Plex Sans",
+    family: "'IBM Plex Sans', system-ui, -apple-system, sans-serif",
+    category: "ui",
+  },
+  {
+    id: "manrope",
+    name: "Manrope",
+    family: "'Manrope', system-ui, -apple-system, sans-serif",
+    category: "ui",
+  },
+  {
+    id: "work-sans",
+    name: "Work Sans",
+    family: "'Work Sans', system-ui, -apple-system, sans-serif",
+    category: "ui",
+  },
+  // Monospace (Nerd Font Mono) fonts — also used for editor and terminal roles
+  {
+    id: "system-mono",
+    name: "System Mono",
+    family: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    category: "mono",
+  },
+  {
+    id: "jetbrains-mono",
+    name: "JetBrains Mono",
+    family: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+    category: "mono",
+  },
+  {
+    id: "fira-code",
+    name: "Fira Code",
+    family: "'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+    category: "mono",
+  },
+  {
+    id: "hack",
+    name: "Hack",
+    family: "'Hack', ui-monospace, Menlo, Consolas, monospace",
+    category: "mono",
+  },
+  {
+    id: "caskaydia-cove",
+    name: "Caskaydia Cove",
+    family: "'Caskaydia Cove', ui-monospace, Menlo, Consolas, monospace",
+    category: "mono",
+  },
+  {
+    id: "meslo-lg",
+    name: "Meslo LG",
+    family: "'Meslo LG', ui-monospace, Menlo, Consolas, monospace",
+    category: "mono",
+  },
+  {
+    id: "iosevka",
+    name: "Iosevka",
+    family: "'Iosevka', ui-monospace, Menlo, Consolas, monospace",
+    category: "mono",
+  },
+  {
+    id: "source-code-pro",
+    name: "Source Code Pro",
+    family: "'Source Code Pro', ui-monospace, Menlo, Consolas, monospace",
+    category: "mono",
+  },
+  {
+    id: "ubuntu-mono",
+    name: "Ubuntu Mono",
+    family: "'Ubuntu Mono', ui-monospace, Menlo, Consolas, monospace",
+    category: "mono",
+  },
+];
+
+export const DEFAULT_FONT_MAPPING: FontMapping = {
+  ui: "system-ui",
+  mono: "system-mono",
+  editor: "system-mono",
+  xterm: "system-mono",
+};
+
+/** Resolve a catalog id to its CSS font-family, falling back to `fallback`. */
+export function fontFamilyById(options: FontOption[], id: string, fallback: string): string {
+  return options.find((option) => option.id === id)?.family ?? fallback;
+}
+
+/** Resolve a full role mapping to CSS font-family values (unknown ids fall back to defaults). */
+export function resolveFontFamilies(
+  options: FontOption[],
+  mapping: Partial<FontMapping> | undefined,
+): Record<FontRole, string> {
+  const defaults = resolveFontFamiliesFromCatalog(options, DEFAULT_FONT_MAPPING);
+  if (!mapping) return defaults;
+  return {
+    ui: fontFamilyById(options, mapping.ui ?? DEFAULT_FONT_MAPPING.ui, defaults.ui),
+    mono: fontFamilyById(options, mapping.mono ?? DEFAULT_FONT_MAPPING.mono, defaults.mono),
+    editor: fontFamilyById(options, mapping.editor ?? DEFAULT_FONT_MAPPING.editor, defaults.editor),
+    xterm: fontFamilyById(options, mapping.xterm ?? DEFAULT_FONT_MAPPING.xterm, defaults.xterm),
+  };
+}
+
+function resolveFontFamiliesFromCatalog(options: FontOption[], mapping: FontMapping): Record<FontRole, string> {
+  const byId = new Map(options.map((option) => [option.id, option.family] as const));
+  const systemUi = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  const systemMono = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+  return {
+    ui: byId.get(mapping.ui) ?? systemUi,
+    mono: byId.get(mapping.mono) ?? systemMono,
+    editor: byId.get(mapping.editor) ?? systemMono,
+    xterm: byId.get(mapping.xterm) ?? systemMono,
+  };
+}
+
+/** Catalog entries suitable for a role: sans options for UI, mono options elsewhere. */
+export function fontOptionsForRole(options: FontOption[], role: FontRole): FontOption[] {
+  const category = role === "ui" ? "ui" : "mono";
+  return options.filter((option) => option.category === category);
+}
 
 export const toolMatcherSchema = z.object({
   toolName: z.string().min(1).max(64),
@@ -250,31 +402,6 @@ export const BUILTIN_THEMES: ThemePack[] = [
       terminalForeground: "#ffffff",
       editorBackground: "#000000",
     },
-  },
-];
-
-// Built-in font packs
-export const BUILTIN_FONTS: FontPack[] = [
-  {
-    id: "system-default",
-    name: "System Default",
-    uiFontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-    monoFontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-    editorFontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-  },
-  {
-    id: "fira-code",
-    name: "Fira Code",
-    uiFontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-    monoFontFamily: "'Fira Code', ui-monospace, monospace",
-    editorFontFamily: "'Fira Code', ui-monospace, monospace",
-  },
-  {
-    id: "jetbrains-mono",
-    name: "JetBrains Mono",
-    uiFontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-    monoFontFamily: "'JetBrains Mono', ui-monospace, monospace",
-    editorFontFamily: "'JetBrains Mono', ui-monospace, monospace",
   },
 ];
 

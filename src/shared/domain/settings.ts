@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  DEFAULT_FONT_MAPPING,
+  fontMappingSchema,
+} from "./customization.ts";
 
 export const CURRENT_SETTINGS_SCHEMA_VERSION = 1;
 
@@ -50,7 +54,8 @@ export const DEFAULT_TIMELINE_EXPANSION: TimelineExpansionSettings = {
 
 export const workspaceSettingsSchema = z.object({
   themeId: z.string().min(1).max(64).default("passage-light"),
-  fontId: z.string().min(1).max(64).default("system-default"),
+  /** Per-surface font mapping (ui, mono, editor, xterm), each a font catalog id. */
+  fonts: fontMappingSchema.default(DEFAULT_FONT_MAPPING),
   toolRendererPackId: z.string().min(1).max(64).default("builtin"),
   notificationsEnabled: z.boolean().default(false),
   editorWordWrap: z.boolean().default(true),
@@ -63,7 +68,7 @@ export type WorkspaceSettings = z.infer<typeof workspaceSettingsSchema>;
 
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   themeId: "passage-light",
-  fontId: "system-default",
+  fonts: { ...DEFAULT_FONT_MAPPING },
   toolRendererPackId: "builtin",
   notificationsEnabled: false,
   editorWordWrap: true,

@@ -9,9 +9,14 @@ import { connectTerminalSocket, type TerminalSocket } from "../terminalSocket.ts
 type TerminalProps = {
   terminal: TerminalSummary;
   onClose: () => void;
+  fontFamily?: string;
+  fontSize?: number;
 };
 
-export function TerminalPanel({ terminal, onClose }: TerminalProps) {
+const DEFAULT_TERMINAL_FONT_FAMILY = "ui-monospace, SFMono-Regular, Menlo, monospace";
+const DEFAULT_TERMINAL_FONT_SIZE = 13;
+
+export function TerminalPanel({ terminal, onClose, fontFamily, fontSize }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -48,8 +53,8 @@ export function TerminalPanel({ terminal, onClose }: TerminalProps) {
     const term = new Terminal({
       allowProposedApi: true,
       cursorBlink: true,
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-      fontSize: 13,
+      fontFamily: fontFamily ?? DEFAULT_TERMINAL_FONT_FAMILY,
+      fontSize: fontSize ?? DEFAULT_TERMINAL_FONT_SIZE,
       lineHeight: 1.2,
       theme: {
         background: "#16232d",
@@ -152,6 +157,28 @@ export function TerminalPanel({ terminal, onClose }: TerminalProps) {
       socketRef.current = null;
     };
   }, [terminal.id, handleResize]);
+
+  // Apply settings-driven font changes to the live terminal without
+  // recreating it, then refit so the new glyph metrics take effect.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    let changed = false;
+    if (fontFamily && term.options.fontFamily !== fontFamily) {
+      term.options.fontFamily = fontFamily;
+      changed = true;
+    }
+    if (fontSize && term.options.fontSize !== fontSize) {
+      term.options.fontSize = fontSize;
+      changed = true;
+    }
+    if (changed) {
+      try {
+        fitAddonRef.current?.fit();
+      } catch {}
+      handleResize();
+    }
+  }, [fontFamily, fontSize, handleResize]);
 
   const handleTakeLease = () => {
     socketRef.current?.takeLease();

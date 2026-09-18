@@ -3,7 +3,7 @@ import { z } from "zod";
 import { opaqueDomainIdSchema, MAX_DOMAIN_LABEL_LENGTH, MAX_DOMAIN_PATH_LENGTH } from "../../shared/domain/workspaces.ts";
 import { workspaceLayoutSchema } from "../../shared/domain/layout.ts";
 import { workspaceSettingsSchema } from "../../shared/domain/settings.ts";
-import { BUILTIN_THEMES, BUILTIN_FONTS, BUILTIN_TOOL_RENDERERS } from "../../shared/domain/customization.ts";
+import { BUILTIN_THEMES, AVAILABLE_FONTS, BUILTIN_TOOL_RENDERERS } from "../../shared/domain/customization.ts";
 import { WorkspaceError, type WorkspaceService } from "../workspaces/service.ts";
 import type { WorkspaceEventHub } from "../workspaces/events.ts";
 import type { WorkspacesChangedReason } from "../../shared/protocol/index.ts";
@@ -90,7 +90,7 @@ export const createWorkspaceRoutes = (service: WorkspaceService, hooks?: { onArc
   });
 
   app.get("/api/customization/themes", () => success(BUILTIN_THEMES));
-  app.get("/api/customization/fonts", () => success(BUILTIN_FONTS));
+  app.get("/api/customization/font-options", () => success(AVAILABLE_FONTS));
   app.get("/api/customization/tool-renderers", () => success(BUILTIN_TOOL_RENDERERS));
 
   return app;

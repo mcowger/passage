@@ -103,6 +103,12 @@ describe("layout and settings HTTP API", () => {
       ...DEFAULT_WORKSPACE_SETTINGS,
       themeId: "passage-light",
       terminalFontSize: 16,
+      fonts: {
+        ui: "inter",
+        mono: "jetbrains-mono",
+        editor: "fira-code",
+        xterm: "meslo-lg",
+      },
       timelineExpansion: {
         thinking: "always",
         tools: {
@@ -130,6 +136,10 @@ describe("layout and settings HTTP API", () => {
     const updated = await updatedRes.json();
     expect(updated.themeId).toBe("passage-light");
     expect(updated.terminalFontSize).toBe(16);
+    expect(updated.fonts.ui).toBe("inter");
+    expect(updated.fonts.mono).toBe("jetbrains-mono");
+    expect(updated.fonts.editor).toBe("fira-code");
+    expect(updated.fonts.xterm).toBe("meslo-lg");
     expect(updated.timelineExpansion.thinking).toBe("always");
     expect(updated.timelineExpansion.tools.read).toBe("none");
     expect(updated.timelineExpansion.tools.write).toBe("always");
@@ -145,10 +155,17 @@ describe("layout and settings HTTP API", () => {
     expect(Array.isArray(themes)).toBe(true);
     expect(themes.length).toBeGreaterThanOrEqual(3);
 
-    const fontsRes = await f.app.fetch(request("/api/customization/fonts"));
-    expect(fontsRes.status).toBe(200);
-    const fonts = await fontsRes.json();
-    expect(Array.isArray(fonts)).toBe(true);
+    const fontOptionsRes = await f.app.fetch(request("/api/customization/font-options"));
+    expect(fontOptionsRes.status).toBe(200);
+    const fontOptions = await fontOptionsRes.json();
+    expect(Array.isArray(fontOptions)).toBe(true);
+    expect(fontOptions.length).toBeGreaterThanOrEqual(10);
+    for (const option of fontOptions) {
+      expect(typeof option.id).toBe("string");
+      expect(typeof option.family).toBe("string");
+    }
+    expect(fontOptions.some((option: { id: string }) => option.id === "jetbrains-mono")).toBe(true);
+    expect(fontOptions.some((option: { id: string }) => option.id === "inter")).toBe(true);
 
     const toolsRes = await f.app.fetch(request("/api/customization/tool-renderers"));
     expect(toolsRes.status).toBe(200);
