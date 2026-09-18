@@ -208,8 +208,8 @@ export function createWorkspaceApi(
     async setLocationEnabled(locationId: string, enabled: boolean): Promise<WorktreeLocation> {
       return locationSchema.parse(await request(`/api/worktree-locations/${encodeURIComponent(locationId)}`, { method: "PATCH", body: JSON.stringify({ enabled }) }));
     },
-    async suggestWorktree(projectId: string, purpose: string, model?: string, thinkingLevel?: string): Promise<{ label: string; branch: string; folder: string }> {
-      return await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees/suggest`, { method: "POST", body: JSON.stringify({ purpose, ...(model?.trim() ? { model: model.trim() } : {}), ...(thinkingLevel?.trim() ? { thinkingLevel: thinkingLevel.trim() } : {}) }) }) as { label: string; branch: string; folder: string };
+    async suggestWorktree(projectId: string, purpose: string, model?: string, thinkingLevel?: string, worktreePrompt?: string): Promise<{ label: string; branch: string; folder: string }> {
+      return await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees/suggest`, { method: "POST", body: JSON.stringify({ purpose, ...(model?.trim() ? { model: model.trim() } : {}), ...(thinkingLevel?.trim() ? { thinkingLevel: thinkingLevel.trim() } : {}), ...(worktreePrompt !== undefined ? { worktreePrompt } : {}) }) }) as { label: string; branch: string; folder: string };
     },
     async createWorktree(projectId: string, input: { locationId: string; ref: string; label: string; folder?: string; createBranch?: boolean; baseRef?: string }): Promise<CreateWorktreeResponse> {
       return createWorktreeResponseSchema.parse(await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees`, { method: "POST", body: JSON.stringify(input) }));
@@ -251,6 +251,7 @@ export function createWorkspaceApi(
     async gitUnstageAll(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/unstage-all`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
     async gitDiscard(id: string, path: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/discard`, { method: "POST", body: JSON.stringify({ path }) }) as GitStatus; },
     async gitCommit(id: string, message: string): Promise<{ head: string; status: GitStatus }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/commit`, { method: "POST", body: JSON.stringify({ message }) }) as { head: string; status: GitStatus }; },
+    async gitCommitAuto(id: string, input?: { model?: string; thinkingLevel?: string; commitPrompt?: string }): Promise<{ head: string; message: string; status: GitStatus }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/commit-auto`, { method: "POST", body: JSON.stringify(input ?? {}) }) as { head: string; message: string; status: GitStatus }; },
     async gitPull(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/pull`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
     async gitFetch(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/fetch`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
     async gitMergeIntoMain(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/merge`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },

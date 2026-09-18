@@ -32,6 +32,7 @@ type Props = {
   initialTab?: "create" | "discover";
   suggestModel?: string;
   suggestThinkingLevel?: string;
+  worktreePrompt?: string;
   api: WorkspaceApi;
   onClose: () => void;
   onCreated: (result: CreateWorktreeResponse) => void;
@@ -46,6 +47,7 @@ export function NewWorktreeModal({
   initialTab = "create",
   suggestModel,
   suggestThinkingLevel,
+  worktreePrompt,
   api,
   onClose,
   onCreated,
@@ -118,7 +120,7 @@ export function NewWorktreeModal({
     setSuggesting(true);
     setError("");
     try {
-      const suggestion = await api.suggestWorktree(projectId, purpose.trim(), suggestModel, suggestThinkingLevel);
+      const suggestion = await api.suggestWorktree(projectId, purpose.trim(), suggestModel, suggestThinkingLevel, worktreePrompt);
       setLabel(suggestion.label);
       setBranch(suggestion.branch);
       setFolder(suggestion.folder);

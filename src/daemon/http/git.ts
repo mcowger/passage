@@ -5,6 +5,7 @@ import { opaqueDomainIdSchema } from "../../shared/domain/workspaces.ts";
 import { MAX_FILE_PATH_LENGTH } from "../../shared/domain/files.ts";
 import type { GitStatusChangedReason } from "../../shared/protocol/index.ts";
 import { GitError, GitService } from "../workspaces/git.ts";
+import { CommitGenerator, fallbackCommitMessage, serializeDiffsForPrompt } from "../workspaces/commit-generator.ts";
 import type { WorkspaceEventHub } from "../workspaces/events.ts";
 import { WorkspaceService } from "../workspaces/service.ts";
 import { readJsonBody } from "./body.ts";
@@ -15,6 +16,11 @@ const repoPath = z.string().min(1).max(MAX_FILE_PATH_LENGTH);
 const pathsInput = z.object({ paths: z.array(repoPath).min(1).max(100) }).strict();
 const pathInput = z.object({ path: repoPath }).strict();
 const commitInput = z.object({ message: z.string().trim().min(1).max(1000) }).strict();
+const commitAutoInput = z.object({
+  model: z.string().trim().max(256).optional(),
+  thinkingLevel: z.string().trim().max(256).optional(),
+  commitPrompt: z.string().max(8000).optional(),
+}).strict();
 
 const gitMessage = (e: GitError): string | undefined => {
   const detail = (e.stderr || e.message || "").split("\n")[0].trim().replace(/^fatal:\s*/i, "");
@@ -54,7 +60,8 @@ const resolveRepoPath = async (workspaces: WorkspaceService, workspaceId: string
   return { cwd, rel };
 };
 
-export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, events?: WorkspaceEventHub): Hono => {
+export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, events?: WorkspaceEventHub, commitGenerator?: Pick<CommitGenerator, "suggestCommit">): Hono => {
+  const commits = commitGenerator ?? new CommitGenerator();
   const app = new Hono();
   app.use("*", async (c, next) => { c.header("Cache-Control", "no-store"); return next(); });
   const changed = (workspaceId: string, reason: GitStatusChangedReason) => {
@@ -129,6 +136,45 @@ export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, e
       const status = await git.status(cwd);
       changed(workspaceId, "commit");
       return ok({ head, status });
+    } catch (e) { return error(e); }
+  });
+  app.post("/api/workspaces/:workspaceId/git/commit-auto", async (c) => {
+    try {
+      const input = commitAutoInput.parse(await readJsonBody(c.req.raw));
+      const workspaceId = id(c.req.param("workspaceId"));
+      const cwd = await workspaces.resolvePath(workspaceId, ".");
+      const before = await git.status(cwd);
+      if (before.files.length === 0) throw new GitError("Nothing to commit: working tree is clean");
+      if (before.conflicted) throw new GitError("Resolve merge conflicts before committing");
+      // Snapshot the overall change (staged + working tree) before
+      // stage-all rewrites the index, so the message covers everything.
+      const [stagedDiffs, workingDiffs] = await Promise.all([git.diff(cwd, "staged"), git.diff(cwd, "working-tree")]);
+      const combined = [serializeDiffsForPrompt(stagedDiffs), serializeDiffsForPrompt(workingDiffs)].filter(Boolean).join("\n");
+      await git.stageAll(cwd);
+      let storedModel = "";
+      let storedThinking = "";
+      let storedPrompt = "";
+      try {
+        const settings = workspaces.getSettings(workspaceId);
+        storedModel = settings.suggestModel ?? "";
+        storedThinking = settings.suggestThinkingLevel ?? "";
+        storedPrompt = settings.commitPrompt ?? "";
+      } catch {
+        // Stored settings are best-effort; explicit body fields still apply.
+      }
+      const files = before.files.map((f) => ({ path: f.oldPath ? `${f.oldPath} -> ${f.path}` : f.path, kind: f.kind }));
+      const message = (await commits.suggestCommit(
+        files,
+        combined,
+        cwd,
+        input.model ?? storedModel,
+        input.thinkingLevel ?? storedThinking,
+        input.commitPrompt ?? storedPrompt,
+      )) ?? fallbackCommitMessage(files);
+      const head = await git.commit(cwd, message);
+      const status = await git.status(cwd);
+      changed(workspaceId, "commit");
+      return ok({ head, message, status });
     } catch (e) { return error(e); }
   });
   app.post("/api/workspaces/:workspaceId/git/pull", async (c) => {

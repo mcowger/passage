@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import type { ThemePack, FontMapping, FontOption, FontRole } from "../../shared/domain/customization.ts";
 import { BUILTIN_THEMES, AVAILABLE_FONTS, fontOptionsForRole, resolveFontFamilies } from "../../shared/domain/customization.ts";
 import type { WorkspaceSettings, BaselineTool, ExpandMode, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
-import { baselineTools, DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
+import { baselineTools, DEFAULT_TIMELINE_EXPANSION, DEFAULT_WORKTREE_PROMPT, DEFAULT_TITLE_PROMPT, DEFAULT_COMMIT_PROMPT } from "../../shared/domain/settings.ts";
 import type { AgentCapabilities } from "../../shared/domain/agents.ts";
 import type { Project, WorktreeLocation } from "../../shared/domain/workspaces.ts";
 import type { WorkspaceApi } from "../api.ts";
@@ -27,6 +27,7 @@ import { RadioGroup, RadioGroupItem } from "./ui/radio-group.tsx";
 import { Label } from "./ui/label.tsx";
 import { Alert, AlertDescription } from "./ui/alert.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs.tsx";
+import { Textarea } from "./ui/textarea.tsx";
 import { toast } from "sonner";
 
 /** Sentinel Select value for "use pi default" (stored as an empty suggestModel). Radix requires non-empty item values. */
@@ -468,9 +469,10 @@ export function SettingsModal({
         </DialogHeader>
 
         <Tabs defaultValue="fonts-colors" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="fonts-colors">Fonts &amp; Colors</TabsTrigger>
             <TabsTrigger value="suggestion-output">Suggestion &amp; Output</TabsTrigger>
+            <TabsTrigger value="prompts">Prompts</TabsTrigger>
             <TabsTrigger value="worktree-locations">Worktree Locations</TabsTrigger>
           </TabsList>
 
@@ -645,6 +647,94 @@ export function SettingsModal({
             expansion={expansion}
             onExpansionChange={handleUpdateExpansion}
           />
+          </TabsContent>
+
+          <TabsContent value="prompts" className="flex flex-col gap-4 py-2">
+          <p className="text-xs text-muted-foreground">
+            Prompt templates for AI-generated text. They apply to every workspace. Leave a template blank to use the built-in default.
+            Placeholders are replaced before sending to the model; if a template omits a placeholder, its value is appended automatically.
+          </p>
+
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="settings-worktree-prompt">Worktree Suggestion Prompt</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => setCurrentSettings((prev) => ({ ...prev, worktreePrompt: "" }))}
+                title="Reset to the built-in default"
+              >
+                Reset to default
+              </Button>
+            </div>
+            <Textarea
+              id="settings-worktree-prompt"
+              value={currentSettings.worktreePrompt ?? ""}
+              onChange={(e) => setCurrentSettings((prev) => ({ ...prev, worktreePrompt: e.target.value }))}
+              placeholder={DEFAULT_WORKTREE_PROMPT}
+              rows={8}
+              className="font-mono text-xs"
+              aria-label="Worktree suggestion prompt template"
+            />
+            <small className="text-xs font-normal text-muted-foreground">
+              Placeholders: <code className="font-mono">{"{{purpose}}"}</code> — the purpose description typed in the New Worktree dialog.
+            </small>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="settings-title-prompt">Agent Title Prompt</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => setCurrentSettings((prev) => ({ ...prev, titlePrompt: "" }))}
+                title="Reset to the built-in default"
+              >
+                Reset to default
+              </Button>
+            </div>
+            <Textarea
+              id="settings-title-prompt"
+              value={currentSettings.titlePrompt ?? ""}
+              onChange={(e) => setCurrentSettings((prev) => ({ ...prev, titlePrompt: e.target.value }))}
+              placeholder={DEFAULT_TITLE_PROMPT}
+              rows={6}
+              className="font-mono text-xs"
+              aria-label="Agent title prompt template"
+            />
+            <small className="text-xs font-normal text-muted-foreground">
+              Placeholders: <code className="font-mono">{"{{messages}}"}</code> — the first user messages, numbered (e.g. <code className="font-mono">Message 1: "..."</code>).
+            </small>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="settings-commit-prompt">Auto-Commit Prompt</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => setCurrentSettings((prev) => ({ ...prev, commitPrompt: "" }))}
+                title="Reset to the built-in default"
+              >
+                Reset to default
+              </Button>
+            </div>
+            <Textarea
+              id="settings-commit-prompt"
+              value={currentSettings.commitPrompt ?? ""}
+              onChange={(e) => setCurrentSettings((prev) => ({ ...prev, commitPrompt: e.target.value }))}
+              placeholder={DEFAULT_COMMIT_PROMPT}
+              rows={8}
+              className="font-mono text-xs"
+              aria-label="Auto-commit prompt template"
+            />
+            <small className="text-xs font-normal text-muted-foreground">
+              Placeholders: <code className="font-mono">{"{{files}}"}</code> — the changed file list (one per line with its change kind); <code className="font-mono">{"{{diff}}"}</code> — the overall unified diff (truncated for size).
+            </small>
+          </div>
           </TabsContent>
 
           <TabsContent value="worktree-locations" className="flex flex-col gap-2 py-2">

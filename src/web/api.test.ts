@@ -208,9 +208,12 @@ test("client requests worktree operations and suggestions", async () => {
     });
   });
 
-  const suggestion = await api.suggestWorktree("prj_123", "Test purpose");
+  const suggestion = await api.suggestWorktree("prj_123", "Test purpose", "m/model", "high", "Purpose: {{purpose}}");
   expect(suggestion.label).toBe("Test Label");
   expect(suggestion.branch).toBe("feature/test");
+  const suggestBody = await calls[0].json() as Record<string, unknown>;
+  expect(suggestBody["worktreePrompt"]).toBe("Purpose: {{purpose}}");
+  expect(suggestBody["model"]).toBe("m/model");
 
   const created = await api.createWorktree("prj_123", { locationId: "loc_123", ref: "feature/test", label: "Test Worktree" });
   expect(created.workspace.id).toBe("wsp_123");

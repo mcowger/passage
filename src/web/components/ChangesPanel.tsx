@@ -29,9 +29,17 @@ type ChangesProps = {
   onOpenFile: (path: string) => void;
   onOpenDiff: (path: string, staged?: boolean) => void;
   onWorkspaceDeleted?: () => void | Promise<void>;
+  /** True when the selected agent session is settled (not running). The
+   *  auto-commit button only enables in this state to avoid committing
+   *  mid-generation. Defaults to true when the caller has no agent. */
+  agentSettled?: boolean;
+  agentStatusLabel?: string;
+  suggestModel?: string;
+  suggestThinkingLevel?: string;
+  commitPrompt?: string;
 };
 
-type BulkOp = "stage-all" | "unstage-all" | "commit" | "pull" | "fetch" | "merge";
+type BulkOp = "stage-all" | "unstage-all" | "commit" | "commit-auto" | "pull" | "fetch" | "merge";
 
 const draftKey = (workspaceId: string) => `passage:commit-draft:${workspaceId}`;
 const loadDraft = (workspaceId: string): string => {
@@ -42,7 +50,7 @@ const loadDraft = (workspaceId: string): string => {
   }
 };
 
-export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorkspaceDeleted }: ChangesProps) {
+export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorkspaceDeleted, agentSettled = true, agentStatusLabel, suggestModel, suggestThinkingLevel, commitPrompt }: ChangesProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -162,6 +170,29 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
       handleCommitMessageChange("");
       toast.success("Committed staged changes");
     });
+  };
+
+  const canAutoCommit = files.length > 0 && agentSettled && bulkOp === null && pendingPaths.size === 0 && !status?.conflicted;
+  const autoCommitTitle = status?.conflicted
+    ? "Resolve merge conflicts before auto-committing"
+    : files.length === 0
+      ? "No changes to commit"
+      : !agentSettled
+        ? `Wait for the selected agent to settle before auto-committing${agentStatusLabel ? ` (currently ${agentStatusLabel})` : ""}`
+        : "Stage all changes, generate a commit message, and commit";
+
+  const handleAutoCommit = () => {
+    if (!canAutoCommit) return;
+    setBulkOp("commit-auto");
+    void api.gitCommitAuto(workspaceId, { model: suggestModel, thinkingLevel: suggestThinkingLevel, commitPrompt }).then(
+      (r) => {
+        setStatus(r.status);
+        setError("");
+        handleCommitMessageChange("");
+        toast.success("Auto-committed all changes", { description: r.message });
+      },
+      (err: unknown) => setError(friendlyApiError(err, "Auto-commit failed. Try again.")),
+    ).finally(() => setBulkOp(null));
   };
 
   const handlePull = () => {
@@ -389,6 +420,16 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
           <Button
             variant="secondary"
             size="xs"
+            onClick={handleAutoCommit}
+            disabled={!canAutoCommit}
+            title={autoCommitTitle}
+          >
+            {bulkOp === "commit-auto" ? <Spinner className="size-3" /> : null}
+            ✨ Auto-commit
+          </Button>
+          <Button
+            variant="secondary"
+            size="xs"
             onClick={handlePull}
             disabled={bulkOp !== null}
             title="Pull latest changes (fast-forward only)"
@@ -407,6 +448,11 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
             Fetch
           </Button>
         </div>
+        {files.length > 0 && !agentSettled && (
+          <small className="text-xs text-muted-foreground">
+            Auto-commit unlocks when the selected agent settles{agentStatusLabel ? ` (currently ${agentStatusLabel})` : ""}.
+          </small>
+        )}
       </div>
 
       <AlertDialog open={discardTarget !== null} onOpenChange={(open) => { if (!open) setDiscardTarget(null); }}>

@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { renderTitlePrompt } from "../../shared/domain/settings.ts";
 import { PiRpcManager, type PiEvent, type PiProcessHandle, type PiRpcOptions } from "./rpc/index.ts";
 
 /** Eligible default title: agents still carrying the create() placeholder
@@ -17,16 +18,16 @@ export const MAX_SUGGESTED_TITLE_CHARS = 60;
 
 type TitleSuggesterPiOptions = Pick<PiRpcOptions, "executable" | "executableArgs">;
 
-export function buildTitlePrompt(messages: string[]): string {
+export function buildTitlePrompt(messages: string[], template = ""): string {
   const excerpt = messages
     .slice(0, TITLE_SUGGEST_AFTER_USER_MESSAGES)
     .map((message, index) => `Message ${index + 1}: "${message.slice(0, MAX_TITLE_SOURCE_CHARS).trim()}"`)
     .join("\n");
-  return [
-    "Suggest a short title for an AI agent conversation based on the user's first messages below.",
-    excerpt,
-    "Return ONLY the title itself: 3-4 words, plain text, no quotes, no markdown, no trailing period.",
-  ].join("\n");
+  if (template.trim() !== "") {
+    if (template.includes("{{messages}}")) return template.split("{{messages}}").join(excerpt);
+    return `${template}\n${excerpt}`;
+  }
+  return renderTitlePrompt("", messages);
 }
 
 /** Normalizes raw model output to a displayable title, or null when it
@@ -70,7 +71,7 @@ export class AgentTitleSuggester {
   /** Best-effort 3-4 word title for the given user messages. Never throws:
    *  returns null when the model is unavailable, times out, or answers
    *  with nothing usable (the caller keeps the placeholder / falls back). */
-  async suggestTitle(messages: string[], cwd?: string, model?: string, thinkingLevel?: string): Promise<string | null> {
+  async suggestTitle(messages: string[], cwd?: string, model?: string, thinkingLevel?: string, promptTemplate = ""): Promise<string | null> {
     const sources = messages.map((message) => message.trim()).filter(Boolean);
     if (sources.length === 0) return null;
     let sessionDir: string | undefined;
@@ -91,7 +92,7 @@ export class AgentTitleSuggester {
       if (thinkingLevel?.trim()) {
         await piProcess.request({ type: "set_thinking_level", level: thinkingLevel.trim() }, this.timeoutMs).catch(() => undefined);
       }
-      const response = await this.readTitle(piProcess, buildTitlePrompt(sources));
+      const response = await this.readTitle(piProcess, buildTitlePrompt(sources, promptTemplate));
       return sanitizeAgentTitle(response) ?? fallbackAgentTitle(sources);
     } catch {
       return fallbackAgentTitle(sources);

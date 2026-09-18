@@ -217,6 +217,134 @@ describe("git HTTP API", () => {
 
     f.store.close();
   });
+  test("auto-commits dirty files with a generated message, then reports clean", async () => {
+    const root = await mkdtemp(join(tmpdir(), "passage-git-auto-"));
+    roots.push(root);
+    await runGit(root, ["init", "-b", "main"]);
+    await runGit(root, ["config", "user.email", "test@passage.dev"]);
+    await runGit(root, ["config", "user.name", "Passage Test"]);
+    await writeFile(join(root, "README.md"), "# Init");
+    await runGit(root, ["add", "README.md"]);
+    await runGit(root, ["commit", "-m", "Initial commit"]);
+
+    const store = new MetadataStore(join(root, "metadata.sqlite"));
+    const repos = new MetadataRepositories(store.db);
+    const workspaces = new WorkspaceService(repos);
+    const git = new GitService();
+    const seen: Array<{ files: Array<{ path: string; kind: string }>; diff: string; template: string }> = [];
+    const stub = {
+      suggestCommit: async (files: Array<{ path: string; kind: string }>, diff: string, _cwd?: string, _model?: string, _thinking?: string, template = "") => {
+        seen.push({ files, diff, template });
+        return "Update README and add notes";
+      },
+    };
+    const app = createGitRoutes(workspaces, git, undefined, stub);
+    repos.projects.save(projectSchema.parse({
+      id: "prj_auto",
+      configuredRootPath: root,
+      canonicalRootPath: root,
+      displayLabel: "Auto Project",
+      archivedAt: null,
+    }));
+    const workspace = workspaceSchema.parse({
+      id: "wsp_auto",
+      projectId: "prj_auto",
+      kind: "directory",
+      cwd: root,
+      checkoutRoot: root,
+      mainRepositoryRoot: root,
+      branchRef: "main",
+      displayLabel: "Auto Workspace",
+      locationId: null,
+      ownershipState: "not-owned",
+      markerId: null,
+      markerPath: null,
+      repairDetail: null,
+      archivedAt: null,
+    });
+    repos.workspaces.save(workspace);
+
+    await writeFile(join(root, "README.md"), "# Init\nUpdated line");
+    await writeFile(join(root, "new-file.txt"), "New file content");
+
+    const res = await app.fetch(request(`/api/workspaces/${workspace.id}/git/commit-auto`, { method: "POST", body: JSON.stringify({}) }));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { head: string; message: string; status: { dirty: boolean } };
+    expect(body.head).toMatch(/^[0-9a-f]{40}$/);
+    expect(body.message).toBe("Update README and add notes");
+    expect(body.status.dirty).toBe(false);
+    // The generator saw both the file list and the overall diff.
+    expect(seen.length).toBe(1);
+    expect(seen[0].files.some((f) => f.path === "README.md")).toBe(true);
+    expect(seen[0].files.some((f) => f.path === "new-file.txt")).toBe(true);
+    expect(seen[0].diff).toContain("Updated line");
+
+    const clean = await app.fetch(request(`/api/workspaces/${workspace.id}/git/commit-auto`, { method: "POST", body: JSON.stringify({}) }));
+    expect(clean.status).toBe(422);
+
+    store.close();
+  });
+
+  test("auto-commit falls back to a deterministic message and honors stored prompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "passage-git-auto-fallback-"));
+    roots.push(root);
+    await runGit(root, ["init", "-b", "main"]);
+    await runGit(root, ["config", "user.email", "test@passage.dev"]);
+    await runGit(root, ["config", "user.name", "Passage Test"]);
+    await writeFile(join(root, "README.md"), "# Init");
+    await runGit(root, ["add", "README.md"]);
+    await runGit(root, ["commit", "-m", "Initial commit"]);
+
+    const store = new MetadataStore(join(root, "metadata.sqlite"));
+    const repos = new MetadataRepositories(store.db);
+    const workspaces = new WorkspaceService(repos);
+    const git = new GitService();
+    let capturedTemplate: string | undefined;
+    const nullStub = {
+      suggestCommit: async (_files: Array<{ path: string; kind: string }>, _diff: string, _cwd?: string, _model?: string, _thinking?: string, template = "") => {
+        capturedTemplate = template;
+        return null;
+      },
+    };
+    const app = createGitRoutes(workspaces, git, undefined, nullStub);
+    repos.projects.save(projectSchema.parse({
+      id: "prj_fallback",
+      configuredRootPath: root,
+      canonicalRootPath: root,
+      displayLabel: "Fallback Project",
+      archivedAt: null,
+    }));
+    const workspace = workspaceSchema.parse({
+      id: "wsp_fallback",
+      projectId: "prj_fallback",
+      kind: "directory",
+      cwd: root,
+      checkoutRoot: root,
+      mainRepositoryRoot: root,
+      branchRef: "main",
+      displayLabel: "Fallback Workspace",
+      locationId: null,
+      ownershipState: "not-owned",
+      markerId: null,
+      markerPath: null,
+      repairDetail: null,
+      archivedAt: null,
+    });
+    repos.workspaces.save(workspace);
+    const settings = workspaces.getSettings(workspace.id);
+    workspaces.saveSettings(workspace.id, { ...settings, commitPrompt: "CUSTOM {{files}} {{diff}}" });
+
+    await writeFile(join(root, "notes.txt"), "hello");
+    const res = await app.fetch(request(`/api/workspaces/${workspace.id}/git/commit-auto`, { method: "POST", body: JSON.stringify({}) }));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { head: string; message: string; status: { dirty: boolean } };
+    expect(body.message).toContain("notes.txt");
+    expect(body.status.dirty).toBe(false);
+    expect(capturedTemplate).toBe("CUSTOM {{files}} {{diff}}");
+
+    store.close();
+  });
+
   test("reports a conflicted pre-merge rebase as a 422 with a specific message", async () => {
     const f = await fixture();
     const worktree = join(f.root, "rebase-conflict-worktree");

@@ -21,6 +21,7 @@ import { IdempotencyCache } from "./replay/index.ts";
 import { WorkspaceService } from "./workspaces/service.ts";
 import { WorkspaceEventHub } from "./workspaces/events.ts";
 import { GitService } from "./workspaces/git.ts";
+import { CommitGenerator } from "./workspaces/commit-generator.ts";
 import { FileService } from "./workspaces/files.ts";
 import { WorktreeService } from "./workspaces/worktrees.ts";
 import { WorkspaceActionsService } from "./workspaces/actions.ts";
@@ -137,6 +138,7 @@ const workspaceActionsService = new WorkspaceActionsService(repositories, undefi
   },
 });
 const worktreeService = new WorktreeService(repositories, gitService, undefined, workspaceActionsService);
+const commitGenerator = new CommitGenerator();
 const terminalManager = new TerminalManager(workspaceService);
 const previewManager = new WebPreviewManager(repositories, workspaceService);
 const sessionsRoot = process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(metadataPath), "sessions");
@@ -160,11 +162,12 @@ const agentService = new AgentService(repositories, {
   // (construction order), never after.
   admissionGate: () => lifecycleRef?.isAdmissionOpen() ?? true,
   // Auto-titles use the workspace's configured suggestion model + thinking
-  // level (Settings); empty fields mean the suggestion backend's defaults.
+  // level + prompt template (Settings); empty fields mean the suggestion
+  // backend's defaults.
   getSuggestConfig: (workspaceId) => {
     try {
       const settings = workspaceService.getSettings(workspaceId);
-      return { model: settings.suggestModel, thinkingLevel: settings.suggestThinkingLevel };
+      return { model: settings.suggestModel, thinkingLevel: settings.suggestThinkingLevel, titlePrompt: settings.titlePrompt };
     } catch {
       return undefined;
     }
@@ -319,7 +322,7 @@ const teardownWorkspace = async (workspaceId: string): Promise<void> => {
   });
 };
 app.route("/", createWorkspaceRoutes(workspaceService, { onArchiveWorkspace: (workspaceId) => teardownWorkspace(workspaceId) }, workspaceEvents));
-app.route("/", createGitRoutes(workspaceService, gitService, workspaceEvents));
+app.route("/", createGitRoutes(workspaceService, gitService, workspaceEvents, commitGenerator));
 app.route("/", createFileRoutes(fileService, workspaceEvents));
 app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (workspaceId) => teardownWorkspace(workspaceId) }, workspaceEvents));
 app.route("/", createWorkspaceActionRoutes(workspaceActionsService));

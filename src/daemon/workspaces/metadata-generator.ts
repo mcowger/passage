@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { MAX_DOMAIN_LABEL_LENGTH, MAX_DOMAIN_PATH_LENGTH } from "../../shared/domain/workspaces.ts";
+import { renderWorktreePrompt } from "../../shared/domain/settings.ts";
 import { PiRpcManager, type PiEvent, type PiProcessHandle, type PiRpcOptions } from "../agents/rpc/index.ts";
 
 export const worktreeSuggestionSchema = z.object({
@@ -38,21 +39,14 @@ export class MetadataGenerator {
 
   constructor(private readonly timeoutMs = 10_000, private readonly pi: MetadataGeneratorPiOptions = {}) {}
 
-  async suggest(purpose: string, cwd?: string, model?: string, thinkingLevel?: string): Promise<WorktreeSuggestion> {
+  async suggest(purpose: string, cwd?: string, model?: string, thinkingLevel?: string, promptTemplate = ""): Promise<WorktreeSuggestion> {
     const fallback = deterministicSlugSuggestion(purpose);
     if (!purpose.trim()) return fallback;
 
     let sessionDir: string | undefined;
     let agentId: string | undefined;
     try {
-      const prompt = [
-        "Generate workspace metadata for a Git worktree based on this purpose description.",
-        `Purpose: "${purpose.trim()}"`,
-        "Return ONLY a valid JSON object (no markdown, no backticks, no code fence) with exactly these keys:",
-        "- label: concise human-readable title (max 60 chars)",
-        "- branch: valid git branch name like 'feature/short-name' or 'fix/short-name' (lowercase, hyphen-separated, no spaces)",
-        "- folder: collision-safe directory name like 'short-name--wk_abcd' (lowercase, alphanumeric with hyphens/underscores, ending with a short suffix)",
-      ].join("\n");
+      const prompt = renderWorktreePrompt(promptTemplate, purpose);
 
       sessionDir = await mkdtemp(join(tmpdir(), "passage-worktree-metadata-"));
       agentId = `metadata-${crypto.randomUUID()}`;

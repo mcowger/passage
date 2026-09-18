@@ -1270,8 +1270,10 @@ function App() {
           />
         );
 
-      case "changes":
+      case "changes": {
         if (!isGitWorkspace) return <NonGitPane title="Changes" />;
+        const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? agents[0];
+        const settled = !selectedAgent || (selectedAgent.status !== "running" && selectedAgent.status !== "stopping" && selectedAgent.status !== "initializing");
         return (
           <ChangesPanel
             workspaceId={workspace.id}
@@ -1279,8 +1281,14 @@ function App() {
             onOpenFile={openEditorFile}
             onOpenDiff={openDiffFile}
             onWorkspaceDeleted={handleWorkspaceRemoved}
+            agentSettled={settled}
+            agentStatusLabel={selectedAgent ? AGENT_STATUS_LABEL[getAgentStatusKind(selectedAgent)] : undefined}
+            suggestModel={settings.suggestModel}
+            suggestThinkingLevel={settings.suggestThinkingLevel}
+            commitPrompt={settings.commitPrompt}
           />
         );
+      }
 
       case "editor": {
         const filePath = tab.targetId ?? openEditorPath;
@@ -1808,6 +1816,7 @@ function App() {
           initialTab={worktreeModalTab}
           suggestModel={settings.suggestModel}
           suggestThinkingLevel={settings.suggestThinkingLevel}
+          worktreePrompt={settings.worktreePrompt}
           api={api}
           onClose={() => {
             setForm(undefined);

@@ -43,4 +43,9 @@ describe("buildTitlePrompt", () => {
     expect(prompt).toContain("second message");
     expect(prompt).not.toContain("third is ignored");
   });
+
+  test("renders a custom template with {{messages}}", () => {
+    const prompt = buildTitlePrompt(["first message"], "Custom: {{messages}}!");
+    expect(prompt).toBe("Custom: Message 1: \"first message\"!");
+  });
 });

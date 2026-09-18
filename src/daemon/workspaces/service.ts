@@ -165,7 +165,7 @@ export class WorkspaceService {
   saveSettings(workspaceId: string, settings: WorkspaceSettings): WorkspaceSettings {
     this.requireWorkspace(workspaceId);
     const parsed = workspaceSettingsSchema.parse(settings);
-    this.saveAppearance({ themeId: parsed.themeId, fonts: parsed.fonts });
+    this.saveAppearance({ themeId: parsed.themeId, fonts: parsed.fonts, worktreePrompt: parsed.worktreePrompt, titlePrompt: parsed.titlePrompt, commitPrompt: parsed.commitPrompt });
     this.repositories.workspaces.savePreferences(workspaceId, parsed);
     return this.getSettings(workspaceId);
   }

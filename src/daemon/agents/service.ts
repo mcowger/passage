@@ -187,9 +187,9 @@ export class AgentService {
   private readonly titleSuggestions = new Set<string>();
   private readonly titleSuggester: Pick<AgentTitleSuggester, "suggestTitle">;
   /** Resolves the workspace's configured suggestion model + thinking level
-   *  (Settings). Empty/undefined fields mean the suggestion backend's
-   *  defaults. */
-  private readonly getSuggestConfig?: (workspaceId: string) => { model?: string; thinkingLevel?: string } | undefined;
+   *  + prompt templates (Settings). Empty/undefined fields mean the
+   *  suggestion backend's defaults. */
+  private readonly getSuggestConfig?: (workspaceId: string) => { model?: string; thinkingLevel?: string; titlePrompt?: string } | undefined;
 
   constructor(
     private readonly repositories: MetadataRepositories,
@@ -215,9 +215,9 @@ export class AgentService {
       /** Override for the auto-title suggestion backend (tests). */
       titleSuggester?: Pick<AgentTitleSuggester, "suggestTitle">;
       /** Resolves the workspace's configured suggestion model + thinking
-       *  level (Settings). Empty/undefined fields mean the suggestion
-       *  backend's defaults. */
-      getSuggestConfig?: (workspaceId: string) => { model?: string; thinkingLevel?: string } | undefined;
+       *  level + prompt templates (Settings). Empty/undefined fields mean
+       *  the suggestion backend's defaults. */
+      getSuggestConfig?: (workspaceId: string) => { model?: string; thinkingLevel?: string; titlePrompt?: string } | undefined;
     },
   ) {
     if (!options.sessionsRoot) throw new AgentError("invalid-input", "sessionsRoot is required");
@@ -1317,14 +1317,16 @@ export class AgentService {
       try {
         let model: string | undefined;
         let thinkingLevel: string | undefined;
+        let titlePrompt = "";
         try {
           const config = this.getSuggestConfig?.(agent.workspaceId);
           model = config?.model?.trim() || undefined;
           thinkingLevel = config?.thinkingLevel?.trim() || undefined;
-        } catch { model = undefined; thinkingLevel = undefined; }
+          titlePrompt = config?.titlePrompt ?? "";
+        } catch { model = undefined; thinkingLevel = undefined; titlePrompt = ""; }
         let cwd: string | undefined;
         try { cwd = this.repositories.workspaces.get(agent.workspaceId)?.cwd; } catch { cwd = undefined; }
-        const title = await this.titleSuggester.suggestTitle(userTexts, cwd, model, thinkingLevel);
+        const title = await this.titleSuggester.suggestTitle(userTexts, cwd, model, thinkingLevel, titlePrompt);
         if (!title) return;
         const current = this.repositories.agents.get(agentId);
         if (!current || current.archivedAt || current.titleOverridden || current.title !== DEFAULT_AGENT_TITLE) return;
