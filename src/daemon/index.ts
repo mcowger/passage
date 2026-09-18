@@ -80,8 +80,26 @@ const shutdownInputSchema = z.object({
   drainId: z.string().min(1).max(64).nullable().optional(),
   readinessRevision: z.number().int().nonnegative().safe().optional(),
 }).strict();
+/** docs/BACKTOSQUAREONE.md step 6 originally specified no automatic kill
+ *  deadline for safe drain; overridden by explicit product decision to
+ *  bound how long a safe shutdown request waits for an idle boundary
+ *  before escalating to a forced stop. Does not bound a manually held
+ *  drain (`POST /api/daemon/drain` without a shutdown request behind it)
+ *  -- only an actual shutdown attempt (HTTP, SIGINT/SIGTERM). */
+const DEFAULT_SHUTDOWN_TIMEOUT_MINUTES = 60;
 await configureLogging();
 const log = logger("daemon");
+function resolveShutdownTimeoutMs(): number {
+  const raw = process.env.PASSAGE_SHUTDOWN_TIMEOUT_MINUTES;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_SHUTDOWN_TIMEOUT_MINUTES * 60_000;
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    log.warn("Ignoring invalid PASSAGE_SHUTDOWN_TIMEOUT_MINUTES", { event: "daemon.invalid_shutdown_timeout", value: raw });
+    return DEFAULT_SHUTDOWN_TIMEOUT_MINUTES * 60_000;
+  }
+  return minutes * 60_000;
+}
+const shutdownTimeoutMs = resolveShutdownTimeoutMs();
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
 const isStandaloneExecutable = (Bun as { isStandaloneExecutable?: boolean }).isStandaloneExecutable === true;
 // Standalone binaries are portable: keep their data beside the working
@@ -850,22 +868,34 @@ async function teardown(options: { interrupted: boolean }): Promise<void> {
 // instead of racing a second teardown. A safe (non-force,
 // non-already-committed) attempt that gets cancelled -- the drain was
 // cancelled, or superseded by a fresh one -- leaves the daemon running and
-// clears the in-flight promise so a later call can try again.
+// clears the in-flight promise so a later call can try again. A safe
+// attempt that instead runs past PASSAGE_SHUTDOWN_TIMEOUT_MINUTES escalates
+// to an explicit forced stop rather than waiting forever.
 let finishShutdownPromise: Promise<void> | undefined;
 function finishShutdown(options: { interrupted: boolean; alreadyCommitted?: boolean }): Promise<void> {
   if (finishShutdownPromise) return finishShutdownPromise;
   finishShutdownPromise = (async () => {
+    let interrupted = options.interrupted;
     try {
-      if (options.interrupted) {
+      if (interrupted) {
         lifecycle.forceStop();
       } else if (!options.alreadyCommitted) {
-        const result = await runSafeShutdown(lifecycle);
+        const result = await runSafeShutdown(lifecycle, { timeoutMs: shutdownTimeoutMs });
         if (!result.committed) {
-          log.warn("Safe shutdown was cancelled before commit; daemon remains running", { event: "daemon.shutdown_cancelled", reason: result.reason });
-          return;
+          if (result.reason === "timeout") {
+            log.warn("Safe shutdown timed out waiting for an idle boundary; escalating to a forced stop", {
+              event: "daemon.shutdown_timeout_forced",
+              timeoutMinutes: shutdownTimeoutMs / 60_000,
+            });
+            lifecycle.forceStop();
+            interrupted = true;
+          } else {
+            log.warn("Safe shutdown was cancelled before commit; daemon remains running", { event: "daemon.shutdown_cancelled", reason: result.reason });
+            return;
+          }
         }
       }
-      await teardown({ interrupted: options.interrupted });
+      await teardown({ interrupted });
       process.exit(0);
     } finally {
       finishShutdownPromise = undefined;

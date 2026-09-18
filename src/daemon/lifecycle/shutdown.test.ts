@@ -90,4 +90,46 @@ describe("runSafeShutdown", () => {
     expect(await shutdown).toEqual({ committed: false, reason: "cancelled" });
     expect(lifecycle.currentPhase).toBe("running");
   });
+
+  describe("timeoutMs (operator override of the plan's default no-deadline behavior)", () => {
+    test("resolves timeout without touching the phase when nothing ever reaches ready", async () => {
+      const blockers = controlledBlockers();
+      const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [], listBlockers: blockers.fn });
+      const shutdown = runSafeShutdown(lifecycle, { timeoutMs: 20 });
+      // Never resolve blockers.fn(): the drain never reaches ready.
+      expect(await shutdown).toEqual({ committed: false, reason: "timeout" });
+      expect(lifecycle.currentPhase).toBe("draining");
+    });
+
+    test("commits normally when ready is reached before the deadline", async () => {
+      const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [], listBlockers: async () => [] });
+      const result = await runSafeShutdown(lifecycle, { timeoutMs: 5000 });
+      expect(result).toEqual({ committed: true });
+      expect(lifecycle.currentPhase).toBe("stopping");
+    });
+
+    test("an already-elapsed deadline (0ms) still lets an already-ready commit land first", async () => {
+      // Guards against an off-by-one that would report timeout even though
+      // commit() itself never got a chance to run.
+      const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [], listBlockers: async () => [] });
+      lifecycle.beginDrain();
+      await Bun.sleep(0);
+      expect(lifecycle.currentPhase).toBe("ready");
+      const result = await runSafeShutdown(lifecycle, { timeoutMs: 0 });
+      expect(result).toEqual({ committed: true });
+    });
+
+    test("omitting timeoutMs still waits indefinitely (manually held drain, no shutdown request behind it)", async () => {
+      const blockers = mutableBlockers([{ agentId: "agt_1", reason: "running" }]);
+      const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [], listBlockers: blockers.fn });
+      let settled = false;
+      const shutdown = runSafeShutdown(lifecycle).then((result) => { settled = true; return result; });
+      await Bun.sleep(20);
+      expect(settled).toBe(false);
+      expect(lifecycle.currentPhase).toBe("draining");
+      blockers.set([]);
+      lifecycle.onActivity();
+      expect(await shutdown).toEqual({ committed: true });
+    });
+  });
 });
