@@ -109,11 +109,22 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; background: var(--background); color: var(--foreground); font-size: 14px; -webkit-font-smoothing: antialiased; }
+html { height: 100vh; height: 100dvh; overscroll-behavior: none; }
+body { margin: 0; min-width: 320px; background: var(--background); color: var(--foreground); font-size: 14px; -webkit-font-smoothing: antialiased; overscroll-behavior: none; touch-action: manipulation; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.5; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 code { font-family: var(--font-mono); }
 
-.app { display: flex; height: 100dvh; max-height: 100dvh; overflow: hidden; }
+/* iOS PWA shell: 100vh fallback covers standalone cold start (WebKit 254868
+   under-reports 100dvh by the safe-area inset until the viewport is
+   exercised); --app-height is JS-corrected to the visible height. */
+.app { display: flex; height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); max-height: 100vh; max-height: 100dvh; max-height: var(--app-height, 100dvh); overflow: hidden; }
+
+/* iOS auto-zooms inputs/selects/textareas/contenteditables under 16px on
+   focus. Desktop keeps its smaller sizes; touch layouts get the 16px floor
+   so focus never triggers page zoom (pinch zoom stays available). */
+@media (pointer: coarse) {
+  input, select, textarea { font-size: 16px; }
+}

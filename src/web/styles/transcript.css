@@ -1,8 +1,11 @@
-/* Timeline Transcript Column */
+/* Timeline Transcript Column — we own scroll pinning/restore in JS
+   (AgentPanel pinned-tail + backfill compensation), so opt out of Safari 27
+   native scroll anchoring to avoid double-compensation. */
 .timeline {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-anchor: none;
   padding: 16px 18px 20px;
   display: flex;
   flex-direction: column;
