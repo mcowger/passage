@@ -239,6 +239,65 @@ describe("TranscriptState", () => {
     expect(timeline[1]).toMatchObject({ kind: "assistant", text: "done" });
   });
 
+  test("streamed text finalized by message_end is not twinned when a tool closes the open block", () => {
+    // Real Pi shape for [thinking, text, toolCall]: text deltas stream first,
+    // the toolcall closes the open text row, then message_end repeats the
+    // same paragraph. It must reconcile the streamed row in place.
+    const state = new TranscriptState();
+    const paragraph = "You're right. I overthought it. Implementing the connection logs now.";
+    state.applyEvent("turn_start", {});
+    state.applyEvent("message_update", { assistantMessageEvent: { type: "text_delta", delta: paragraph } });
+    state.applyEvent("message_update", { assistantMessageEvent: { type: "toolcall_end", id: "t1", toolName: "bash", toolCall: { id: "t1", name: "bash", arguments: {} } } });
+    state.applyEvent("message_end", { message: { role: "assistant", content: [
+      { type: "text", text: paragraph },
+      { type: "toolCall", id: "t1", name: "bash", arguments: {} },
+    ] } });
+    const { timeline } = state.snapshot();
+    expect(timeline.map((i) => i.kind)).toEqual(["assistant", "tool"]);
+    expect(timeline).toHaveLength(2);
+    expect(timeline[0]).toMatchObject({ kind: "assistant", text: paragraph });
+  });
+
+  test("turn_end repeating message_end never appends an identical twin", () => {
+    // Pi sends the full assistant message on both message_end and turn_end
+    // with tool_execution events between them closing the open block.
+    const state = new TranscriptState();
+    const paragraph = "I'll stage only the image-preview fix and its regression tests.";
+    state.applyEvent("turn_start", {});
+    state.applyEvent("message_update", { assistantMessageEvent: { type: "text_delta", delta: paragraph } });
+    state.applyEvent("message_update", { assistantMessageEvent: { type: "toolcall_end", id: "t1", toolName: "bash", toolCall: { id: "t1", name: "bash", arguments: {} } } });
+    const content = [
+      { type: "text", text: paragraph },
+      { type: "toolCall", id: "t1", name: "bash", arguments: {} },
+    ];
+    state.applyEvent("message_end", { message: { role: "assistant", content } });
+    state.applyEvent("tool_execution_start", { toolCallId: "t1", toolName: "bash", args: {} });
+    state.applyEvent("tool_execution_end", { toolCallId: "t1", result: "ok", isError: false });
+    state.applyEvent("turn_end", { message: { role: "assistant", content } });
+    const { timeline } = state.snapshot();
+    expect(timeline.map((i) => i.kind)).toEqual(["assistant", "tool"]);
+    expect(timeline.filter((i) => i.kind === "assistant")).toHaveLength(1);
+    expect(timeline[0]).toMatchObject({ kind: "assistant", text: paragraph });
+  });
+
+  test("identical paragraphs across separate turns still produce separate rows", () => {
+    // Dedupe scope is per-message: a genuinely repeated paragraph in a new
+    // turn must not be folded into the previous turn's row.
+    const state = new TranscriptState();
+    const content = [{ type: "text", text: "Same." }];
+    state.applyEvent("turn_start", {});
+    state.applyEvent("message_update", { delta: "Same." });
+    state.applyEvent("message_end", { message: { role: "assistant", content } });
+    state.applyEvent("turn_end", { message: { role: "assistant", content } });
+    state.applyEvent("turn_start", {});
+    state.applyEvent("message_update", { delta: "Same." });
+    state.applyEvent("message_end", { message: { role: "assistant", content } });
+    state.applyEvent("turn_end", { message: { role: "assistant", content } });
+    const { timeline } = state.snapshot();
+    expect(timeline.map((i) => i.kind)).toEqual(["assistant", "assistant"]);
+    expect(timeline[0].id).not.toBe(timeline[1].id);
+  });
+
   test("usage and context tokens update without a positive total not clobbering the last known value", () => {
     const state = new TranscriptState();
     state.applyEvent("message_update", { usage: { input: 100, output: 50, totalTokens: 150 } });

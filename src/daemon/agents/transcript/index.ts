@@ -73,6 +73,13 @@ export class TranscriptState {
   private openKind?: "assistant" | "thinking";
   private openRowId?: string;
 
+  /** Row count high-water mark for the current message scope. `message_end`
+   *  text is reconciled only against assistant rows created after this mark,
+   *  so an identical paragraph from an earlier message/turn is never mistaken
+   *  for this message's own streamed row. Advanced on every `turn_start` and
+   *  after every assistant `message_end`/`turn_end`. */
+  private messageMark = 0;
+
   snapshot(): TranscriptSnapshot {
     return {
       timeline: this.rows.slice(),
@@ -103,6 +110,11 @@ export class TranscriptState {
     this.currentThinkingLevel = history.currentThinkingLevel;
     this.sessionName = history.sessionName;
     this.agentErrorCount = history.agentErrorCount;
+    // Seeded journal rows are history, not live stream output: exclude them
+    // from message_end dedupe scope so a new live message that happens to
+    // match old text still creates its own row.
+    this.messageMark = this.rows.length;
+    this.closeOpenBlock();
   }
 
   private upsert(row: TimelineItem): TimelineItem {
@@ -203,6 +215,33 @@ export class TranscriptState {
     return this.upsert({ ...row, kind, text } as TimelineItem);
   }
 
+  /** Reconciles one `message_end` full text against rows streamed live this
+   *  message scope. Streaming deltas and the final message carry the same
+   *  text, but intervening tool events close the open block -- so a naive
+   *  replace would orphan the streamed row and append an identical twin
+   *  (and `turn_end` repeating the message would add a third). Instead,
+   *  when the most recent in-scope assistant row already holds this text
+   *  (or a prefix of it, when deltas were lost), it is updated in place and
+   *  no new row is created. Returns undefined when no row matched, in which
+   *  case the caller falls back to creating one. */
+  private reuseStreamedTextRow(fullText: string): TimelineItem | undefined {
+    for (let index = this.rows.length - 1; index >= this.messageMark; index -= 1) {
+      const row = this.rows[index];
+      // A user/error/summary row is a message boundary: never reach past it.
+      if (row.kind === "user" || row.kind === "error" || row.kind === "summary") break;
+      if (row.kind !== "assistant") continue;
+      const current = (row as { text: string }).text;
+      if (current === fullText || current.startsWith(fullText) || fullText.startsWith(current)) {
+        return this.upsert({ ...row, kind: "assistant", text: fullText });
+      }
+      // A different paragraph already owns the tail: this message's streamed
+      // row (if any) is further back, but reusing across paragraphs would
+      // merge distinct messages -- stop and let the caller create a row.
+      break;
+    }
+    return undefined;
+  }
+
   private findToolRow(toolCallId: string): TimelineItem | undefined {
     return toolCallId ? this.get(toolCallId) : undefined;
   }
@@ -260,6 +299,40 @@ export class TranscriptState {
     }
 
     const messageObj = object(payload.message) as { role?: string; content?: string | Array<{ type?: string; text?: string; id?: string; name?: string; arguments?: JsonValue }> } | undefined;
+    const isAssistantMessage = messageObj !== undefined && (messageObj.role === "assistant" || !messageObj.role);
+    const messageBlocks = isAssistantMessage && Array.isArray(messageObj.content) ? messageObj.content : undefined;
+    // Tool rows are idempotent by toolCallId, so materialize them from any
+    // event carrying message content (live `message_end`, its `turn_end`
+    // repeat, or a `message_update` with an attached cumulative message).
+    // Text is handled separately below: only `message_end` owns it.
+    if (messageBlocks) {
+      for (const value of messageBlocks) {
+        const block = object(value);
+        if (!block || block.type !== "toolCall") continue;
+        const toolCallId = string(block.id)?.trim() ?? "";
+        if (!toolCallId) continue;
+        const toolName = string(block.name)?.trim() || "tool";
+        note(this.upsertTool(toolCallId, { name: toolName, input: (block.arguments ?? {}) as JsonValue }));
+      }
+    }
+    if (type === "turn_start") {
+      // A new turn scopes the next message_end dedupe and closes any row a
+      // previous (possibly duplicated) finalization left open, so the next
+      // message's deltas always start a fresh row.
+      this.messageMark = this.rows.length;
+      this.closeOpenBlock();
+      return changed;
+    }
+    if (type === "turn_end") {
+      // `turn_end` repeats the assistant message already finalized by
+      // `message_end` (same text, same toolCalls). Tools above are
+      // idempotent; the text must NOT create another row -- intervening
+      // tool_execution events closed the open block, so a naive replace
+      // would append an identical twin of the just-finalized paragraph.
+      this.messageMark = this.rows.length;
+      this.closeOpenBlock();
+      return changed;
+    }
     const fullTextFromMessage = typeof messageObj?.content === "string"
       ? messageObj.content
       : Array.isArray(messageObj?.content)
@@ -268,25 +341,26 @@ export class TranscriptState {
     const fullText = (messageObj && (messageObj.role === "assistant" || !messageObj.role) ? fullTextFromMessage : undefined)
       ?? (typeof payload.text === "string" ? payload.text : undefined);
     if (fullText !== undefined && fullText.length > 0) {
-      // A full assistant message can carry toolCall blocks alongside its
-      // text (a non-streamed response, or stream deltas that never arrived).
-      // Materialize those tool rows here, in content-block order, BEFORE the
-      // text row: tool rows created later (e.g. by tool_execution_start)
-      // would otherwise land after the text and render the message inverted
-      // relative to the journal (which lists tools first, text last).
-      // Upserts are idempotent, so rows already built live keep their
-      // position, status, and result.
-      if (messageObj && (messageObj.role === "assistant" || !messageObj.role) && Array.isArray(messageObj.content)) {
-        for (const value of messageObj.content) {
-          const block = object(value);
-          if (!block || block.type !== "toolCall") continue;
-          const toolCallId = string(block.id)?.trim() ?? "";
-          if (!toolCallId) continue;
-          const toolName = string(block.name)?.trim() || "tool";
-          note(this.upsertTool(toolCallId, { name: toolName, input: (block.arguments ?? {}) as JsonValue }));
-        }
+      // Only `message_end` owns assistant text. Pi repeats the same message
+      // on `turn_end`, and may attach a cumulative copy to `message_update`:
+      // honoring those would append an identical twin, because intervening
+      // tool events closed the open block the streamed deltas were using.
+      // (Tool rows were already materialized idempotently above.)
+      if (type !== "message_end") return changed;
+      // The streamed deltas already built this paragraph: reconcile them in
+      // place instead of orphaning that row and appending a twin. Falls back
+      // to creating the row when nothing streamed (non-streaming provider).
+      const reused = this.reuseStreamedTextRow(fullText);
+      if (reused) {
+        note(reused);
+      } else {
+        note(this.replaceFullText("assistant", fullText));
       }
-      note(this.replaceFullText("assistant", fullText));
+      // The message is final: the next deltas belong to a new row, and the
+      // next identical `message_end` (a genuinely repeated paragraph) must
+      // not match this one.
+      this.messageMark = this.rows.length;
+      this.closeOpenBlock();
       return changed;
     }
 
