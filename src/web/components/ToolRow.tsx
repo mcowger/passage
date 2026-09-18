@@ -38,8 +38,8 @@ export const MAX_INLINE_DIFF_LINES = 120;
 const READ_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
 /** Image path when this tool row is a model image read (`read`/`readFile` on
- *  a `.png`/`.jpg`/`.gif`/`.webp` file), else undefined. The raw route
- *  enforces that the path is inside the workspace. */
+ *  a `.png`/`.jpg`/`.gif`/`.webp` file), else undefined. Relative paths
+ *  resolve inside the workspace; absolute paths (e.g. /tmp) read directly. */
 export function getReadToolImagePath(item: Extract<TimelineItem, { kind: "tool" }>): string | undefined {
   const name = item.name.toLowerCase();
   if (name !== "read" && name !== "readfile") return undefined;

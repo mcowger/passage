@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, opendir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import fuzzysort from "fuzzysort";
 import { MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES, type FileEntry, type FileListing, type FileRead, type FileRevision, type FileWrite } from "../../shared/domain/files.ts";
 import { WorkspaceService, WorkspaceError } from "./service.ts";
@@ -80,14 +80,21 @@ export class FileService {
     return { path, entries, nextCursor: hasMore ? String(start + entries.length) : null };
   }
   async read(workspaceId: string, path: string): Promise<FileRead> { const absolute = await this.resolve(workspaceId, path); const s = await this.safeStat(absolute); if (!s.isFile()) throw new FileError("not-file", "Path is not a file"); if (s.size > this.maxBytes) throw new FileError("oversize", "File is too large"); const data = await readFile(absolute); if (data.includes(0)) throw new FileError("binary", "Binary files are not supported"); return { path, content: new TextDecoder().decode(data), revision: revision(s, hash(data)) }; }
-  /** Raw bytes for workspace images (e.g. a screenshot the model read with
-   *  the `read` tool) so the browser can render a preview. Restricted to
-   *  image extensions; never follows symlinks. */
+  /** Raw bytes for images the model read with the `read` tool so the
+   *  browser can render a preview. Relative paths resolve inside the
+   *  workspace; absolute paths (e.g. /tmp screenshots) read straight off
+   *  disk. Either way this is bounded to image extensions + 10MB. */
   async readRawImage(workspaceId: string, path: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
     const mimeType = mimeTypeForImagePath(path);
     if (!mimeType) throw new FileError("invalid-path", "Not an image file");
-    const absolute = await this.resolve(workspaceId, path);
-    const s = await this.safeStat(absolute);
+    if (path.includes("\0")) throw new FileError("invalid-path", "Invalid image path");
+    const absolute = isAbsolute(path) ? resolve(path) : await this.resolve(workspaceId, path);
+    let s;
+    try {
+      s = await stat(absolute);
+    } catch {
+      throw new FileError("not-found", "Path does not exist");
+    }
     if (!s.isFile()) throw new FileError("not-file", "Path is not a file");
     if (s.size > MAX_IMAGE_RAW_BYTES) throw new FileError("oversize", "Image is too large");
     const data = await readFile(absolute);

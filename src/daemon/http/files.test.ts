@@ -234,6 +234,17 @@ describe("files HTTP API", () => {
     const traversalRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files/raw?path=${encodeURIComponent("../escape.png")}`));
     expect(traversalRes.status).toBe(400);
 
+    // Absolute paths outside the workspace (e.g. /tmp screenshots the model
+    // read) serve directly — extension + size capped, nothing else.
+    const outsideDir = await mkdtemp(join(tmpdir(), "passage-raw-outside-"));
+    roots.push(outsideDir);
+    const outsidePath = join(outsideDir, "outside.png");
+    await writeFile(outsidePath, pngBytes);
+    const outsideRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files/raw?path=${encodeURIComponent(outsidePath)}`));
+    expect(outsideRes.status).toBe(200);
+    expect(outsideRes.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await outsideRes.arrayBuffer())).toEqual(new Uint8Array(pngBytes));
+
     f.store.close();
   });
 });
