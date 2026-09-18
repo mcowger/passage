@@ -104,9 +104,11 @@
 .status-dot.running,
 .status-dot.active {
   background-color: var(--status-active, var(--status-running));
+  animation: status-pulse-slow 2.6s ease-in-out infinite;
 }
 .status-dot.attention {
   background-color: var(--status-attention, var(--status-error));
+  animation: status-pulse-fast 1.1s ease-in-out infinite;
 }
 .status-dot.dot-sm,
 .status-dot.small {
@@ -127,6 +129,12 @@
 }
 .connected-dot.ws-checking { background-color: var(--status-idle); }
 .connected-dot.ws-offline { background-color: var(--status-error); }
+
+@keyframes status-pulse-slow { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes status-pulse-fast { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.running, .status-dot.active, .status-dot.attention { animation: none; }
+}
 .project-empty, .side-empty { margin: 4px 14px 6px; font-size: 11.5px; color: var(--muted); }
 .sidebar footer { margin-top: auto; padding: 6px 4px 0; color: var(--muted); border-top: 1px solid var(--border); font-size: 11px; display: flex; align-items: center; justify-content: space-between; }
 .footer-status { display: inline-flex; align-items: center; gap: 4px; }

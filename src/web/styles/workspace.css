@@ -54,8 +54,11 @@
   line-height: 0;
 }
 .canvas-tab-dot.idle { background-color: var(--status-idle); }
-.canvas-tab-dot.active { background-color: var(--status-active, var(--status-running)); }
-.canvas-tab-dot.attention { background-color: var(--status-attention, var(--status-error)); }
+.canvas-tab-dot.active { background-color: var(--status-active, var(--status-running)); animation: status-pulse-slow 2.6s ease-in-out infinite; }
+.canvas-tab-dot.attention { background-color: var(--status-attention, var(--status-error)); animation: status-pulse-fast 1.1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .canvas-tab-dot.active, .canvas-tab-dot.attention { animation: none; }
+}
 .canvas-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .canvas-tab-close { background: none; border: 0; color: var(--muted); font-size: 12px; padding: 0 2px; border-radius: 2px; line-height: 1; margin-left: 3px; }
 .canvas-tab-close:hover { background: var(--border-strong); color: var(--foreground); }

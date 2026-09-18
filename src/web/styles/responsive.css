@@ -95,4 +95,6 @@
 @media (prefers-reduced-motion: reduce) {
   .sidebar { transition: none; }
   .pulse-dot { animation: none; }
+  .status-dot.running, .status-dot.active, .status-dot.attention,
+  .canvas-tab-dot.active, .canvas-tab-dot.attention { animation: none; }
 }
