@@ -273,9 +273,15 @@ export function createWorkspaceApi(
     // Capabilities can block on Pi process start-up, so it keeps the longer
     // mutation-grade deadline even though it is a read.
     async capabilities(id: string): Promise<AgentCapabilities> { return agentCapabilitiesSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/capabilities`, undefined, MUTATION_REQUEST_TIMEOUT_MS)); },
-    async listModels(): Promise<AgentCapabilities["models"]> {
-      const body = (await request("/api/models")) as { models: unknown };
-      return agentCapabilitiesSchema.shape.models.parse(body.models);
+    async listModels(): Promise<{ models: AgentCapabilities["models"]; thinkingLevels: AgentCapabilities["thinkingLevels"] }> {
+      const body = (await request("/api/models")) as { models: unknown; thinkingLevels?: unknown };
+      return {
+        models: agentCapabilitiesSchema.shape.models.parse(body.models),
+        // Older daemons only sent `models`; treat a missing list as "no fallback".
+        thinkingLevels: body.thinkingLevels === undefined
+          ? []
+          : agentCapabilitiesSchema.shape.thinkingLevels.parse(body.thinkingLevels),
+      };
     },
     async history(id: string, before?: number, limit = 100): Promise<AgentHistoryResponse> {
       const query = new URLSearchParams({ limit: String(limit) });

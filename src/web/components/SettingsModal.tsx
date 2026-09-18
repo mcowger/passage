@@ -35,14 +35,24 @@ const DEFAULT_SUGGEST_MODEL_VALUE = "__pi_default";
 const DEFAULT_SUGGEST_THINKING_VALUE = "__pi_default_thinking";
 
 /** Valid thinking levels for the chosen suggestion model: that model's own
- *  supported list, or the union across known models when pi default is
- *  selected (order of first appearance, deduplicated). */
-export function suggestThinkingOptions(models: AgentCapabilities["models"], suggestModel: string): string[] {
+ *  supported list, falling back to pi's global levels when the model
+ *  reports none (pi omits `thinkingLevelMap` for such models and its TUI
+ *  offers the global list instead -- e.g. Nemotron 3 Nano). When pi
+ *  default is selected the global list applies; only when it is
+ *  unavailable do we union across known models (order of first
+ *  appearance, deduplicated). */
+export function suggestThinkingOptions(
+  models: AgentCapabilities["models"],
+  suggestModel: string,
+  fallbackLevels: string[] = [],
+): string[] {
   const selected = suggestModel.trim();
   if (selected) {
     const entry = models.find((m) => `${m.provider}/${m.id}` === selected);
-    return [...(entry?.supportedThinkingLevels ?? [])];
+    if (entry && entry.supportedThinkingLevels.length > 0) return [...entry.supportedThinkingLevels];
+    return [...fallbackLevels];
   }
+  if (fallbackLevels.length > 0) return [...fallbackLevels];
   const union: string[] = [];
   for (const model of models) {
     for (const level of model.supportedThinkingLevels) {
@@ -314,6 +324,7 @@ export function SettingsModal({
   const [newScope, setNewScope] = useState<"global" | "project">("global");
   const [newProjectId, setNewProjectId] = useState("");
   const [suggestModels, setSuggestModels] = useState<AgentCapabilities["models"]>([]);
+  const [suggestThinkingFallback, setSuggestThinkingFallback] = useState<string[]>([]);
   const [suggestModelsLoading, setSuggestModelsLoading] = useState(false);
   const [suggestModelsError, setSuggestModelsError] = useState("");
   const [saveError, setSaveError] = useState("");
@@ -335,8 +346,9 @@ export function SettingsModal({
       });
       setSuggestModelsLoading(true);
       setSuggestModelsError("");
-      void api.listModels().then((models) => {
+      void api.listModels().then(({ models, thinkingLevels }) => {
         setSuggestModels(models.filter((m) => m.authenticated));
+        setSuggestThinkingFallback(thinkingLevels);
       }).catch((err: unknown) => {
         setSuggestModelsError(err instanceof Error ? err.message : "Unable to load pi models");
       }).finally(() => {
@@ -532,7 +544,7 @@ export function SettingsModal({
               onValueChange={(value) =>
                 setCurrentSettings((prev) => {
                   const suggestModel = value === DEFAULT_SUGGEST_MODEL_VALUE ? "" : value;
-                  const levels = suggestThinkingOptions(suggestModels, suggestModel);
+                  const levels = suggestThinkingOptions(suggestModels, suggestModel, suggestThinkingFallback);
                   const thinking = prev.suggestThinkingLevel?.trim() ?? "";
                   // A model change can invalidate the stored level: only
                   // keep it when the new model actually supports it.
@@ -586,14 +598,14 @@ export function SettingsModal({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={DEFAULT_SUGGEST_THINKING_VALUE}>Use pi default</SelectItem>
-                {suggestThinkingOptions(suggestModels, currentSettings.suggestModel?.trim() ?? "").map((level) => (
+                {suggestThinkingOptions(suggestModels, currentSettings.suggestModel?.trim() ?? "", suggestThinkingFallback).map((level) => (
                   <SelectItem key={level} value={level}>
                     {level}
                   </SelectItem>
                 ))}
                 {(() => {
                   const stored = currentSettings.suggestThinkingLevel?.trim() ?? "";
-                  const known = new Set(suggestThinkingOptions(suggestModels, currentSettings.suggestModel?.trim() ?? ""));
+                  const known = new Set(suggestThinkingOptions(suggestModels, currentSettings.suggestModel?.trim() ?? "", suggestThinkingFallback));
                   return stored && !known.has(stored) ? (
                     <SelectItem value={stored}>{stored} (saved)</SelectItem>
                   ) : null;
@@ -601,7 +613,7 @@ export function SettingsModal({
               </SelectContent>
             </Select>
             <small className="text-xs font-normal text-muted-foreground">
-              Only levels the chosen model supports are listed.{(currentSettings.suggestModel?.trim() || "") === "" ? " With pi default, every known level is listed." : ""}
+              Only levels the chosen model supports are listed. Models without an explicit list support pi&apos;s global levels.{(currentSettings.suggestModel?.trim() || "") === "" ? " With pi default, the global levels are listed." : ""}
             </small>
             {suggestModelsError && (
               <small className="text-xs font-normal text-muted-foreground">
@@ -613,8 +625,9 @@ export function SettingsModal({
                     if (!api) return;
                     setSuggestModelsLoading(true);
                     setSuggestModelsError("");
-                    void api.listModels().then((models) => {
+                    void api.listModels().then(({ models, thinkingLevels }) => {
                       setSuggestModels(models.filter((m) => m.authenticated));
+                      setSuggestThinkingFallback(thinkingLevels);
                     }).catch((err: unknown) => {
                       setSuggestModelsError(err instanceof Error ? err.message : "Unable to load pi models");
                     }).finally(() => {

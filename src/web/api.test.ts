@@ -160,11 +160,21 @@ test("client rejects malformed successful command responses", async () => {
 test("client lists pi models for settings", async () => {
   const api = createWorkspaceApi(async (input) => {
     expect(String(input)).toBe("/api/models");
-    return Response.json({ models: [{ provider: "test", id: "model", name: "Model", api: "test", input: ["text"], authenticated: true, supportedThinkingLevels: ["low"] }] });
+    return Response.json({ models: [{ provider: "test", id: "model", name: "Model", api: "test", input: ["text"], authenticated: true, supportedThinkingLevels: ["low"] }], thinkingLevels: ["low", "high"] });
   });
-  const models = await api.listModels();
+  const { models, thinkingLevels } = await api.listModels();
   expect(models).toHaveLength(1);
   expect(models[0]).toMatchObject({ provider: "test", id: "model" });
+  expect(thinkingLevels).toEqual(["low", "high"]);
+});
+
+test("client tolerates legacy model lists without thinking levels", async () => {
+  const api = createWorkspaceApi(async () => Response.json({
+    models: [{ provider: "test", id: "model", name: "Model", api: "test", input: ["text"], authenticated: true, supportedThinkingLevels: [] }],
+  }));
+  const { models, thinkingLevels } = await api.listModels();
+  expect(models).toHaveLength(1);
+  expect(thinkingLevels).toEqual([]);
 });
 
 test("client requests worktree operations and suggestions", async () => {

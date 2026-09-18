@@ -61,10 +61,28 @@ describe("suggestThinkingOptions", () => {
     ];
     expect(suggestThinkingOptions(models, "p/a")).toEqual(["low", "high"]);
     expect(suggestThinkingOptions(models, "p/b")).toEqual(["medium", "high", "xhigh"]);
-    expect(suggestThinkingOptions(models, "p/unknown")).toEqual([]);
+    expect(suggestThinkingOptions(models, "p/unknown", ["low"])).toEqual(["low"]);
   });
 
-  test("unions every known level when pi default is selected", async () => {
+  test("falls back to global levels for models without an explicit list", async () => {
+    const { suggestThinkingOptions } = await import("./SettingsModal.tsx");
+    const models = [
+      { provider: "plexus", id: "nemotron-3-nano-30b-a3b", name: "Nemotron", api: "t", input: ["text"], authenticated: true, supportedThinkingLevels: [] },
+    ];
+    const fallback = ["off", "minimal", "low", "medium", "high"];
+    expect(suggestThinkingOptions(models, "plexus/nemotron-3-nano-30b-a3b", fallback)).toEqual(fallback);
+  });
+
+  test("prefers global levels when pi default is selected", async () => {
+    const { suggestThinkingOptions } = await import("./SettingsModal.tsx");
+    const models = [
+      { provider: "p", id: "a", name: "A", api: "t", input: ["text"], authenticated: true, supportedThinkingLevels: ["low", "high"] },
+      { provider: "p", id: "b", name: "B", api: "t", input: ["text"], authenticated: true, supportedThinkingLevels: ["medium", "high"] },
+    ];
+    expect(suggestThinkingOptions(models, "", ["off", "minimal", "low", "medium", "high"])).toEqual(["off", "minimal", "low", "medium", "high"]);
+  });
+
+  test("unions every known level when pi default is selected without a fallback", async () => {
     const { suggestThinkingOptions } = await import("./SettingsModal.tsx");
     const models = [
       { provider: "p", id: "a", name: "A", api: "t", input: ["text"], authenticated: true, supportedThinkingLevels: ["low", "high"] },

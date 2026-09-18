@@ -1,9 +1,12 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { agentCapabilitiesSchema } from "../../shared/domain/agents.ts";
-import { queryAvailableModels, type ModelCatalogProbeOptions } from "../models/catalog.ts";
+import { queryModelCatalog, type ModelCatalogProbeOptions } from "../models/catalog.ts";
 
-const modelsResponseSchema = z.object({ models: agentCapabilitiesSchema.shape.models }).strict();
+const modelsResponseSchema = z.object({
+  models: agentCapabilitiesSchema.shape.models,
+  thinkingLevels: agentCapabilitiesSchema.shape.thinkingLevels,
+}).strict();
 
 const ok = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 
@@ -15,8 +18,8 @@ export const createModelRoutes = (probeOptions?: ModelCatalogProbeOptions): Hono
   app.use("*", async (c, next) => { c.header("Cache-Control", "no-store"); return next(); });
   app.get("/api/models", async (c) => {
     try {
-      const models = await queryAvailableModels(probeOptions);
-      return ok(modelsResponseSchema.parse({ models }));
+      const catalog = await queryModelCatalog(probeOptions);
+      return ok(modelsResponseSchema.parse(catalog));
     } catch (e) {
       return Response.json(
         { error: "models-unavailable", message: e instanceof Error ? e.message : "Unable to list pi models" },
