@@ -463,17 +463,17 @@ export function SettingsModal({
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
-      <DialogContent className="max-w-[520px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-[640px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-lg font-semibold">Workspace Settings</DialogTitle>
         </DialogHeader>
 
         <Tabs defaultValue="fonts-colors" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="fonts-colors">Fonts &amp; Colors</TabsTrigger>
-            <TabsTrigger value="suggestion-output">Suggestion &amp; Output</TabsTrigger>
-            <TabsTrigger value="prompts">Prompts</TabsTrigger>
-            <TabsTrigger value="worktree-locations">Worktree Locations</TabsTrigger>
+          <TabsList className="flex w-full min-w-0 group-data-[orientation=horizontal]/tabs:h-auto">
+            <TabsTrigger value="fonts-colors" className="h-auto min-h-10 min-w-0 px-1.5 text-center text-xs leading-snug whitespace-normal sm:text-[13px]">Fonts &amp; Colors</TabsTrigger>
+            <TabsTrigger value="suggestion-output" className="h-auto min-h-10 min-w-0 px-1.5 text-center text-xs leading-snug whitespace-normal sm:text-[13px]">Suggestion &amp; Output</TabsTrigger>
+            <TabsTrigger value="prompts" className="h-auto min-h-10 min-w-0 px-1.5 text-center text-xs leading-snug whitespace-normal sm:text-[13px]">Prompts</TabsTrigger>
+            <TabsTrigger value="worktree-locations" className="h-auto min-h-10 min-w-0 px-1.5 text-center text-xs leading-snug whitespace-normal sm:text-[13px]">Worktree Locations</TabsTrigger>
           </TabsList>
 
           <TabsContent value="fonts-colors" className="flex flex-col gap-4 py-2">
@@ -674,7 +674,7 @@ export function SettingsModal({
               onChange={(e) => setCurrentSettings((prev) => ({ ...prev, worktreePrompt: e.target.value }))}
               placeholder={DEFAULT_WORKTREE_PROMPT}
               rows={8}
-              className="font-mono text-xs"
+              className="min-h-40 max-h-64 overflow-y-auto font-mono text-xs"
               aria-label="Worktree suggestion prompt template"
             />
             <small className="text-xs font-normal text-muted-foreground">
@@ -701,7 +701,7 @@ export function SettingsModal({
               onChange={(e) => setCurrentSettings((prev) => ({ ...prev, titlePrompt: e.target.value }))}
               placeholder={DEFAULT_TITLE_PROMPT}
               rows={6}
-              className="font-mono text-xs"
+              className="min-h-40 max-h-64 overflow-y-auto font-mono text-xs"
               aria-label="Agent title prompt template"
             />
             <small className="text-xs font-normal text-muted-foreground">
@@ -728,7 +728,7 @@ export function SettingsModal({
               onChange={(e) => setCurrentSettings((prev) => ({ ...prev, commitPrompt: e.target.value }))}
               placeholder={DEFAULT_COMMIT_PROMPT}
               rows={8}
-              className="font-mono text-xs"
+              className="min-h-40 max-h-64 overflow-y-auto font-mono text-xs"
               aria-label="Auto-commit prompt template"
             />
             <small className="text-xs font-normal text-muted-foreground">
