@@ -265,7 +265,7 @@ export function createWorkspaceApi(
     async followUp(id: string, message: string, images?: AgentImage[], files?: AgentFile[]) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/follow-up`, { method: "POST", body: JSON.stringify({ message, ...(images?.length ? { images } : {}), ...(files?.length ? { files } : {}) }) })); },
     imageUrl(id: string, hash: string): string { return `/api/agents/${encodeURIComponent(id)}/images/${encodeURIComponent(hash)}`; },
     fileUrl(id: string, hash: string): string { return `/api/agents/${encodeURIComponent(id)}/files/${encodeURIComponent(hash)}`; },
-    /** Raw workspace image bytes (model-read preview). Path is workspace-relative. */
+    /** Raw workspace image bytes (model-read preview). */
     workspaceImageUrl(workspaceId: string, path: string): string { return `/api/workspaces/${encodeURIComponent(workspaceId)}/files/raw?path=${encodeURIComponent(path)}`; },
     async abort(id: string) { acceptedResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/abort`, { method: "POST" })); },
     async compact(id: string, customInstructions?: string): Promise<CompactResponse> { return compactResponseSchema.parse(await request(`/api/agents/${encodeURIComponent(id)}/compact`, { method: "POST", body: JSON.stringify(customInstructions ? { customInstructions } : {}) }, COMPACT_REQUEST_TIMEOUT_MS)); },

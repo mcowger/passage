@@ -328,6 +328,25 @@ describe("TimelineRow", () => {
     expect(html).toContain("Image read by the model");
   });
 
+  test("renders an absolute model image read with a workspace preview thumbnail", () => {
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(TimelineRow, {
+        agentId: "agt-test",
+        api: stubApi,
+        workspaceId: "ws-1",
+        item: { kind: "tool", id: "tool-absolute-image", name: "read", input: { path: "/tmp/test.png" }, result: "Read image file [image/png]", status: "complete" },
+        expansion: {
+          thinking: "latest",
+          tools: { read: "always", write: "latest", edit: "latest", bash: "latest", find: "latest", grep: "latest", ls: "latest" },
+          otherTools: "latest",
+        },
+        latestIds: { latestToolIds: { read: "tool-absolute-image" } },
+      }),
+    );
+    expect(html).toContain("user-image-strip");
+    expect(html).toContain("/api/workspaces/ws-1/files/raw?path=%2Ftmp%2Ftest.png");
+  });
+
   test("omits the preview for non-image reads", () => {
     const html = ReactDOMServer.renderToStaticMarkup(
       React.createElement(TimelineRow, {

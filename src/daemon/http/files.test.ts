@@ -220,6 +220,11 @@ describe("files HTTP API", () => {
     expect(imageRes.headers.get("content-type")).toBe("image/png");
     expect(new Uint8Array(await imageRes.arrayBuffer())).toEqual(new Uint8Array(pngBytes));
 
+    const absoluteImageRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files/raw?path=${encodeURIComponent(join(f.root, "shot.png"))}`));
+    expect(absoluteImageRes.status).toBe(200);
+    expect(absoluteImageRes.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await absoluteImageRes.arrayBuffer())).toEqual(new Uint8Array(pngBytes));
+
     const textRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/files/raw?path=notes.txt`));
     expect(textRes.status).toBe(400);
 

@@ -37,8 +37,9 @@ export const MAX_INLINE_DIFF_LINES = 120;
 /** Workspace image extensions the model can read with the `read` tool. */
 const READ_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
-/** Workspace-relative image path when this tool row is a model image read
- *  (`read`/`readFile` on a `.png`/`.jpg`/`.gif`/`.webp` file), else undefined. */
+/** Image path when this tool row is a model image read (`read`/`readFile` on
+ *  a `.png`/`.jpg`/`.gif`/`.webp` file), else undefined. The raw route
+ *  enforces that the path is inside the workspace. */
 export function getReadToolImagePath(item: Extract<TimelineItem, { kind: "tool" }>): string | undefined {
   const name = item.name.toLowerCase();
   if (name !== "read" && name !== "readfile") return undefined;
@@ -48,8 +49,8 @@ export function getReadToolImagePath(item: Extract<TimelineItem, { kind: "tool" 
   const cleaned = raw.trim().replace(/\\/g, "/");
   const dot = cleaned.toLowerCase().lastIndexOf(".");
   if (dot < 0 || !READ_IMAGE_EXTENSIONS.has(cleaned.toLowerCase().slice(dot))) return undefined;
-  // Reject absolute paths and traversal: the raw route resolves inside the workspace anyway.
-  if (cleaned.startsWith("/") || cleaned.split("/").includes("..")) return undefined;
+  // The raw route resolves the path inside the workspace and rejects escapes.
+  if (cleaned.split("/").includes("..")) return undefined;
   return cleaned;
 }
 

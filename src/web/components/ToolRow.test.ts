@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { ToolRow, getToolSummary } from "./ToolRow.tsx";
+import { ToolRow, getReadToolImagePath, getToolSummary } from "./ToolRow.tsx";
 import type { TimelineItem } from "../../shared/domain/agents.ts";
 
 describe("getToolSummary", () => {
@@ -78,6 +78,31 @@ describe("getToolSummary", () => {
 });
 
 describe("ToolRow component", () => {
+  test("recognizes absolute image paths from model reads", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-read-image",
+      kind: "tool",
+      name: "read",
+      input: { path: "/tmp/test.png" },
+      result: "Read image file [image/png]",
+      status: "complete",
+    };
+
+    expect(getReadToolImagePath(item)).toBe("/tmp/test.png");
+  });
+
+  test("rejects traversal paths for model-read image previews", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-read-image-traversal",
+      kind: "tool",
+      name: "read",
+      input: { path: "../test.png" },
+      status: "complete",
+    };
+
+    expect(getReadToolImagePath(item)).toBeUndefined();
+  });
+
   test("renders bash command input block and output", () => {
     const item: Extract<TimelineItem, { kind: "tool" }> = {
       id: "tool-1",
