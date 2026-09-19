@@ -7,7 +7,7 @@ import { addTabToGroup, countTabsOfKind, createDefaultLayout, findFirstDeadTermi
 import { resolveFontFamilies } from "../shared/domain/customization.ts";
 import { createWorkspaceApi, friendlyApiError } from "./api.ts";
 import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
-import { MobileContextBar, MobileSessionSheet, type MobileDestinationKind, type MobileReturn } from "./components/MobileNav.tsx";
+import { MobileContextBar, MobileSessionSheet, type MobileReturn } from "./components/MobileNav.tsx";
 import { AGENT_STATUS_LABEL, getAgentStatusKind, getWorkspaceStatusKind } from "./components/agentStatus.ts";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { WsHealthIndicator } from "./components/WsHealthIndicator.tsx";
@@ -73,6 +73,7 @@ import { useDaemon } from "./app/useDaemon.ts";
 import { useWorkspaceList } from "./app/useWorkspaceList.ts";
 import { useWorkspaceLayout } from "./app/useWorkspaceLayout.ts";
 import { useWorkspaceResources } from "./app/useWorkspaceResources.ts";
+import { resolveMobileDest, resolveMobileReturn, type MobileSessionState } from "./app/mobileSession.ts";
 
 function App() {
   const api = useMemo(() => createWorkspaceApi(), []);
@@ -237,63 +238,29 @@ function App() {
   const selectedTerminal = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
   const isGitWorkspace = workspace?.mainRepositoryRoot != null;
 
-  // Mobile return stack: leaving a working destination for Files, an editor,
-  // or another surface records where "Back to …" should return. Explicit
-  // jumps (switcher, back button, selecting the agent) clear it.
-  const buildMobileReturn = (): MobileReturn | null => {
-    if (activeTab === "agent") {
-      const target = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
-      if (!target) return null;
-      return { kind: "agent", targetId: target.id, label: target.title };
-    }
-    if (activeTab === "terminal") {
-      const target = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
-      if (!target) return null;
-      return { kind: "terminal", targetId: target.id, label: target.title };
-    }
-    if (activeTab === "preview") {
-      const target = previews.find((p) => p.id === selectedPreviewId) ?? previews[0];
-      if (!target) return null;
-      return { kind: "preview", targetId: target.id, label: target.label };
-    }
-    if (activeTab === "explorer") return { kind: "explorer", label: "Files" };
-    if (activeTab === "changes") return { kind: "changes", label: "Changes" };
-    if (activeTab === "overview") return { kind: "overview", label: "Overview" };
-    return null;
+  // Mobile return stack input (resolved via app/mobileSession.ts).
+  const mobileSelection: MobileSessionState = {
+    activeTab,
+    agents,
+    selectedAgentId,
+    terminals,
+    selectedTerminalId,
+    previews,
+    selectedPreviewId,
+    openEditorPath,
+    openDiffPath,
   };
 
   const captureMobileReturn = () => {
     if (!isMobile) return;
-    setMobileReturnTo((current) => current ?? buildMobileReturn());
+    setMobileReturnTo((current) => current ?? resolveMobileReturn(mobileSelection));
   };
   // Ref-stable capturer for memoized callbacks (openEditorFile/openDiffFile)
   // whose closures predate the latest render.
   const captureMobileReturnRef = useRef(captureMobileReturn);
   captureMobileReturnRef.current = captureMobileReturn;
 
-  const mobileDest: { kind: MobileDestinationKind; title: string; meta?: string } = (() => {
-    if (activeTab === "agent") {
-      const current = agents.find((a) => a.id === selectedAgentId) ?? agents[0];
-      return current
-        ? { kind: "agent", title: current.title, meta: AGENT_STATUS_LABEL[getAgentStatusKind(current)] }
-        : { kind: "agent", title: "Agent" };
-    }
-    if (activeTab === "terminal") {
-      const current = terminals.find((t) => t.id === selectedTerminalId) ?? terminals[0];
-      return { kind: "terminal", title: current?.title ?? "Terminal" };
-    }
-    if (activeTab === "preview") {
-      const current = previews.find((p) => p.id === selectedPreviewId) ?? previews[0];
-      return { kind: "preview", title: current?.label ?? "Preview" };
-    }
-    if (activeTab === "explorer") return { kind: "explorer", title: "Files" };
-    if (activeTab === "changes") return { kind: "changes", title: "Changes" };
-    if (activeTab === "overview") return { kind: "overview", title: "Overview" };
-    if (activeTab === "editor") {
-      return { kind: "editor", title: openEditorPath?.split("/").pop() ?? "Editor" };
-    }
-    return { kind: "diff", title: openDiffPath ? `Diff: ${openDiffPath.split("/").pop()}` : "Diff" };
-  })();
+  const mobileDest = resolveMobileDest(mobileSelection);
 
   // Resources are ended when their canvas pane closes, so the top-bar counts
   // reflect the tabs actually present for the current workspace rather than
