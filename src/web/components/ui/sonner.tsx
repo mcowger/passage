@@ -44,13 +44,23 @@ const Toaster = ({ ...props }: ToasterProps) => {
       theme={theme}
       position="top-center"
       className="toaster group"
+      gap={8}
       // PWA edge-to-edge (black-translucent): top-center toasts paint under
       // the status bar / Dynamic Island frost without this. Offset (not
       // layout padding) moves only the toast layer, so the safe-area
-      // geometry is untouched. mobileOffset applies to narrow viewports
-      // (the phone); offset keeps desktop at its current distance.
+      // geometry is untouched. On phones the toast sits below the mobile
+      // context bar (hamburger row ~62px tall) with wide side margins so
+      // it renders as a small centered pill that never covers the nav;
+      // desktop keeps its current distance with a slightly narrower card.
       offset={{ top: "16px" }}
-      mobileOffset={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+      mobileOffset={{
+        top: "calc(env(safe-area-inset-top, 0px) + 72px)",
+        left: "48px",
+        right: "48px",
+      }}
+      toastOptions={{
+        style: { padding: "10px 12px" },
+      }}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,
@@ -64,6 +74,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
+          "--width": "320px",
         } as React.CSSProperties
       }
       {...props}
