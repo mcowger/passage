@@ -92,6 +92,22 @@ export class AppSettingsRepository {
   }
 }
 
+export class PushSubscriptionRepository {
+  constructor(private readonly db: Database) {}
+  save(value: { endpoint: string; keys: { p256dh: string; auth: string }; label?: string | null; userAgent?: string | null; createdAt: string }): void {
+    this.db.query("INSERT INTO push_subscriptions (endpoint, keys_json, label, user_agent, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET keys_json=excluded.keys_json, label=excluded.label, user_agent=excluded.user_agent").run(value.endpoint, JSON.stringify(value.keys), value.label ?? null, value.userAgent ?? null, value.createdAt);
+  }
+  list(limit = 500): Array<{ endpoint: string; keysJson: string; label: string | null; userAgent: string | null; createdAt: string }> {
+    return this.db.query<{ endpoint: string; keys_json: string; label: string | null; user_agent: string | null; created_at: string }, [number]>("SELECT endpoint, keys_json, label, user_agent, created_at FROM push_subscriptions ORDER BY created_at LIMIT ?").all(limit).map((row) => ({ endpoint: row.endpoint, keysJson: row.keys_json, label: row.label, userAgent: row.user_agent, createdAt: row.created_at }));
+  }
+  delete(endpoint: string): void {
+    this.db.query("DELETE FROM push_subscriptions WHERE endpoint=?").run(endpoint);
+  }
+  count(): number {
+    return this.db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM push_subscriptions").get()?.count ?? 0;
+  }
+}
+
 export class WebPreviewRepository {
   constructor(private readonly db: Database) {}
   save(value: WebPreviewRow): void {
@@ -108,6 +124,6 @@ export class WebPreviewRepository {
 }
 
 export class MetadataRepositories {
-  readonly projects: ProjectRepository; readonly worktreeLocations: WorktreeLocationRepository; readonly workspaces: WorkspaceRepository; readonly agents: AgentRepository; readonly webPreviews: WebPreviewRepository; readonly appSettings: AppSettingsRepository;
-  constructor(db: Database) { this.projects = new ProjectRepository(db); this.worktreeLocations = new WorktreeLocationRepository(db); this.workspaces = new WorkspaceRepository(db); this.agents = new AgentRepository(db); this.webPreviews = new WebPreviewRepository(db); this.appSettings = new AppSettingsRepository(db); }
+  readonly projects: ProjectRepository; readonly worktreeLocations: WorktreeLocationRepository; readonly workspaces: WorkspaceRepository; readonly agents: AgentRepository; readonly webPreviews: WebPreviewRepository; readonly appSettings: AppSettingsRepository; readonly pushSubscriptions: PushSubscriptionRepository;
+  constructor(db: Database) { this.projects = new ProjectRepository(db); this.worktreeLocations = new WorktreeLocationRepository(db); this.workspaces = new WorkspaceRepository(db); this.agents = new AgentRepository(db); this.webPreviews = new WebPreviewRepository(db); this.appSettings = new AppSettingsRepository(db); this.pushSubscriptions = new PushSubscriptionRepository(db); }
 }

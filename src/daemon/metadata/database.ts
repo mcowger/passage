@@ -50,6 +50,19 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 3,
+    name: "push_subscriptions",
+    sql: `
+      CREATE TABLE push_subscriptions (
+        endpoint TEXT PRIMARY KEY,
+        keys_json TEXT NOT NULL,
+        label TEXT,
+        user_agent TEXT,
+        created_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export class MetadataStore {

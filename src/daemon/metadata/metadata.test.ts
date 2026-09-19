@@ -65,10 +65,10 @@ afterEach(async () => {
 describe("metadata persistence", () => {
   test("migrates an empty database and reopens idempotently", async () => {
     const { path, store } = await open();
-    expect(store.schemaVersion).toBe(2);
+    expect(store.schemaVersion).toBe(3);
     store.close();
     const reopened = new MetadataStore(path);
-    expect(reopened.schemaVersion).toBe(2);
+    expect(reopened.schemaVersion).toBe(3);
     reopened.close();
   });
 

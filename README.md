@@ -22,6 +22,55 @@ stop daemon-owned work.
 - Local SQLite metadata for projects, workspaces, agent links, preferences, and
   layouts. Passage does not copy agent transcripts into SQLite.
 
+## Push notifications (PWA Web Push)
+
+Passage can push agent `needs-attention` + `done` alerts even with the PWA
+closed, via standards-based Web Push. No Apple Developer signup or paid
+account is needed — the daemon signs with self-generated VAPID keys and
+POSTs to Apple's push service.
+
+### 1. Daemon setup (once)
+
+```sh
+bunx web-push generate-vapid-keys
+```
+
+Set the three env vars where the daemon runs (`.env`, systemd
+`EnvironmentFile`, etc. — never commit them) and restart:
+
+```sh
+VAPID_PUBLIC_KEY=BK...
+VAPID_PRIVATE_KEY=xyz...
+VAPID_SUBJECT=mailto:you@example.com
+```
+
+`VAPID_SUBJECT` must be a `mailto:` or `https:` URL (Apple rejects bare
+emails). Without these keys `/api/push/*` returns `push-not-configured`
+and no pushes are sent.
+
+### 2. Serve over HTTPS
+
+Web Push needs a secure context + installed PWA. Serve the production
+build (`bun run build` / `bun run start`) behind your HTTPS reverse proxy.
+The daemon only needs outbound HTTPS to `web.push.apple.com` — the phone
+receives via Apple, not via LAN, so off-LAN delivery still works.
+
+### 3. iPhone setup (iOS 16.4+, non-EU)
+
+1. Open the site in Safari → Share → Add to Home Screen.
+2. Open the Home Screen app (not the Safari tab — Push APIs only exist
+   in the installed app).
+3. Settings → turn on Agent Notifications → Enable push on this device
+   (tap directly; iOS ignores non-gesture prompts).
+4. Send test to verify, then kill the PWA — pushes still arrive.
+
+If permission was denied, remove/re-add the Home Screen app to get
+prompted again. Android/desktop use the same toggle with no install step.
+
+Tapping a notification deep-links to that workspace/agent
+(`?workspaceId=&agentId=`). Every push shows a visible notification
+(Apple forbids silent push); expired endpoints are pruned on 404/410.
+
 ## Development
 
 Passage uses Bun end to end. Install Bun 1.4.0 and the pinned Pi CLI, then:

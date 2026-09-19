@@ -296,6 +296,12 @@ function App() {
       setSnapshot(next);
       setSelectedWorkspaceId((current) => {
         const candidates = next.workspaces.filter((workspace) => !workspace.archivedAt);
+        // Push deep-link (?workspaceId=&agentId=&source=push) wins over last-used.
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const linked = params.get("workspaceId");
+          if (linked && candidates.some((workspace) => workspace.id === linked)) return linked;
+        } catch {}
         if (current && candidates.some((workspace) => workspace.id === current)) return current;
         const last = readLastWorkspaceId();
         if (last && candidates.some((workspace) => workspace.id === last)) return last;
@@ -356,6 +362,11 @@ function App() {
       setAgentError("");
       setAgents(next);
       setSelectedAgentId((current) => {
+        // Push deep-link (?agentId=) wins once when the agent list lands.
+        try {
+          const linked = new URLSearchParams(window.location.search).get("agentId");
+          if (linked && next.some((agent) => agent.id === linked)) return linked;
+        } catch {}
         if (current && next.some((agent) => agent.id === current)) return current;
         return selectFirst ? next[0]?.id : undefined;
       });

@@ -64,3 +64,51 @@ self.addEventListener("message", (event) => {
     self.skipWaiting();
   }
 });
+
+// Web Push: every push must surface a visible notification (Apple enforces
+// userVisibleOnly). Payload is { title, body, tag, url, workspaceId, agentId }.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = {};
+  }
+  const title = typeof data.title === "string" && data.title ? data.title.slice(0, 128) : "Passage";
+  const body = typeof data.body === "string" && data.body ? data.body.slice(0, 512) : "Something needs your attention.";
+  const tag = typeof data.tag === "string" ? data.tag : "passage-push";
+  const url = typeof data.url === "string" ? data.url : "/?source=push";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      tag,
+      data: { url, workspaceId: data.workspaceId, agentId: data.agentId },
+      icon: "/icon.svg",
+      badge: "/icon.svg",
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/?source=push";
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const target = new URL(url, self.location.origin).href;
+      for (const client of windows) {
+        // Focus an existing tab on the same origin and navigate it to the agent.
+        if ("navigate" in client && "focus" in client) {
+          try {
+            await client.navigate(target);
+            return client.focus();
+          } catch {
+            // Fall through to opening a new window.
+          }
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+      return undefined;
+    })()
+  );
+});

@@ -30,6 +30,9 @@ import { TerminalManager } from "./terminals/manager.ts";
 import { WebPreviewManager } from "./previews/manager.ts";
 import { isAllowedPreviewRequest } from "./previews/relay.ts";
 import { createPreviewRoutes } from "./http/previews.ts";
+import { PushService } from "./push/service.ts";
+import { createPushRoutes } from "./push/routes.ts";
+import { wireAgentPushNotifications } from "./push/notifier.ts";
 import { configureLogging, errorFields, logger } from "./logging.ts";
 import {
   MAX_PREVIEW_MESSAGE_BYTES,
@@ -201,6 +204,10 @@ const lifecycle = new DaemonLifecycle({
   },
 });
 lifecycleRef = lifecycle;
+// Web Push for installed PWAs (iOS 16.4+ standalone + Android/desktop):
+// env-provided VAPID keys, multi-device fanout, prune on 404/410.
+const pushService = new PushService(repositories);
+wireAgentPushNotifications({ agentService, workspaceService, push: pushService });
 // Cheap, synchronous: only ever revokes an already-reached `ready`, and
 // (while draining) kicks off the coalesced authoritative recompute.
 agentService.subscribe(() => lifecycle.onActivity());
@@ -328,6 +335,7 @@ app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (works
 app.route("/", createWorkspaceActionRoutes(workspaceActionsService));
 app.route("/", createTerminalRoutes(terminalManager));
 app.route("/", createPreviewRoutes(previewManager, workspaceEvents));
+app.route("/", createPushRoutes(pushService));
 app.route("/", createAgentRoutes(agentService));
 app.route("/", createModelRoutes());
 app.route("/", createTranscriptPreviewRoutes());

@@ -93,6 +93,9 @@ const daemonSnapshotSchema = z.object({
   blockersTruncated: z.boolean(),
 }).strict();
 const healthSchema = z.object({ ok: z.literal(true), build: buildInfoSchema }).strict();
+const vapidKeySchema = z.object({ configured: z.boolean(), publicKey: z.string().optional() }).strict();
+const pushStatusSchema = z.object({ configured: z.boolean(), count: z.number() }).strict();
+const pushTestResultSchema = z.object({ ok: z.literal(true), sent: z.number(), pruned: z.number(), failed: z.number() }).strict();
 
 export type DaemonSnapshot = z.infer<typeof daemonSnapshotSchema>;
 export type HealthResponse = z.infer<typeof healthSchema>;
@@ -431,6 +434,20 @@ export function createWorkspaceApi(
     async transcriptPreview(): Promise<AgentHistory> {
       const json = (await request("/api/dev/transcript-preview?mode=transcript")) as { history: unknown };
       return agentHistorySchema.parse(json.history);
+    },
+    async pushVapidKey(): Promise<{ configured: boolean; publicKey?: string }> {
+      try {
+        return vapidKeySchema.parse(await request("/api/push/vapid-public-key"));
+      } catch (cause) {
+        if (cause instanceof WorkspaceApiError && cause.status === 503) return { configured: false };
+        throw cause;
+      }
+    },
+    async pushStatus(): Promise<{ configured: boolean; count: number }> {
+      return pushStatusSchema.parse(await request("/api/push/subscriptions"));
+    },
+    async pushTest(input?: { title?: string; body?: string }): Promise<{ ok: true; sent: number; pruned: number; failed: number }> {
+      return pushTestResultSchema.parse(await request("/api/push/test", { method: "POST", body: JSON.stringify(input ?? {}) }));
     },
   };
 }

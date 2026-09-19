@@ -7,6 +7,7 @@ import type { AgentCapabilities } from "../../shared/domain/agents.ts";
 import type { Project, WorktreeLocation } from "../../shared/domain/workspaces.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { requestNotificationPermission, getNotificationPermission } from "../notifications.ts";
+import { isPushSupported, isInstalledPwa, isIos, getPushSubscription, subscribePush, unsubscribePush, persistSubscription } from "../push.ts";
 import { Button } from "./ui/button.tsx";
 import { Input } from "./ui/input.tsx";
 import {
@@ -317,6 +318,10 @@ export function SettingsModal({
   const [currentSettings, setCurrentSettings] = useState<WorkspaceSettings>(settings);
   const [busy, setBusy] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<string>(getNotificationPermission());
+  const [pushState, setPushState] = useState<"unknown" | "subscribed" | "unsubscribed" | "unsupported">("unknown");
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushError, setPushError] = useState("");
+  const [pushInfo, setPushInfo] = useState("");
   const [locations, setLocations] = useState<WorktreeLocation[]>(initialLocations);
   const [locationError, setLocationError] = useState("");
   const [locationBusy, setLocationBusy] = useState(false);
@@ -334,6 +339,14 @@ export function SettingsModal({
     setCurrentSettings(settings);
     setNotificationStatus(getNotificationPermission());
     setSaveError("");
+    setPushError("");
+    setPushInfo("");
+    if (!open) return;
+    if (!isPushSupported()) {
+      setPushState("unsupported");
+      return;
+    }
+    void getPushSubscription().then((sub) => setPushState(sub ? "subscribed" : "unsubscribed")).catch(() => setPushState("unsubscribed"));
   }, [settings, open]);
 
   React.useEffect(() => {
@@ -394,6 +407,64 @@ export function SettingsModal({
       setCurrentSettings((prev) => ({ ...prev, notificationsEnabled: granted }));
     } else {
       setCurrentSettings((prev) => ({ ...prev, notificationsEnabled: false }));
+    }
+  };
+
+  const handleEnablePush = async () => {
+    if (!api) {
+      setPushError("Push needs an API connection.");
+      return;
+    }
+    setPushBusy(true);
+    setPushError("");
+    setPushInfo("");
+    try {
+      // Must stay in the tap handler with no await before subscribePush:
+      // iOS ignores non-gesture permission prompts.
+      const { configured, publicKey } = await api.pushVapidKey();
+      if (!configured || !publicKey) {
+        setPushError("Daemon has no VAPID keys. Set VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT and restart.");
+        return;
+      }
+      const subscription = await subscribePush(publicKey);
+      await persistSubscription(subscription, isIos() ? "iOS PWA" : navigator.platform);
+      setCurrentSettings((prev) => ({ ...prev, notificationsEnabled: true }));
+      setNotificationStatus(getNotificationPermission());
+      setPushState("subscribed");
+      setPushInfo("This device will get push notifications even with the PWA closed.");
+    } catch (cause) {
+      setPushError(cause instanceof Error ? cause.message : "Failed to enable push.");
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleDisablePush = async () => {
+    setPushBusy(true);
+    setPushError("");
+    setPushInfo("");
+    try {
+      await unsubscribePush();
+      setPushState("unsubscribed");
+    } catch (cause) {
+      setPushError(cause instanceof Error ? cause.message : "Failed to disable push.");
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleTestPush = async () => {
+    if (!api) return;
+    setPushBusy(true);
+    setPushError("");
+    setPushInfo("");
+    try {
+      const result = await api.pushTest();
+      setPushInfo(result.sent > 0 ? `Test sent to ${result.sent} device(s).` : "No devices subscribed yet.");
+    } catch (cause) {
+      setPushError(cause instanceof Error ? cause.message : "Test push failed.");
+    } finally {
+      setPushBusy(false);
     }
   };
 
@@ -508,7 +579,7 @@ export function SettingsModal({
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between gap-2">
               <Label htmlFor="settings-notifications" className="text-sm font-medium">
-                Browser Notifications on Agent Completion
+                Agent Notifications (push + browser)
               </Label>
               <Switch
                 id="settings-notifications"
@@ -517,8 +588,38 @@ export function SettingsModal({
               />
             </div>
             <small className="text-xs text-muted-foreground">
-              Permission state: <code className="font-mono">{notificationStatus}</code>. Notifications only fire when tab is inactive.
+              Permission state: <code className="font-mono">{notificationStatus}</code>. Local alerts fire when the tab is inactive; push arrives even with the PWA closed.
             </small>
+            {isIos() && !isInstalledPwa() && (
+              <Alert>
+                <AlertDescription className="text-xs">
+                  iPhone/iPad: open this site in Safari, tap Share → Add to Home Screen, then open the Home Screen app and enable push here. Push is unavailable in a Safari tab.
+                </AlertDescription>
+              </Alert>
+            )}
+            {pushState === "unsupported" ? (
+              <small className="text-xs text-muted-foreground">Push is not supported in this browser.</small>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {pushState === "subscribed" ? (
+                  <>
+                    <Button type="button" variant="outline" size="xs" disabled={pushBusy} onClick={() => void handleDisablePush()}>
+                      {pushBusy ? "Working…" : "Disable push on this device"}
+                    </Button>
+                    <Button type="button" variant="ghost" size="xs" disabled={pushBusy} onClick={() => void handleTestPush()}>
+                      Send test
+                    </Button>
+                  </>
+                ) : (
+                  <Button type="button" variant="outline" size="xs" disabled={pushBusy} onClick={() => void handleEnablePush()}>
+                    {pushBusy ? "Enabling…" : "Enable push on this device"}
+                  </Button>
+                )}
+                <span className="text-[11px] text-muted-foreground">Status: {pushState}</span>
+              </div>
+            )}
+            {pushError && <small className="text-xs text-destructive">{pushError}</small>}
+            {pushInfo && <small className="text-xs text-muted-foreground">{pushInfo}</small>}
           </div>
 
           <label className="flex flex-col gap-1 text-sm font-medium">
