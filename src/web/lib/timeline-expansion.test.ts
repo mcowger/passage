@@ -167,7 +167,19 @@ describe("isItemExpanded", () => {
     expect(isItemExpanded(editError, settings, latestIds)).toBe(true);
   });
 
-  test("running tools expand during execution", () => {
+  test("running tools expand during execution unless set to none", () => {
+    const readRunning: ToolActivity = {
+      kind: "tool",
+      id: "tool-read-run",
+      name: "read",
+      input: null,
+      status: "running",
+    };
+    // read is "latest" in the test settings, so a running read stays open.
+    expect(isItemExpanded(readRunning, settings, latestIds)).toBe(true);
+  });
+
+  test("running tools set to none start collapsed", () => {
     const editRunning: ToolActivity = {
       kind: "tool",
       id: "tool-edit-run",
@@ -175,7 +187,22 @@ describe("isItemExpanded", () => {
       input: null,
       status: "running",
     };
-    expect(isItemExpanded(editRunning, settings, latestIds)).toBe(true);
+    // edit is "none" in the test settings: args streaming in must not
+    // flash the row open only to collapse it again on completion.
+    expect(isItemExpanded(editRunning, settings, latestIds)).toBe(false);
+
+    const readNoneSettings = {
+      ...settings,
+      tools: { ...settings.tools, read: "none" as const },
+    };
+    const readRunning: ToolActivity = {
+      kind: "tool",
+      id: "tool-read-run",
+      name: "read",
+      input: null,
+      status: "running",
+    };
+    expect(isItemExpanded(readRunning, readNoneSettings, latestIds)).toBe(false);
   });
 
   test("manual toggle overrides setting", () => {

@@ -80,7 +80,6 @@ export function isItemExpanded(
 
   if (item.kind === "tool") {
     if (item.status === "error") return true;
-    if (item.status === "running") return true;
 
     const canonical = resolveCanonicalTool(item.name);
     // Fall back to otherTools when a persisted expansion predates a
@@ -88,8 +87,14 @@ export function isItemExpanded(
     const mode: ExpandMode =
       canonical === "other" ? settings.otherTools : (settings.tools[canonical] ?? settings.otherTools);
 
-    if (mode === "always") return true;
+    // A tool set to "none" stays collapsed from the start -- including
+    // while its args are still streaming in (status running). Forcing
+    // running rows open first and collapsing on completion flashes
+    // expanded for exactly the tool types the user asked to keep shut.
     if (mode === "none") return false;
+    if (item.status === "running") return true;
+
+    if (mode === "always") return true;
     if (mode === "latest") return latestIds.latestToolIds[canonical] === item.id;
     return false;
   }
