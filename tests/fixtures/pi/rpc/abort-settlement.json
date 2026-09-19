@@ -1,0 +1,977 @@
+{
+  "name": "abort-settlement",
+  "scenario": "abort",
+  "sessionFixture": "../history/aborted-run.jsonl",
+  "note": "prompt emission truncated at 3rd text delta; abort step carries the aborted tail",
+  "steps": [
+    {
+      "expect": {
+        "type": "get_state"
+      },
+      "respond": {
+        "id": "$id",
+        "type": "response",
+        "command": "get_state",
+        "success": true,
+        "data": {
+          "model": {
+            "id": "muse-spark-1.3",
+            "name": "Muse Spark 1.3",
+            "api": "openai-responses",
+            "provider": "plexus",
+            "baseUrl": "https://fixture-model.local/v1",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "cost": {
+              "input": 0.1,
+              "output": 0.2,
+              "cacheRead": 0.002,
+              "cacheWrite": 0
+            },
+            "contextWindow": 1048564,
+            "maxTokens": 32000
+          },
+          "thinkingLevel": "high",
+          "isStreaming": false,
+          "isCompacting": false,
+          "steeringMode": "one-at-a-time",
+          "followUpMode": "one-at-a-time",
+          "sessionFile": "$sessionDir/$sessionId.jsonl",
+          "sessionId": "$sessionId",
+          "autoCompactionEnabled": true,
+          "messageCount": 0,
+          "pendingMessageCount": 0
+        }
+      }
+    },
+    {
+      "expect": {
+        "type": "prompt"
+      },
+      "respond": {
+        "type": "response",
+        "id": "$id",
+        "command": "prompt",
+        "success": true
+      },
+      "emit": [
+        {
+          "type": "agent_start"
+        },
+        {
+          "type": "turn_start"
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "Fixture system preamble.",
+              "tools": "Fixture tool catalog."
+            },
+            "timestamp": 1767225600000,
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Fixture read tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              },
+              {
+                "name": "bash",
+                "description": "Fixture bash tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              }
+            ]
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "Fixture system preamble.",
+              "tools": "Fixture tool catalog."
+            },
+            "timestamp": 1767225600000,
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Fixture read tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              },
+              {
+                "name": "bash",
+                "description": "Fixture bash tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              }
+            ]
+          }
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Explain distributed consensus in great detail, at least 800 words. Be thorough and verbose."
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Explain distributed consensus in great detail, at least 800 words. Be thorough and verbose."
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "assistant",
+            "content": [],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "totalTokens": 0,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "pending",
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_start",
+            "contentIndex": 0
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_end",
+            "contentIndex": 0,
+            "content": ""
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_start",
+            "contentIndex": 1
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "type": "abort"
+      },
+      "respond": {
+        "type": "response",
+        "id": "$id",
+        "command": "abort",
+        "success": true
+      },
+      "emit": [
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": "Distributed consensus is one of the most"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " fundamental and intellect"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": "ually demanding problems in distributed systems. At its core, it is about"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " getting"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " a collection of independent"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " computers"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": ", connected"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " by an"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " unreliable network, to agree on a single value"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " or a single sequence of actions"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": ", even when some of those"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " computers fail and"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " messages"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " can"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " be delayed,"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " lost, or reordered"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": ".\n\nThe intuitive"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " idea"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " is simple:"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " we"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " want a"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " cluster"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " of machines to act like"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " a single, highly"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " reliable machine. The practical reality"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " is extraordin"
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "text",
+                "text": "Fixture consensus essay lead sentence one. Fixture consensus essay lead sentence two."
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "totalTokens": 0,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "aborted",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0001",
+            "errorMessage": "OpenAI Responses stream ended before a terminal response event"
+          }
+        },
+        {
+          "type": "turn_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "text",
+                "text": "Fixture consensus essay lead sentence one. Fixture consensus essay lead sentence two."
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "totalTokens": 0,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "aborted",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0002",
+            "errorMessage": "OpenAI Responses stream ended before a terminal response event"
+          },
+          "toolResults": []
+        },
+        {
+          "type": "agent_end",
+          "messages": [
+            {
+              "role": "system",
+              "content": "",
+              "sections": {
+                "preamble": "Fixture system preamble.",
+                "tools": "Fixture tool catalog."
+              },
+              "timestamp": 1767225600000,
+              "toolsAdded": [
+                {
+                  "name": "read",
+                  "description": "Fixture read tool.",
+                  "parameters": "{'type': 'object'}",
+                  "constrainedSampling": "{'type': 'json_schema'}"
+                },
+                {
+                  "name": "bash",
+                  "description": "Fixture bash tool.",
+                  "parameters": "{'type': 'object'}",
+                  "constrainedSampling": "{'type': 'json_schema'}"
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Explain distributed consensus in great detail, at least 800 words. Be thorough and verbose."
+                }
+              ],
+              "timestamp": 1767225600000
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": "",
+                  "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+                },
+                {
+                  "type": "text",
+                  "text": "Fixture consensus essay lead sentence one. Fixture consensus essay lead sentence two."
+                }
+              ],
+              "api": "openai-responses",
+              "provider": "plexus",
+              "model": "muse-spark-1.3",
+              "usage": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "totalTokens": 0,
+                "cost": {
+                  "input": 0,
+                  "output": 0,
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "total": 0
+                }
+              },
+              "stopReason": "aborted",
+              "timestamp": 1767225600000,
+              "responseId": "resp_fixture0003",
+              "errorMessage": "OpenAI Responses stream ended before a terminal response event"
+            }
+          ],
+          "willRetry": false
+        },
+        {
+          "type": "agent_settled"
+        }
+      ]
+    }
+  ]
+}

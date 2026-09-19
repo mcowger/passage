@@ -1,0 +1,1552 @@
+{
+  "name": "prompt-steer-follow-up",
+  "scenario": "steer-followup",
+  "sessionFixture": "../history/steer-followup.jsonl",
+  "note": "trimmed 28 bash partialResult updates; steering/follow-up text kept",
+  "steps": [
+    {
+      "expect": {
+        "type": "get_state"
+      },
+      "respond": {
+        "id": "$id",
+        "type": "response",
+        "command": "get_state",
+        "success": true,
+        "data": {
+          "model": {
+            "id": "muse-spark-1.3",
+            "name": "Muse Spark 1.3",
+            "api": "openai-responses",
+            "provider": "plexus",
+            "baseUrl": "https://fixture-model.local/v1",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "cost": {
+              "input": 0.1,
+              "output": 0.2,
+              "cacheRead": 0.002,
+              "cacheWrite": 0
+            },
+            "contextWindow": 1048564,
+            "maxTokens": 32000
+          },
+          "thinkingLevel": "high",
+          "isStreaming": false,
+          "isCompacting": false,
+          "steeringMode": "one-at-a-time",
+          "followUpMode": "one-at-a-time",
+          "sessionFile": "$sessionDir/$sessionId.jsonl",
+          "sessionId": "$sessionId",
+          "autoCompactionEnabled": true,
+          "messageCount": 0,
+          "pendingMessageCount": 0
+        }
+      }
+    },
+    {
+      "expect": {
+        "type": "prompt"
+      },
+      "respond": {
+        "type": "response",
+        "id": "$id",
+        "command": "prompt",
+        "success": true
+      },
+      "emit": [
+        {
+          "type": "agent_start"
+        },
+        {
+          "type": "turn_start"
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "Fixture system preamble.",
+              "tools": "Fixture tool catalog."
+            },
+            "timestamp": 1767225600000,
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Fixture read tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              },
+              {
+                "name": "bash",
+                "description": "Fixture bash tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              }
+            ]
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "Fixture system preamble.",
+              "tools": "Fixture tool catalog."
+            },
+            "timestamp": 1767225600000,
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Fixture read tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              },
+              {
+                "name": "bash",
+                "description": "Fixture bash tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              }
+            ]
+          }
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Count slowly from 1 to 30, one number per line, using bash `for i in $(seq 1 30); do echo $i; sleep 0.4; done`. Then say done."
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Count slowly from 1 to 30, one number per line, using bash `for i in $(seq 1 30); do echo $i; sleep 0.4; done`. Then say done."
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "assistant",
+            "content": [],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "totalTokens": 0,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "pending",
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_start",
+            "contentIndex": 0
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_delta",
+            "contentIndex": 0,
+            "delta": "Evaluating whether to use process start versus bash for a long-running counting loop."
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_delta",
+            "contentIndex": 0,
+            "delta": "\n\n"
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "type": "steer"
+      },
+      "respond": {
+        "type": "response",
+        "id": "$id",
+        "command": "steer",
+        "success": true
+      },
+      "emit": [
+        {
+          "type": "queue_update",
+          "steering": [
+            "Also say STEERED at the end."
+          ],
+          "followUp": []
+        },
+        {
+          "type": "queue_update",
+          "steering": [
+            "Also say STEERED at the end."
+          ],
+          "followUp": [
+            "Reply with exactly FOLLOWED."
+          ]
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_delta",
+            "contentIndex": 0,
+            "delta": "Shifting to process start to avoid blocking the turn for a 12-second loop."
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_delta",
+            "contentIndex": 0,
+            "delta": "\n\n"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_end",
+            "contentIndex": 0,
+            "content": "Evaluating whether to use process start versus bash for a long-running counting loop.\n\nShifting to process start to avoid blocking the turn for a 12-second loop."
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_start",
+            "contentIndex": 1
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_end",
+            "contentIndex": 1,
+            "content": ""
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "toolcall_start",
+            "contentIndex": 2,
+            "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+            "toolName": "bash"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "toolcall_delta",
+            "contentIndex": 2,
+            "delta": "{\"command\":\"for i in $(seq 1 30); do echo $i; sleep 0.4; done\""
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "toolcall_delta",
+            "contentIndex": 2,
+            "delta": ",\"timeout\":20.0}"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "toolcall_end",
+            "contentIndex": 2,
+            "toolCall": {
+              "type": "toolCall",
+              "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+              "name": "bash",
+              "arguments": {
+                "command": "for i in $(seq 1 30); do echo $i; sleep 0.4; done",
+                "timeout": 20
+              }
+            }
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "Considering how to run the counting loop within this turn.",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "toolCall",
+                "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+                "name": "bash",
+                "arguments": {
+                  "command": "for i in $(seq 1 30); do echo $i; sleep 0.4; done",
+                  "timeout": 20
+                }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 17666,
+              "output": 881,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 738,
+              "totalTokens": 18547,
+              "cost": {
+                "input": 0.0017666000000000001,
+                "output": 0.00017620000000000003,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.0019428000000000002
+              }
+            },
+            "stopReason": "toolUse",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0001",
+            "rawStopReason": "completed"
+          }
+        },
+        {
+          "type": "tool_execution_start",
+          "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+          "toolName": "bash",
+          "args": {
+            "command": "for i in $(seq 1 30); do echo $i; sleep 0.4; done",
+            "timeout": 20
+          }
+        },
+        {
+          "type": "tool_execution_update",
+          "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+          "toolName": "bash",
+          "args": {
+            "command": "for i in $(seq 1 30); do echo $i; sleep 0.4; done",
+            "timeout": 20
+          },
+          "partialResult": {
+            "content": []
+          }
+        },
+        {
+          "type": "tool_execution_update",
+          "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+          "toolName": "bash",
+          "args": {
+            "command": "for i in $(seq 1 30); do echo $i; sleep 0.4; done",
+            "timeout": 20
+          },
+          "partialResult": {
+            "content": [
+              {
+                "type": "text",
+                "text": "1\n"
+              }
+            ],
+            "details": {}
+          }
+        },
+        {
+          "type": "tool_execution_update",
+          "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+          "toolName": "bash",
+          "args": {
+            "command": "for i in $(seq 1 30); do echo $i; sleep 0.4; done",
+            "timeout": 20
+          },
+          "partialResult": {
+            "content": [
+              {
+                "type": "text",
+                "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n"
+              }
+            ],
+            "details": {}
+          }
+        },
+        {
+          "type": "tool_execution_end",
+          "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+          "toolName": "bash",
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n"
+              }
+            ]
+          },
+          "isError": false
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "toolResult",
+            "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+            "toolName": "bash",
+            "content": [
+              {
+                "type": "text",
+                "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n"
+              }
+            ],
+            "isError": false,
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "toolResult",
+            "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+            "toolName": "bash",
+            "content": [
+              {
+                "type": "text",
+                "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n"
+              }
+            ],
+            "isError": false,
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "turn_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "Considering how to run the counting loop within this turn.",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "toolCall",
+                "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+                "name": "bash",
+                "arguments": {
+                  "command": "for i in $(seq 1 30); do echo $i; sleep 0.4; done",
+                  "timeout": 20
+                }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 17666,
+              "output": 881,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 738,
+              "totalTokens": 18547,
+              "cost": {
+                "input": 0.0017666000000000001,
+                "output": 0.00017620000000000003,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.0019428000000000002
+              }
+            },
+            "stopReason": "toolUse",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0002",
+            "rawStopReason": "completed"
+          },
+          "toolResults": [
+            {
+              "role": "toolResult",
+              "toolCallId": "call_01a0b7bf323977e78766206b6e04331b|fc_01a0b7bf323977e78766206b6e04331b",
+              "toolName": "bash",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n"
+                }
+              ],
+              "isError": false,
+              "timestamp": 1767225600000
+            }
+          ]
+        },
+        {
+          "type": "turn_start"
+        },
+        {
+          "type": "queue_update",
+          "steering": [],
+          "followUp": [
+            "Reply with exactly FOLLOWED."
+          ]
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Also say STEERED at the end."
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Also say STEERED at the end."
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "assistant",
+            "content": [],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "totalTokens": 0,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "pending",
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_start",
+            "contentIndex": 0
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_delta",
+            "contentIndex": 0,
+            "delta": "Appending the requested final token after delivering the prior bash counting output."
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_delta",
+            "contentIndex": 0,
+            "delta": "\n\n"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_end",
+            "contentIndex": 0,
+            "content": "Appending the requested final token after delivering the prior bash counting output."
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_start",
+            "contentIndex": 1
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": "1\n2\n3\n4\n5\n6"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": "\n7\n8\n9\n10\n11\n12\n13\n14"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": "\n15\n16\n17\n18\n19\n20\n21\n22"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": "\n23\n24\n25\n26\n27\n28\n29\n30"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": "\ndone\nSTEERED"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_end",
+            "contentIndex": 1,
+            "content": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\ndone\nSTEERED"
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "Adding the steered closing token after the counting output.",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "text",
+                "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\ndone\nSTEERED",
+                "textSignature": "{\"v\":1,\"id\":\"msg_fixture0003\"}"
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 952,
+              "output": 349,
+              "cacheRead": 17649,
+              "cacheWrite": 0,
+              "reasoning": 256,
+              "totalTokens": 18950,
+              "cost": {
+                "input": 0.00009520000000000001,
+                "output": 0.0000698,
+                "cacheRead": 0.000035298,
+                "cacheWrite": 0,
+                "total": 0.000200298
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0004",
+            "rawStopReason": "completed"
+          }
+        },
+        {
+          "type": "turn_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "Adding the steered closing token after the counting output.",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "text",
+                "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\ndone\nSTEERED",
+                "textSignature": "{\"v\":1,\"id\":\"msg_fixture0005\"}"
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 952,
+              "output": 349,
+              "cacheRead": 17649,
+              "cacheWrite": 0,
+              "reasoning": 256,
+              "totalTokens": 18950,
+              "cost": {
+                "input": 0.00009520000000000001,
+                "output": 0.0000698,
+                "cacheRead": 0.000035298,
+                "cacheWrite": 0,
+                "total": 0.000200298
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0006",
+            "rawStopReason": "completed"
+          },
+          "toolResults": []
+        }
+      ]
+    },
+    {
+      "expect": {
+        "type": "follow_up"
+      },
+      "respond": {
+        "type": "response",
+        "id": "$id",
+        "command": "follow_up",
+        "success": true
+      },
+      "emit": [
+        {
+          "type": "turn_start"
+        },
+        {
+          "type": "queue_update",
+          "steering": [],
+          "followUp": []
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reply with exactly FOLLOWED."
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reply with exactly FOLLOWED."
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "assistant",
+            "content": [],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "totalTokens": 0,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "pending",
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_start",
+            "contentIndex": 0
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_end",
+            "contentIndex": 0,
+            "content": ""
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_start",
+            "contentIndex": 1
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": "FOLLOW"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": "ED"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_end",
+            "contentIndex": 1,
+            "content": "FOLLOWED"
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "text",
+                "text": "FOLLOWED",
+                "textSignature": "{\"v\":1,\"id\":\"msg_fixture0007\"}"
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 399,
+              "output": 30,
+              "cacheRead": 18545,
+              "cacheWrite": 0,
+              "reasoning": 17,
+              "totalTokens": 18974,
+              "cost": {
+                "input": 0.0000399,
+                "output": 0.000006,
+                "cacheRead": 0.00003709,
+                "cacheWrite": 0,
+                "total": 0.00008299
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0008",
+            "rawStopReason": "completed"
+          }
+        },
+        {
+          "type": "turn_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "text",
+                "text": "FOLLOWED",
+                "textSignature": "{\"v\":1,\"id\":\"msg_fixture0009\"}"
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 399,
+              "output": 30,
+              "cacheRead": 18545,
+              "cacheWrite": 0,
+              "reasoning": 17,
+              "totalTokens": 18974,
+              "cost": {
+                "input": 0.0000399,
+                "output": 0.000006,
+                "cacheRead": 0.00003709,
+                "cacheWrite": 0,
+                "total": 0.00008299
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0010",
+            "rawStopReason": "completed"
+          },
+          "toolResults": []
+        },
+        {
+          "type": "agent_end",
+          "messages": [
+            {
+              "role": "system",
+              "content": "",
+              "sections": {
+                "preamble": "Fixture system preamble.",
+                "tools": "Fixture tool catalog."
+              },
+              "timestamp": 1767225600000,
+              "toolsAdded": [
+                {
+                  "name": "read",
+                  "description": "Fixture read tool.",
+                  "parameters": "{'type': 'object'}",
+                  "constrainedSampling": "{'type': 'json_schema'}"
+                },
+                {
+                  "name": "bash",
+                  "description": "Fixture bash tool.",
+                  "parameters": "{'type': 'object'}",
+                  "constrainedSampling": "{'type': 'json_schema'}"
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Count slowly from 1 to 30, one number per line, using bash `for i in $(seq 1 30); do echo $i; sleep 0.4; done`. Then say done."
+                }
+              ],
+              "timestamp": 1767225600000
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": "Considering how to run the counting loop within this turn.",
+                  "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+                },
+                {
+                  "type": "thinking",
+                  "thinking": "",
+                  "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+                },
+                {
+                  "type": "toolCall",
+                  "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+                  "name": "bash",
+                  "arguments": {
+                    "command": "for i in $(seq 1 30); do echo $i; sleep 0.4; done",
+                    "timeout": 20
+                  }
+                }
+              ],
+              "api": "openai-responses",
+              "provider": "plexus",
+              "model": "muse-spark-1.3",
+              "usage": {
+                "input": 17666,
+                "output": 881,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "reasoning": 738,
+                "totalTokens": 18547,
+                "cost": {
+                  "input": 0.0017666000000000001,
+                  "output": 0.00017620000000000003,
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "total": 0.0019428000000000002
+                }
+              },
+              "stopReason": "toolUse",
+              "timestamp": 1767225600000,
+              "responseId": "resp_fixture0011",
+              "rawStopReason": "completed"
+            },
+            {
+              "role": "toolResult",
+              "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+              "toolName": "bash",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n"
+                }
+              ],
+              "isError": false,
+              "timestamp": 1767225600000
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Also say STEERED at the end."
+                }
+              ],
+              "timestamp": 1767225600000
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": "Adding the steered closing token after the counting output.",
+                  "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+                },
+                {
+                  "type": "text",
+                  "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\ndone\nSTEERED",
+                  "textSignature": "{\"v\":1,\"id\":\"msg_fixture0012\"}"
+                }
+              ],
+              "api": "openai-responses",
+              "provider": "plexus",
+              "model": "muse-spark-1.3",
+              "usage": {
+                "input": 952,
+                "output": 349,
+                "cacheRead": 17649,
+                "cacheWrite": 0,
+                "reasoning": 256,
+                "totalTokens": 18950,
+                "cost": {
+                  "input": 0.00009520000000000001,
+                  "output": 0.0000698,
+                  "cacheRead": 0.000035298,
+                  "cacheWrite": 0,
+                  "total": 0.000200298
+                }
+              },
+              "stopReason": "stop",
+              "timestamp": 1767225600000,
+              "responseId": "resp_fixture0013",
+              "rawStopReason": "completed"
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Reply with exactly FOLLOWED."
+                }
+              ],
+              "timestamp": 1767225600000
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": "",
+                  "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+                },
+                {
+                  "type": "text",
+                  "text": "FOLLOWED",
+                  "textSignature": "{\"v\":1,\"id\":\"msg_fixture0014\"}"
+                }
+              ],
+              "api": "openai-responses",
+              "provider": "plexus",
+              "model": "muse-spark-1.3",
+              "usage": {
+                "input": 399,
+                "output": 30,
+                "cacheRead": 18545,
+                "cacheWrite": 0,
+                "reasoning": 17,
+                "totalTokens": 18974,
+                "cost": {
+                  "input": 0.0000399,
+                  "output": 0.000006,
+                  "cacheRead": 0.00003709,
+                  "cacheWrite": 0,
+                  "total": 0.00008299
+                }
+              },
+              "stopReason": "stop",
+              "timestamp": 1767225600000,
+              "responseId": "resp_fixture0015",
+              "rawStopReason": "completed"
+            }
+          ],
+          "willRetry": false
+        },
+        {
+          "type": "agent_settled"
+        }
+      ]
+    }
+  ]
+}

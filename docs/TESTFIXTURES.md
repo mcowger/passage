@@ -2,9 +2,11 @@
 
 ## Status
 
-Proposed. This document describes a fixture strategy for Pi history and RPC
-tests. It does not authorize a production replay mode, another agent runtime,
-or a provider abstraction.
+Implemented. Corpus lives in `tests/fixtures/pi/` (`manifest.json`,
+`history/`, `rpc/`) with the strict replay runner (`replay.ts`) and gate
+(`fixtures.test.ts`); authoring tools live in `scripts/`
+(`harvest-*.ts`, `synthesize-fixtures.ts`). This document does not authorize
+a production replay mode, another agent runtime, or a provider abstraction.
 
 `docs/DESIGN.md` remains authoritative for architecture and persistence.
 `PI.md` remains authoritative for the Pi RPC boundary and durable-history

@@ -1,0 +1,1306 @@
+{
+  "name": "sequential-tools",
+  "scenario": "tools",
+  "sessionFixture": "../history/sequential-tools.jsonl",
+  "steps": [
+    {
+      "expect": {
+        "type": "get_state"
+      },
+      "respond": {
+        "id": "$id",
+        "type": "response",
+        "command": "get_state",
+        "success": true,
+        "data": {
+          "model": {
+            "id": "muse-spark-1.3",
+            "name": "Muse Spark 1.3",
+            "api": "openai-responses",
+            "provider": "plexus",
+            "baseUrl": "https://fixture-model.local/v1",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "cost": {
+              "input": 0.1,
+              "output": 0.2,
+              "cacheRead": 0.002,
+              "cacheWrite": 0
+            },
+            "contextWindow": 1048564,
+            "maxTokens": 32000
+          },
+          "thinkingLevel": "high",
+          "isStreaming": false,
+          "isCompacting": false,
+          "steeringMode": "one-at-a-time",
+          "followUpMode": "one-at-a-time",
+          "sessionFile": "$sessionDir/$sessionId.jsonl",
+          "sessionId": "$sessionId",
+          "autoCompactionEnabled": true,
+          "messageCount": 0,
+          "pendingMessageCount": 0
+        }
+      }
+    },
+    {
+      "expect": {
+        "type": "prompt"
+      },
+      "respond": {
+        "type": "response",
+        "id": "$id",
+        "command": "prompt",
+        "success": true
+      },
+      "emit": [
+        {
+          "type": "agent_start"
+        },
+        {
+          "type": "turn_start"
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "Fixture system preamble.",
+              "tools": "Fixture tool catalog."
+            },
+            "timestamp": 1767225600000,
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Fixture read tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              },
+              {
+                "name": "bash",
+                "description": "Fixture bash tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              }
+            ]
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "Fixture system preamble.",
+              "tools": "Fixture tool catalog."
+            },
+            "timestamp": 1767225600000,
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Fixture read tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              },
+              {
+                "name": "bash",
+                "description": "Fixture bash tool.",
+                "parameters": "{'type': 'object'}",
+                "constrainedSampling": "{'type': 'json_schema'}"
+              }
+            ]
+          }
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Create file FIXTURE_NOTE.txt containing exactly the text 'fixture hello' then run `echo fixture-done` with bash. Keep your final message under 20 words."
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Create file FIXTURE_NOTE.txt containing exactly the text 'fixture hello' then run `echo fixture-done` with bash. Keep your final message under 20 words."
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "assistant",
+            "content": [],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "totalTokens": 0,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "pending",
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_start",
+            "contentIndex": 0
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_end",
+            "contentIndex": 0,
+            "content": ""
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_start",
+            "contentIndex": 1
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_end",
+            "contentIndex": 1,
+            "content": ""
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "toolcall_start",
+            "contentIndex": 2,
+            "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+            "toolName": "write"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "toolcall_delta",
+            "contentIndex": 2,
+            "delta": "{\"content\":\"fixture hello\""
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "toolcall_delta",
+            "contentIndex": 2,
+            "delta": ",\"path\":\"FIXTURE_NOTE.txt\"}"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "toolcall_end",
+            "contentIndex": 2,
+            "toolCall": {
+              "type": "toolCall",
+              "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+              "name": "write",
+              "arguments": {
+                "content": "fixture hello",
+                "path": "FIXTURE_NOTE.txt"
+              }
+            }
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "toolCall",
+                "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+                "name": "write",
+                "arguments": {
+                  "content": "fixture hello",
+                  "path": "FIXTURE_NOTE.txt"
+                }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 17651,
+              "output": 220,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 135,
+              "totalTokens": 17871,
+              "cost": {
+                "input": 0.0017651000000000001,
+                "output": 0.000044000000000000006,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.0018091000000000001
+              }
+            },
+            "stopReason": "toolUse",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0001",
+            "rawStopReason": "completed"
+          }
+        },
+        {
+          "type": "tool_execution_start",
+          "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+          "toolName": "write",
+          "args": {
+            "content": "fixture hello",
+            "path": "FIXTURE_NOTE.txt"
+          }
+        },
+        {
+          "type": "tool_execution_end",
+          "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+          "toolName": "write",
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Successfully wrote to FIXTURE_NOTE.txt"
+              }
+            ]
+          },
+          "isError": false
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "toolResult",
+            "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+            "toolName": "write",
+            "content": [
+              {
+                "type": "text",
+                "text": "Successfully wrote to FIXTURE_NOTE.txt"
+              }
+            ],
+            "isError": false,
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "toolResult",
+            "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+            "toolName": "write",
+            "content": [
+              {
+                "type": "text",
+                "text": "Successfully wrote to FIXTURE_NOTE.txt"
+              }
+            ],
+            "isError": false,
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "turn_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "toolCall",
+                "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+                "name": "write",
+                "arguments": {
+                  "content": "fixture hello",
+                  "path": "FIXTURE_NOTE.txt"
+                }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 17651,
+              "output": 220,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 135,
+              "totalTokens": 17871,
+              "cost": {
+                "input": 0.0017651000000000001,
+                "output": 0.000044000000000000006,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.0018091000000000001
+              }
+            },
+            "stopReason": "toolUse",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0002",
+            "rawStopReason": "completed"
+          },
+          "toolResults": [
+            {
+              "role": "toolResult",
+              "toolCallId": "call_01a0b7bc1d1d73c68e778469e07c20a9|fc_01a0b7bc1d1d73c68e778469e07c20a9",
+              "toolName": "write",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Successfully wrote to FIXTURE_NOTE.txt"
+                }
+              ],
+              "isError": false,
+              "timestamp": 1767225600000
+            }
+          ]
+        },
+        {
+          "type": "turn_start"
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "assistant",
+            "content": [],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "totalTokens": 0,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "pending",
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_start",
+            "contentIndex": 0
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_end",
+            "contentIndex": 0,
+            "content": ""
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "toolcall_start",
+            "contentIndex": 1,
+            "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+            "toolName": "bash"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "toolcall_delta",
+            "contentIndex": 1,
+            "delta": "{\"command\":\"echo fixture-done\"}"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "toolcall_end",
+            "contentIndex": 1,
+            "toolCall": {
+              "type": "toolCall",
+              "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+              "name": "bash",
+              "arguments": {
+                "command": "echo fixture-done"
+              }
+            }
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "toolCall",
+                "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+                "name": "bash",
+                "arguments": {
+                  "command": "echo fixture-done"
+                }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 251,
+              "output": 60,
+              "cacheRead": 17649,
+              "cacheWrite": 0,
+              "reasoning": 6,
+              "totalTokens": 17960,
+              "cost": {
+                "input": 0.000025100000000000004,
+                "output": 0.000012,
+                "cacheRead": 0.000035298,
+                "cacheWrite": 0,
+                "total": 0.00007239800000000001
+              }
+            },
+            "stopReason": "toolUse",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0003",
+            "rawStopReason": "completed"
+          }
+        },
+        {
+          "type": "tool_execution_start",
+          "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+          "toolName": "bash",
+          "args": {
+            "command": "echo fixture-done"
+          }
+        },
+        {
+          "type": "tool_execution_update",
+          "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+          "toolName": "bash",
+          "args": {
+            "command": "echo fixture-done"
+          },
+          "partialResult": {
+            "content": []
+          }
+        },
+        {
+          "type": "tool_execution_update",
+          "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+          "toolName": "bash",
+          "args": {
+            "command": "echo fixture-done"
+          },
+          "partialResult": {
+            "content": [
+              {
+                "type": "text",
+                "text": "fixture-done\n"
+              }
+            ],
+            "details": {}
+          }
+        },
+        {
+          "type": "tool_execution_end",
+          "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+          "toolName": "bash",
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "fixture-done\n"
+              }
+            ]
+          },
+          "isError": false
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "toolResult",
+            "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+            "toolName": "bash",
+            "content": [
+              {
+                "type": "text",
+                "text": "fixture-done\n"
+              }
+            ],
+            "isError": false,
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "toolResult",
+            "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+            "toolName": "bash",
+            "content": [
+              {
+                "type": "text",
+                "text": "fixture-done\n"
+              }
+            ],
+            "isError": false,
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "turn_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "toolCall",
+                "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+                "name": "bash",
+                "arguments": {
+                  "command": "echo fixture-done"
+                }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 251,
+              "output": 60,
+              "cacheRead": 17649,
+              "cacheWrite": 0,
+              "reasoning": 6,
+              "totalTokens": 17960,
+              "cost": {
+                "input": 0.000025100000000000004,
+                "output": 0.000012,
+                "cacheRead": 0.000035298,
+                "cacheWrite": 0,
+                "total": 0.00007239800000000001
+              }
+            },
+            "stopReason": "toolUse",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0004",
+            "rawStopReason": "completed"
+          },
+          "toolResults": [
+            {
+              "role": "toolResult",
+              "toolCallId": "call_01a0b7bc23e5704bb3b8a7a8777e960e|fc_01a0b7bc23e5704bb3b8a7a8777e960e",
+              "toolName": "bash",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "fixture-done\n"
+                }
+              ],
+              "isError": false,
+              "timestamp": 1767225600000
+            }
+          ]
+        },
+        {
+          "type": "turn_start"
+        },
+        {
+          "type": "message_start",
+          "message": {
+            "role": "assistant",
+            "content": [],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "totalTokens": 0,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "pending",
+            "timestamp": 1767225600000
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_start",
+            "contentIndex": 0
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "thinking_end",
+            "contentIndex": 0,
+            "content": ""
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_start",
+            "contentIndex": 1
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": "Created"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": " file and ran echo successfully"
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 1,
+            "delta": "."
+          }
+        },
+        {
+          "type": "message_update",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "assistantMessageEvent": {
+            "type": "text_end",
+            "contentIndex": 1,
+            "content": "Created file and ran echo successfully."
+          }
+        },
+        {
+          "type": "message_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "text",
+                "text": "Created file and ran echo successfully.",
+                "textSignature": "{\"v\":1,\"id\":\"msg_fixture0005\"}"
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 209,
+              "output": 30,
+              "cacheRead": 17777,
+              "cacheWrite": 0,
+              "reasoning": 13,
+              "totalTokens": 18016,
+              "cost": {
+                "input": 0.000020900000000000003,
+                "output": 0.000006,
+                "cacheRead": 0.000035554000000000006,
+                "cacheWrite": 0,
+                "total": 0.00006245400000000001
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0006",
+            "rawStopReason": "completed"
+          }
+        },
+        {
+          "type": "turn_end",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+              },
+              {
+                "type": "text",
+                "text": "Created file and ran echo successfully.",
+                "textSignature": "{\"v\":1,\"id\":\"msg_fixture0007\"}"
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "plexus",
+            "model": "muse-spark-1.3",
+            "usage": {
+              "input": 209,
+              "output": 30,
+              "cacheRead": 17777,
+              "cacheWrite": 0,
+              "reasoning": 13,
+              "totalTokens": 18016,
+              "cost": {
+                "input": 0.000020900000000000003,
+                "output": 0.000006,
+                "cacheRead": 0.000035554000000000006,
+                "cacheWrite": 0,
+                "total": 0.00006245400000000001
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1767225600000,
+            "responseId": "resp_fixture0008",
+            "rawStopReason": "completed"
+          },
+          "toolResults": []
+        },
+        {
+          "type": "agent_end",
+          "messages": [
+            {
+              "role": "system",
+              "content": "",
+              "sections": {
+                "preamble": "Fixture system preamble.",
+                "tools": "Fixture tool catalog."
+              },
+              "timestamp": 1767225600000,
+              "toolsAdded": [
+                {
+                  "name": "read",
+                  "description": "Fixture read tool.",
+                  "parameters": "{'type': 'object'}",
+                  "constrainedSampling": "{'type': 'json_schema'}"
+                },
+                {
+                  "name": "bash",
+                  "description": "Fixture bash tool.",
+                  "parameters": "{'type': 'object'}",
+                  "constrainedSampling": "{'type': 'json_schema'}"
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Create file FIXTURE_NOTE.txt containing exactly the text 'fixture hello' then run `echo fixture-done` with bash. Keep your final message under 20 words."
+                }
+              ],
+              "timestamp": 1767225600000
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": "",
+                  "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+                },
+                {
+                  "type": "thinking",
+                  "thinking": "",
+                  "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+                },
+                {
+                  "type": "toolCall",
+                  "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+                  "name": "write",
+                  "arguments": {
+                    "content": "fixture hello",
+                    "path": "FIXTURE_NOTE.txt"
+                  }
+                }
+              ],
+              "api": "openai-responses",
+              "provider": "plexus",
+              "model": "muse-spark-1.3",
+              "usage": {
+                "input": 17651,
+                "output": 220,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "reasoning": 135,
+                "totalTokens": 17871,
+                "cost": {
+                  "input": 0.0017651000000000001,
+                  "output": 0.000044000000000000006,
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "total": 0.0018091000000000001
+                }
+              },
+              "stopReason": "toolUse",
+              "timestamp": 1767225600000,
+              "responseId": "resp_fixture0009",
+              "rawStopReason": "completed"
+            },
+            {
+              "role": "toolResult",
+              "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+              "toolName": "write",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Successfully wrote to FIXTURE_NOTE.txt"
+                }
+              ],
+              "isError": false,
+              "timestamp": 1767225600000
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": "",
+                  "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+                },
+                {
+                  "type": "toolCall",
+                  "id": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+                  "name": "bash",
+                  "arguments": {
+                    "command": "echo fixture-done"
+                  }
+                }
+              ],
+              "api": "openai-responses",
+              "provider": "plexus",
+              "model": "muse-spark-1.3",
+              "usage": {
+                "input": 251,
+                "output": 60,
+                "cacheRead": 17649,
+                "cacheWrite": 0,
+                "reasoning": 6,
+                "totalTokens": 17960,
+                "cost": {
+                  "input": 0.000025100000000000004,
+                  "output": 0.000012,
+                  "cacheRead": 0.000035298,
+                  "cacheWrite": 0,
+                  "total": 0.00007239800000000001
+                }
+              },
+              "stopReason": "toolUse",
+              "timestamp": 1767225600000,
+              "responseId": "resp_fixture0010",
+              "rawStopReason": "completed"
+            },
+            {
+              "role": "toolResult",
+              "toolCallId": "call_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2|fc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+              "toolName": "bash",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "fixture-done\n"
+                }
+              ],
+              "isError": false,
+              "timestamp": 1767225600000
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": "",
+                  "thinkingSignature": "{\"encrypted_content\":\"FIXTURE\"}"
+                },
+                {
+                  "type": "text",
+                  "text": "Created file and ran echo successfully.",
+                  "textSignature": "{\"v\":1,\"id\":\"msg_fixture0011\"}"
+                }
+              ],
+              "api": "openai-responses",
+              "provider": "plexus",
+              "model": "muse-spark-1.3",
+              "usage": {
+                "input": 209,
+                "output": 30,
+                "cacheRead": 17777,
+                "cacheWrite": 0,
+                "reasoning": 13,
+                "totalTokens": 18016,
+                "cost": {
+                  "input": 0.000020900000000000003,
+                  "output": 0.000006,
+                  "cacheRead": 0.000035554000000000006,
+                  "cacheWrite": 0,
+                  "total": 0.00006245400000000001
+                }
+              },
+              "stopReason": "stop",
+              "timestamp": 1767225600000,
+              "responseId": "resp_fixture0012",
+              "rawStopReason": "completed"
+            }
+          ],
+          "willRetry": false
+        },
+        {
+          "type": "agent_settled"
+        }
+      ]
+    }
+  ]
+}

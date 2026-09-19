@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"fixture-branch","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/fixture"}
+{"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Fixture branch root prompt."}]}}
+{"type":"message","id":"old","parentId":"u1","timestamp":"2026-01-01T00:00:02.000Z","message":{"role":"assistant","provider":"plexus","model":"muse-spark-1.3","usage":{"input":100,"output":10,"cacheRead":0,"cacheWrite":0,"totalTokens":110,"cost":{"total":0.001}},"content":[{"type":"text","text":"Fixture older branch reply."}],"stopReason":"stop"}}
+{"type":"message","id":"new","parentId":"u1","timestamp":"2026-01-01T00:00:03.000Z","message":{"role":"assistant","provider":"plexus","model":"muse-spark-1.3","usage":{"input":100,"output":12,"cacheRead":0,"cacheWrite":0,"totalTokens":112,"cost":{"total":0.0012}},"content":[{"type":"text","text":"Fixture active branch reply."}],"stopReason":"stop"}}
+{"type":"session_info","id":"meta","parentId":"u1","timestamp":"2026-01-01T00:00:04.000Z","name":"File-last metadata"}

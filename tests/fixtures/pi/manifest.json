@@ -1,0 +1,285 @@
+{
+  "version": 1,
+  "piCliVersion": "0.85.1-patch",
+  "sessionFormatVersion": 3,
+  "fixtures": [
+    {
+      "name": "history/aborted-run.jsonl",
+      "kind": "history",
+      "purpose": "Aborted run: mid-stream abort tombstone retained with provider terminal error.",
+      "expects": {
+        "stopReason": "aborted",
+        "agentErrorCount": 1
+      },
+      "bytes": 1851,
+      "sha256": "61164bb5ef4ba29b48b8fbdf14b6f7996c6ed6ec3ab545ed12feeca3b7e8fa03"
+    },
+    {
+      "name": "history/basic-settled.jsonl",
+      "kind": "history",
+      "purpose": "Basic settled turn: session header, model/thinking changes, user/assistant messages, usage.",
+      "expects": {
+        "roles": [
+          "system",
+          "user",
+          "assistant"
+        ],
+        "model": "plexus/muse-spark-1.3",
+        "contextTokens": 17645
+      },
+      "bytes": 1777,
+      "sha256": "4bfd1bb800316dc83dc9a8b16aca7453684b1c3299dadee64de21d97dcbe8222"
+    },
+    {
+      "name": "history/branch-selection.jsonl",
+      "kind": "history",
+      "purpose": "SYNTHETIC: two assistant branches off one user message; explicit leaf vs file-order fallback.",
+      "expects": {
+        "synthetic": true,
+        "branches": [
+          "old",
+          "new"
+        ],
+        "fileLastId": "meta"
+      },
+      "bytes": 1105,
+      "sha256": "7c834654d59ee514ac9070f6f5523d72ac3762a8216b03245ea7668f659ca592"
+    },
+    {
+      "name": "history/compaction.jsonl",
+      "kind": "history",
+      "purpose": "Compaction: real pi-vcc summary entry, firstKept linkage, unknown post-compaction occupancy.",
+      "expects": {
+        "summaryType": "compaction",
+        "contextTokens": null,
+        "tokensBefore": 132741
+      },
+      "bytes": 34012,
+      "sha256": "d41219f331b90b55ee17b63ecb83ae96f5e23f30c5604b9e52a2d10835672e2d"
+    },
+    {
+      "name": "history/long-output.jsonl",
+      "kind": "history",
+      "purpose": "Long output: large bash result for byte limits, paging, and lazy disclosure.",
+      "expects": {
+        "tools": [
+          "bash"
+        ],
+        "largeResult": true
+      },
+      "bytes": 4408,
+      "sha256": "3af8d255d88bcee19e5fc1db2dcc1ef6718b35205dc3070d0522dc5e97158a45"
+    },
+    {
+      "name": "history/partial-tail.jsonl",
+      "kind": "history",
+      "purpose": "SYNTHETIC: torn final write flags partialTail without malformed-record noise.",
+      "expects": {
+        "synthetic": true,
+        "partialTail": true,
+        "malformedRecordCount": 0
+      },
+      "bytes": 323,
+      "sha256": "e3af0ead1d267e1b2e3512fe4f3a4b9a32d1ebffd602989201428a5cf6a449cb"
+    },
+    {
+      "name": "history/sequential-tools.jsonl",
+      "kind": "history",
+      "purpose": "Sequential tools: write then bash tool-call/result pairing and completed grouping.",
+      "expects": {
+        "tools": [
+          "write",
+          "bash"
+        ],
+        "toolStatus": "complete"
+      },
+      "bytes": 4316,
+      "sha256": "56b0fdd19a2f775f854c4590aa6698fc495f79e5856a1eab9036e3a760fb772b"
+    },
+    {
+      "name": "history/significant-edit.jsonl",
+      "kind": "history",
+      "purpose": "Significant write/edit: read plus edit tool flow with prominent activity rendering.",
+      "expects": {
+        "tools": [
+          "read",
+          "edit"
+        ],
+        "toolStatus": "complete"
+      },
+      "bytes": 4532,
+      "sha256": "dbe041ab56fe4464ce758741ba653df944c713fbeee830a6a653b04463192ab9"
+    },
+    {
+      "name": "history/steer-followup.jsonl",
+      "kind": "history",
+      "purpose": "Steer and follow-up as durable user entries on one chain (counting loop, STEERED token, FOLLOWED reply).",
+      "expects": {
+        "userEntries": 3,
+        "finalText": "FOLLOWED"
+      },
+      "bytes": 4563,
+      "sha256": "b5fe1e01fbd50f706be8388c127165ef7be367cdbad61e3ee740ab3f006f12c8"
+    },
+    {
+      "name": "history/thinking-levels.jsonl",
+      "kind": "history",
+      "purpose": "Thinking levels: low-then-high thinking_level_change entries around a settled turn.",
+      "expects": {
+        "thinkingLevels": [
+          "low",
+          "high"
+        ]
+      },
+      "bytes": 2030,
+      "sha256": "49fee65daea3e9238ae0780cf343618272df9a375f30566c40077d6e70a79140"
+    },
+    {
+      "name": "history/tool-error.jsonl",
+      "kind": "history",
+      "purpose": "Tool error: ENOENT read and failing bash stay visible as error tool rows.",
+      "expects": {
+        "tools": [
+          "read",
+          "bash"
+        ],
+        "toolStatus": "error"
+      },
+      "bytes": 3696,
+      "sha256": "b4fdedb064d30ba1e87f0d0b72d8669b30251201d4dfbd343c6036699d4b1c11"
+    },
+    {
+      "name": "history/unknown-entry.jsonl",
+      "kind": "history",
+      "purpose": "SYNTHETIC: future entry type projects as unknown without exposing its payload.",
+      "expects": {
+        "synthetic": true,
+        "entryType": "future_widget",
+        "unknownRecordCount": 1
+      },
+      "bytes": 701,
+      "sha256": "4fc3bf5141801e1d00f7d8dded18ab23c2c01cd76417246351fde929bb4bd461"
+    },
+    {
+      "name": "rpc/abort-settlement.json",
+      "kind": "rpc",
+      "purpose": "Abort mid-text-stream: stopping state held until abort confirmation plus non-streaming settle.",
+      "expects": {
+        "splitStep": "abort",
+        "terminal": "agent_settled",
+        "sessionFixture": "history/aborted-run.jsonl"
+      },
+      "bytes": 26238,
+      "sha256": "5c6a68912757f6a7a6a6da604c7ebbef17cca963bfeee77e8fdd8ab2476a3700"
+    },
+    {
+      "name": "rpc/compact-refused.json",
+      "kind": "rpc",
+      "purpose": "Real Pi refusal: compact returns success:false with imbalance error; start/end events bracket it.",
+      "expects": {
+        "success": false,
+        "error": "Nothing to compact (session too small)"
+      },
+      "bytes": 1971,
+      "sha256": "02fb64863412025e37c417b361a7c5a2460d9fcdac0f3858e81854be20642f0a"
+    },
+    {
+      "name": "rpc/crash-after-response.json",
+      "kind": "rpc",
+      "purpose": "SYNTHETIC: prompt admitted and agent started, then stderr plus exit 1; pending fails, crash state.",
+      "expects": {
+        "synthetic": true,
+        "exitCode": 1
+      },
+      "bytes": 1754,
+      "sha256": "f4d3f25caad30dcfa0cf5762ab697eb437d10afe18895f43512749bb353a525f"
+    },
+    {
+      "name": "rpc/extension-custom-answer.json",
+      "kind": "rpc",
+      "purpose": "Select answered with the free-text row; input follow-up carries the typed answer (Gamma).",
+      "expects": {
+        "dialogMethods": [
+          "select",
+          "input"
+        ],
+        "typedAnswer": "Gamma"
+      },
+      "bytes": 35971,
+      "sha256": "825430ccc74bdaccf30edc5458d7f8c077c0a591ed4aea918060cf02a2c486fb"
+    },
+    {
+      "name": "rpc/extension-select.json",
+      "kind": "rpc",
+      "purpose": "Extension select dialog answered with an offered row; tool result carries details.answers.",
+      "expects": {
+        "dialogMethod": "select",
+        "escapeRow": "3. Type something."
+      },
+      "bytes": 35810,
+      "sha256": "1484991506baa345ec89d5f95f37ee8e82cefa5f4fcd160f8e0b7108e1213127"
+    },
+    {
+      "name": "rpc/prompt-steer-follow-up.json",
+      "kind": "rpc",
+      "purpose": "Pi queue semantics: steer admission, queue_update steering state, queued follow-up turn.",
+      "expects": {
+        "queueEvent": "queue_update",
+        "bashPartialUpdatesTrimmed": true,
+        "sessionFixture": "history/steer-followup.jsonl"
+      },
+      "bytes": 45350,
+      "sha256": "50cbdc42d0ce62a2ebca2e3f0fde70f8f64861f3a0f28120a63c3a01915b09a1"
+    },
+    {
+      "name": "rpc/prompt-stream.json",
+      "kind": "rpc",
+      "purpose": "Prompt admission distinct from settlement; thinking/text streaming deltas finalize one message.",
+      "expects": {
+        "lifecycle": [
+          "agent_start",
+          "turn_start",
+          "message_update",
+          "turn_end",
+          "agent_end",
+          "agent_settled"
+        ],
+        "sessionFixture": "history/basic-settled.jsonl"
+      },
+      "bytes": 12438,
+      "sha256": "24d83e952bc9e8d5690f07c90b70a298884554b243823791bdacd89e00d8182b"
+    },
+    {
+      "name": "rpc/sequential-tools.json",
+      "kind": "rpc",
+      "purpose": "Tool streaming (toolcall deltas) plus tool_execution start/end pairing across two tools.",
+      "expects": {
+        "tools": [
+          "write",
+          "bash"
+        ],
+        "events": [
+          "tool_execution_start",
+          "tool_execution_end"
+        ],
+        "sessionFixture": "history/sequential-tools.jsonl"
+      },
+      "bytes": 38498,
+      "sha256": "9312b60d2e09ae272344da48e9256a2a9cff3abf353fcdcc9c564ccf0bb3649f"
+    },
+    {
+      "name": "rpc/thinking-levels.json",
+      "kind": "rpc",
+      "purpose": "set_thinking_level low/high around a settled turn; thinking_level_changed events observed.",
+      "expects": {
+        "levels": [
+          "low",
+          "high"
+        ],
+        "sessionFixture": "history/thinking-levels.jsonl"
+      },
+      "bytes": 13145,
+      "sha256": "b332f338068166843c9bc9415f7c4d3a14a281fb1efcfb524418e28d22187cbf"
+    }
+  ]
+}
