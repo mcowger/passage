@@ -1,9 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type {
   AgentCapabilities,
   AgentHistory,
   AgentSummary,
-  SlashCommand,
   UserFileRef,
   UserImageRef,
 } from "../../shared/domain/agents.ts";
@@ -20,12 +19,6 @@ import {
   currentViewportIsMobileComposer,
   type ComposerEditorHandle,
 } from "./ComposerEditor.tsx";
-import {
-  applyFileInsert,
-  applySlashInsert,
-  filterSlashCommands,
-  useComposerTrigger,
-} from "./useComposerTrigger.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,6 +44,7 @@ import { shouldSuppressComposerClickAfterTouch } from "./agentPanelState.ts";
 import { useComposerDraft } from "./useComposerDraft.ts";
 import { useComposerAttachments } from "./useComposerAttachments.ts";
 import { useFollowUpQueue } from "./useFollowUpQueue.ts";
+import { useComposerSuggestions } from "./useComposerSuggestions.ts";
 import {
   attachmentLabel,
   toOptimisticFiles,
@@ -172,31 +166,6 @@ function AgentComposerInner({
   const [caret, setCaret] = useState<number | null>(null);
   const [compactConfirmOpen, setCompactConfirmOpen] = useState(false);
   const [isMobileComposer, setIsMobileComposer] = useState(() => currentViewportIsMobileComposer());
-  const autocomplete = useComposerTrigger({ draft, caret, workspaceId, api });
-  const slashCommands = useMemo(
-    () => capabilities?.slashCommands ?? [],
-    [capabilities?.slashCommands],
-  );
-  const filteredCommands = useMemo(
-    () =>
-      autocomplete.trigger?.kind === "/"
-        ? filterSlashCommands(slashCommands, autocomplete.trigger.query)
-        : [],
-    [autocomplete.trigger, slashCommands],
-  );
-  const suggestionOpen = autocomplete.trigger !== null;
-  const suggestionCount =
-    autocomplete.trigger?.kind === "@" ? autocomplete.files.length : filteredCommands.length;
-  const activeValue = (() => {
-    if (!autocomplete.trigger) return "";
-    if (autocomplete.trigger.kind === "@") {
-      const entry = autocomplete.files[autocomplete.activeIndex];
-      return entry ? `file:${entry.path}` : "";
-    }
-    const command = filteredCommands[autocomplete.activeIndex];
-    return command ? `cmd:${command.name}` : "";
-  })();
-
   const placeCaret = (position: number) => {
     setCaret(position);
     requestAnimationFrame(() => {
@@ -207,42 +176,30 @@ function AgentComposerInner({
     });
   };
 
-  const acceptFile = (path: string) => {
-    const trigger = autocomplete.trigger;
-    if (!trigger || trigger.kind !== "@") return;
-    const next = applyFileInsert(draft, trigger, path);
-    updateDraft(next.value);
-    placeCaret(next.caret);
-  };
-
-  const acceptCommand = (command: SlashCommand) => {
-    const trigger = autocomplete.trigger;
-    if (!trigger || trigger.kind !== "/") return;
-    if (command.kind === "action") {
-      // Action kinds never send raw Pi JSON: compact routes through the
-      // typed compact endpoint after explicit confirmation.
-      if (command.name === "compact") setCompactConfirmOpen(true);
-      return;
-    }
-    const next = applySlashInsert(draft, trigger, `/${command.name}`);
-    updateDraft(next.value);
-    placeCaret(next.caret);
-  };
-
-  const acceptActiveSuggestion = (): boolean => {
-    const trigger = autocomplete.trigger;
-    if (!trigger) return false;
-    if (trigger.kind === "@") {
-      const entry = autocomplete.files[autocomplete.activeIndex];
-      if (!entry) return false;
-      acceptFile(entry.path);
-      return true;
-    }
-    const command = filteredCommands[autocomplete.activeIndex];
-    if (!command) return false;
-    acceptCommand(command);
-    return true;
-  };
+  const {
+    autocomplete,
+    filteredCommands,
+    suggestionOpen,
+    activeValue,
+    acceptFile,
+    acceptCommand,
+    handleActiveValueChange,
+    handleEditorKeyDown,
+  } = useComposerSuggestions({
+    draft,
+    updateDraft,
+    caret,
+    placeCaret,
+    workspaceId,
+    api,
+    capabilities,
+    onCompactRequest: () => setCompactConfirmOpen(true),
+    running,
+    stopping,
+    loading,
+    busy,
+    onSubmit: (kind) => send(kind),
+  });
 
   useEffect(() => {
     setCtxDetailsOpen(false);
@@ -451,15 +408,7 @@ function AgentComposerInner({
           skillsSupported={capabilities?.skillsSupported ?? false}
           activeIndex={autocomplete.activeIndex}
           activeValue={activeValue}
-          onActiveValueChange={(value) => {
-            if (autocomplete.trigger?.kind === "@") {
-              const index = autocomplete.files.findIndex((entry) => `file:${entry.path}` === value);
-              if (index >= 0) autocomplete.setActiveIndex(index);
-            } else {
-              const index = filteredCommands.findIndex((command) => `cmd:${command.name}` === value);
-              if (index >= 0) autocomplete.setActiveIndex(index);
-            }
-          }}
+          onActiveValueChange={handleActiveValueChange}
           onHoverIndex={autocomplete.setActiveIndex}
           onSelectFile={acceptFile}
           onSelectCommand={acceptCommand}
@@ -476,37 +425,7 @@ function AgentComposerInner({
           ariaExpanded={suggestionOpen}
           ariaControls={suggestionOpen ? COMPOSER_SUGGESTION_LIST_ID : undefined}
           ariaActivedescendant={suggestionOpen && activeValue ? `composer-option-${activeValue}` : undefined}
-          onKeyDown={(event) => {
-            if (suggestionOpen && autocomplete.trigger) {
-              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                event.preventDefault();
-                autocomplete.moveSelection(event.key === "ArrowDown" ? 1 : -1, suggestionCount);
-                return;
-              }
-              if (event.key === "Escape") {
-                // Dismiss only: the draft keeps the raw trigger token and the
-                // caret stays where it was. Retyping re-opens.
-                event.preventDefault();
-                event.stopPropagation();
-                autocomplete.dismiss();
-                return;
-              }
-              if ((event.key === "Tab" || event.key === "Enter") && suggestionCount > 0 && !event.shiftKey) {
-                event.preventDefault();
-                acceptActiveSuggestion();
-                return;
-              }
-            }
-            if (event.key === "Enter" && !event.shiftKey) {
-              // Mobile plain-Enter inserts a newline (handled in
-              // ComposerEditor); only Cmd/Ctrl+Enter submits there.
-              if (currentViewportIsMobileComposer() && !event.metaKey && !event.ctrlKey) return;
-              event.preventDefault();
-              if (stopping || loading) return;
-              if (running) send("steer");
-              else if (!busy && !loading) send("prompt");
-            }
-          }}
+          onKeyDown={handleEditorKeyDown}
           placeholder={
             loading
               ? "Loading agent status…"
