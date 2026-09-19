@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { createQueuedFollowUp, extractLatestThinkingSummary, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, isComposerSendItEnabled, isComposerSendItMergeable, resolveComposerGitOptions, resolvePinned, REPIN_SLACK_PX, UNPIN_SLACK_PX, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, shouldSuppressComposerClickAfterTouch, COMPOSER_TOUCH_SEND_SUPPRESS_MS, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
+import { createQueuedFollowUp, extractLatestThinkingSummary, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, isComposerSendItEnabled, isComposerSendItMergeable, isWorkspaceDeletable, resolveComposerGitOptions, resolvePinned, REPIN_SLACK_PX, UNPIN_SLACK_PX, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, shouldSuppressComposerClickAfterTouch, COMPOSER_TOUCH_SEND_SUPPRESS_MS, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 
@@ -259,6 +259,37 @@ describe("isComposerSendItMergeable", () => {
     expect(isComposerSendItMergeable({ ...base, branchRef: null, detached: true })).toBe(false);
     expect(isComposerSendItMergeable(null)).toBe(false);
     expect(isComposerSendItMergeable(undefined)).toBe(false);
+  });
+});
+
+describe("isWorkspaceDeletable", () => {
+  const base: import("../../shared/domain/git.ts").GitStatus = {
+    checkoutRoot: "/wt/feature",
+    mainCheckoutRoot: "/repo",
+    repositoryRoot: "/repo",
+    branchRef: "feature",
+    detached: false,
+    ahead: 0,
+    behind: 0,
+    aheadOfMain: 0,
+    behindMain: 0,
+    hasUpstream: false,
+    dirty: false,
+    conflicted: false,
+    truncated: false,
+    files: [],
+  };
+
+  test("deletable for separate worktrees, never for the main checkout", () => {
+    expect(isWorkspaceDeletable({ ...base })).toBe(true);
+    // Detached worktrees and worktrees on main are still disposable.
+    expect(isWorkspaceDeletable({ ...base, branchRef: null, detached: true })).toBe(true);
+    expect(isWorkspaceDeletable({ ...base, branchRef: "main" })).toBe(true);
+    // The main checkout itself is never offered for deletion.
+    expect(isWorkspaceDeletable({ ...base, checkoutRoot: "/repo", mainCheckoutRoot: "/repo" })).toBe(false);
+    expect(isWorkspaceDeletable({ ...base, mainCheckoutRoot: null })).toBe(false);
+    expect(isWorkspaceDeletable(null)).toBe(false);
+    expect(isWorkspaceDeletable(undefined)).toBe(false);
   });
 });
 

@@ -348,6 +348,20 @@ export function isComposerSendItMergeable(status: GitStatus | null | undefined):
   return !isMainWorktree;
 }
 
+/**
+ * True when the workspace itself can be offered for deletion (a separate
+ * worktree checkout, not the main checkout). Mirrors the daemon guard that
+ * refuses to remove the main checkout: only prompt when the checkout root
+ * differs from a known main checkout root.
+ */
+export function isWorkspaceDeletable(status: GitStatus | null | undefined): boolean {
+  if (!status?.mainCheckoutRoot) return false;
+  return status.checkoutRoot !== status.mainCheckoutRoot;
+}
+
+/** Pending "delete this workspace?" prompt after a merge or a Send It. */
+export type DeleteWorkspacePrompt = { branch: string; merged: boolean };
+
 export type ComposerGitOption = "commit" | "merge" | "rebase" | "push";
 
 /**
@@ -505,7 +519,7 @@ function ComposerMergeButton({
   const [busyOp, setBusyOp] = useState<ComposerGitOption | "send-it" | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [mergedBranch, setMergedBranch] = useState<string | null>(null);
+  const [deletePrompt, setDeletePrompt] = useState<DeleteWorkspacePrompt | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
@@ -522,7 +536,7 @@ function ComposerMergeButton({
     setStatus(null);
     setConfirmOpen(false);
     setMenuOpen(false);
-    setMergedBranch(null);
+    setDeletePrompt(null);
     setDeleteError("");
     void refresh();
   }, [refresh]);
@@ -585,7 +599,7 @@ function ComposerMergeButton({
       (next) => {
         setStatus(next);
         setDeleteError("");
-        setMergedBranch(next.branchRef ?? branchRef);
+        setDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true });
         toast.success(`Merged ${next.branchRef ?? branchRef} into main`);
       },
       (err: unknown) => {
@@ -663,12 +677,20 @@ function ComposerMergeButton({
         setStatus(commit.status);
         if (!mergeable) {
           toast.success("Committed changes", { description: commit.message });
+          // A commit-only Send It (main branch or detached HEAD) still
+          // leaves a disposable worktree behind, so offer the same delete
+          // workspace prompt -- except on the main checkout, which the
+          // daemon refuses to remove.
+          if (isWorkspaceDeletable(commit.status)) {
+            setDeleteError("");
+            setDeletePrompt({ branch: commit.status.branchRef ?? branchRef, merged: false });
+          }
           return;
         }
         const next = await api.gitMergeIntoMain(workspaceId);
         setStatus(next);
         setDeleteError("");
-        setMergedBranch(next.branchRef ?? branchRef);
+        setDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true });
         toast.success(`Sent ${next.branchRef ?? branchRef} to main`, { description: commit.message });
       } catch (err: unknown) {
         const message = friendlyApiError(err, "Could not send changes. Resolve any conflicts and try again.");
@@ -685,13 +707,13 @@ function ComposerMergeButton({
   };
 
   const handleDeleteWorkspace = () => {
-    if (mergedBranch === null || deleting) return;
+    if (deletePrompt === null || deleting) return;
     setDeleting(true);
     setDeleteError("");
     void api.removeWorktree(workspaceId).then(
       async () => {
         setDeleting(false);
-        setMergedBranch(null);
+        setDeletePrompt(null);
         toast.success("Workspace deleted");
         await onWorkspaceDeleted?.();
       },
@@ -707,7 +729,7 @@ function ComposerMergeButton({
   // clean), so the component stays mounted once Git status loads even when
   // no standalone commit/merge/rebase/push option applies. Only non-Git
   // workspaces (no status) render nothing.
-  if (status === null && mergedBranch === null) return null;
+  if (status === null && deletePrompt === null) return null;
   const sendItEnabled = isComposerSendItEnabled(status);
   const sendItBusy = busyOp === "send-it";
   const dirtyCount = status?.files.length ?? 0;
@@ -718,7 +740,7 @@ function ComposerMergeButton({
       : isComposerSendItMergeable(status)
         ? `Auto-commit ${dirtyCount} changed file${dirtyCount === 1 ? "" : "s"}, rebase onto main, and merge into main`
         : `Auto-commit ${dirtyCount} changed file${dirtyCount === 1 ? "" : "s"} (stage all + generate message)`;
-  const branchRef = status?.branchRef ?? mergedBranch ?? "branch";
+  const branchRef = status?.branchRef ?? deletePrompt?.branch ?? "branch";
   const ahead = status?.aheadOfMain ?? 0;
   const behindMain = status?.behindMain ?? 0;
   const aheadUpstream = status?.ahead ?? 0;
@@ -857,13 +879,22 @@ function ComposerMergeButton({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <AlertDialog open={mergedBranch !== null} onOpenChange={(open) => { if (!open && !deleting) setMergedBranch(null); }}>
+      <AlertDialog open={deletePrompt !== null} onOpenChange={(open) => { if (!open && !deleting) setDeletePrompt(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Merged into main</AlertDialogTitle>
+            <AlertDialogTitle>{deletePrompt?.merged === false ? "Changes sent" : "Merged into main"}</AlertDialogTitle>
             <AlertDialogDescription>
-              <code className="font-mono">{mergedBranch}</code> was merged into main. Delete this workspace?
-              The branch is kept; the worktree directory is removed.
+              {deletePrompt?.merged === false ? (
+                <>
+                  <code className="font-mono">{deletePrompt?.branch}</code> was committed. Delete this workspace?
+                  The branch is kept; the worktree directory is removed.
+                </>
+              ) : (
+                <>
+                  <code className="font-mono">{deletePrompt?.branch}</code> was merged into main. Delete this workspace?
+                  The branch is kept; the worktree directory is removed.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>}
