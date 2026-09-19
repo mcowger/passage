@@ -2,12 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderCommitPrompt } from "../../shared/domain/settings.ts";
-import { getSharedLocalQwen, isLocalQwenModel } from "../llm/local-qwen.ts";
 import type { GitDiff } from "../../shared/domain/git.ts";
 import { PiRpcManager, type PiEvent, type PiProcessHandle, type PiRpcOptions } from "../agents/rpc/index.ts";
 
-/** Max diff characters forwarded to the commit-message model. Sized to
- *  fit the local model's context window (~100K chars ≈ 25-30K tokens). */
+/** Max diff characters forwarded to the commit-message model. */
 export const MAX_COMMIT_DIFF_CHARS = 100000;
 /** Max changed-file list characters forwarded to the model. */
 export const MAX_COMMIT_FILES_CHARS = 4000;
@@ -131,22 +129,6 @@ export class CommitGenerator {
     promptTemplate = "",
   ): Promise<string | null> {
     if (files.length === 0) return null;
-    // Local path: same signature/return type, no Pi spawn. Thinking level
-    // is intentionally ignored (Qwen Local is hardcoded to no thinking).
-    if (isLocalQwenModel(model)) {
-      try {
-        const local = getSharedLocalQwen();
-        if (!local) return null;
-        const prompt = buildCommitPrompt(
-          formatChangedFiles(files),
-          truncateCommitDiff(diff),
-          promptTemplate,
-        );
-        return sanitizeCommitMessage(await local.generate(prompt));
-      } catch {
-        return null;
-      }
-    }
     let sessionDir: string | undefined;
     let agentId: string | undefined;
     try {

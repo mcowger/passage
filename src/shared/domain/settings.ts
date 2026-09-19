@@ -55,18 +55,6 @@ export const DEFAULT_TIMELINE_EXPANSION: TimelineExpansionSettings = {
   otherTools: "latest",
 };
 
-/** Stored `suggestModel` value that routes title/branch/commit suggestions
- *  to the in-process Qwen model instead of `pi --model`. Qwen Local is
- *  hardcoded to no thinking: the thinking-level selector is disabled
- *  whenever this value is selected. */
-export const LOCAL_QWEN_MODEL_VALUE = "local/qwen2.5-0.5b-instruct";
-/** Label shown in the suggestion-model dropdown for the local path. */
-export const LOCAL_QWEN_LABEL = "Qwen (Local)";
-/** True when the configured suggestion model selects the local Qwen path. */
-export function isLocalQwenModelValue(model?: string | null): boolean {
-  return (model ?? "").trim() === LOCAL_QWEN_MODEL_VALUE;
-}
-
 /** Default worktree metadata prompt. `{{purpose}}` is replaced with the
  *  user's purpose description before sending to the suggestion model. */
 export const DEFAULT_WORKTREE_PROMPT = [

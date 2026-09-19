@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { z } from "zod";
 import { MAX_DOMAIN_LABEL_LENGTH, MAX_DOMAIN_PATH_LENGTH } from "../../shared/domain/workspaces.ts";
 import { renderWorktreePrompt } from "../../shared/domain/settings.ts";
-import { getSharedLocalQwen, isLocalQwenModel } from "../llm/local-qwen.ts";
 import { PiRpcManager, type PiEvent, type PiProcessHandle, type PiRpcOptions } from "../agents/rpc/index.ts";
 
 export const worktreeSuggestionSchema = z.object({
@@ -120,22 +119,6 @@ export class MetadataGenerator {
   async suggest(purpose: string, cwd?: string, model?: string, thinkingLevel?: string, promptTemplate = ""): Promise<WorktreeSuggestion> {
     const fallback = deterministicSlugSuggestion(purpose);
     if (!purpose.trim()) return fallback;
-
-    // Local path: same signature/return type, no Pi spawn. Thinking level
-    // is intentionally ignored (Qwen Local is hardcoded to no thinking).
-    if (isLocalQwenModel(model)) {
-      try {
-        const local = getSharedLocalQwen();
-        if (!local) return fallback;
-        const prompt = renderWorktreePrompt(promptTemplate, purpose);
-        const result = await local.generate(prompt);
-        const jsonMatch = result.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) return fallback;
-        return sanitizeSuggestion(JSON.parse(jsonMatch[0]), fallback);
-      } catch {
-        return fallback;
-      }
-    }
 
     let sessionDir: string | undefined;
     let agentId: string | undefined;

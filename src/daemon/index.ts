@@ -31,7 +31,6 @@ import { WebPreviewManager } from "./previews/manager.ts";
 import { isAllowedPreviewRequest } from "./previews/relay.ts";
 import { createPreviewRoutes } from "./http/previews.ts";
 import { configureLogging, errorFields, logger } from "./logging.ts";
-import { disposeSharedLocalQwen, initSharedLocalQwen } from "./llm/local-qwen.ts";
 import {
   MAX_PREVIEW_MESSAGE_BYTES,
   MAX_PREVIEW_UPSTREAM_BYTES,
@@ -124,11 +123,6 @@ if (pidPath) {
 }
 
 const metadata = new MetadataStore(metadataPath);
-// Local suggestion model: download on cold start only (never re-download
-// when present), load into memory, and run one throwaway warm-up so the
-// first real title/branch request isn't slow. Never throws; failures only
-// disable the local path (generators fall back to Pi/deterministic).
-await initSharedLocalQwen(metadataPath);
 const repositories = new MetadataRepositories(metadata.db);
 const workspaceService = new WorkspaceService(repositories);
 const gitService = new GitService();
@@ -847,8 +841,6 @@ async function teardown(options: { interrupted: boolean }): Promise<void> {
   } catch (error) {
     log.warn("Agent shutdown failed", { event: "daemon.shutdown_agents_failed", ...errorFields(error) });
   }
-
-  await disposeSharedLocalQwen();
 
   const cleanupResults = await Promise.allSettled([
     previewManager.shutdown(),
