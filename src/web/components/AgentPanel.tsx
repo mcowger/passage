@@ -58,6 +58,7 @@ import {
   Wrench,
   PencilSparkles,
   GraduationCap,
+  GitCommitHorizontal,
   GitMerge,
   RotateCwFadingClock,
   X,
@@ -294,20 +295,25 @@ export function isComposerMergeRelevant(status: GitStatus | null | undefined): b
   return !isMainWorktree && status.aheadOfMain > 0;
 }
 
-export type ComposerGitOption = "merge" | "rebase" | "push";
+export type ComposerGitOption = "commit" | "merge" | "rebase" | "push";
 
 /**
  * Smart Git options for the composer button:
+ * - Commit: the workspace is dirty (uncommitted changes present).
  * - Merge: the branch is ahead of main.
  * - Rebase: main has moved since the branch was cut (branch is behind main).
  * - Push: a remote branch exists and is behind the local branch.
- * Main worktrees, detached HEADs, and branches without a branchRef offer nothing.
+ * Commit is offered on any branch (including main) whenever the tree is
+ * dirty; merge/rebase/push stay gated on non-main branches with a branchRef.
  */
 export function resolveComposerGitOptions(status: GitStatus | null | undefined): ComposerGitOption[] {
-  if (!status || !status.branchRef) return [];
-  const isMainWorktree = status.checkoutRoot === status.mainCheckoutRoot || status.branchRef === "main";
-  if (isMainWorktree) return [];
+  if (!status) return [];
   const options: ComposerGitOption[] = [];
+  const dirty = status.dirty || status.files.length > 0;
+  if (dirty && !status.conflicted) options.push("commit");
+  if (!status.branchRef) return options;
+  const isMainWorktree = status.checkoutRoot === status.mainCheckoutRoot || status.branchRef === "main";
+  if (isMainWorktree) return options;
   if (status.aheadOfMain > 0) options.push("merge");
   if ((status.behindMain ?? 0) > 0) options.push("rebase");
   if (status.hasUpstream && status.ahead > 0) options.push("push");
@@ -412,8 +418,9 @@ export function QueuedFollowUpList({
 
 /**
  * Smart Git shortcut for the bottom composer bar. Fetches its own Git status and
- * only renders when at least one action is relevant: merge (ahead of main),
- * rebase (main has diverged), or push (remote branch exists and is behind).
+ * only renders when at least one action is relevant: commit (dirty tree),
+ * merge (ahead of main), rebase (main has diverged), or push (remote branch
+ * exists and is behind).
  * A single option renders as a direct action button; multiple options collapse
  * into a FolderGit2 icon button with a thinking-selector-style popup menu.
  * Merge still runs only after explicit confirmation.
@@ -535,6 +542,22 @@ function ComposerMergeButton({
     ).finally(() => setBusyOp(null));
   };
 
+  const handleCommitAuto = () => {
+    if (busy) return;
+    setMenuOpen(false);
+    setBusyOp("commit");
+    void api.gitCommitAuto(workspaceId).then(
+      (result) => {
+        setStatus(result.status);
+        toast.success("Committed changes", { description: result.message });
+      },
+      (err: unknown) => {
+        const message = friendlyApiError(err, "Could not commit changes. Try again.");
+        toast.error("Commit failed", { description: message });
+      },
+    ).finally(() => setBusyOp(null));
+  };
+
   const handleDeleteWorkspace = () => {
     if (mergedBranch === null || deleting) return;
     setDeleting(true);
@@ -561,12 +584,20 @@ function ComposerMergeButton({
   const aheadUpstream = status?.ahead ?? 0;
 
   const runOption = (option: ComposerGitOption) => {
-    if (option === "merge") setConfirmOpen(true);
+    if (option === "commit") handleCommitAuto();
+    else if (option === "merge") setConfirmOpen(true);
     else if (option === "rebase") handleRebase();
     else handlePush();
   };
 
+  const dirtyCount = status?.files.length ?? 0;
   const optionMeta: Record<ComposerGitOption, { label: string; detail: string; title: string; Icon: typeof GitMerge }> = {
+    commit: {
+      label: "Commit",
+      detail: `${dirtyCount} changed`,
+      title: `Auto-commit ${dirtyCount} changed file${dirtyCount === 1 ? "" : "s"} (stage all + generate message)`,
+      Icon: GitCommitHorizontal,
+    },
     merge: {
       label: "Merge",
       detail: `${ahead} ahead`,

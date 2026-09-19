@@ -166,6 +166,25 @@ describe("resolveComposerGitOptions", () => {
     ]);
   });
 
+  test("offers commit first when the tree is dirty", () => {
+    const dirtyFile = { path: "a.ts", kind: "modified" as const, staged: false, workingTree: true, binary: false, submodule: false };
+    expect(resolveComposerGitOptions({ ...base, dirty: true, files: [dirtyFile] })).toEqual(["commit"]);
+    // Commit leads merge/rebase/push in that order.
+    expect(resolveComposerGitOptions({ ...base, dirty: true, files: [dirtyFile], aheadOfMain: 2, behindMain: 1, hasUpstream: true, ahead: 1 })).toEqual([
+      "commit",
+      "merge",
+      "rebase",
+      "push",
+    ]);
+  });
+
+  test("offers commit on main and detached HEADs, but not when conflicted", () => {
+    const dirtyFile = { path: "a.ts", kind: "modified" as const, staged: false, workingTree: true, binary: false, submodule: false };
+    expect(resolveComposerGitOptions({ ...base, dirty: true, files: [dirtyFile], branchRef: "main" })).toEqual(["commit"]);
+    expect(resolveComposerGitOptions({ ...base, dirty: true, files: [dirtyFile], branchRef: null, detached: true })).toEqual(["commit"]);
+    expect(resolveComposerGitOptions({ ...base, dirty: true, files: [dirtyFile], conflicted: true })).toEqual([]);
+  });
+
   test("hides everything on main, detached, or missing branch", () => {
     expect(resolveComposerGitOptions({ ...base, aheadOfMain: 2, branchRef: "main" })).toEqual([]);
     expect(resolveComposerGitOptions({ ...base, aheadOfMain: 2, checkoutRoot: "/repo", mainCheckoutRoot: "/repo" })).toEqual([]);
