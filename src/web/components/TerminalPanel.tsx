@@ -97,6 +97,11 @@ export function TerminalPanel({ terminal, onClose, fontFamily, fontSize }: Termi
     const socket = connectTerminalSocket(terminal.id, {
       onOpen: () => {
         setConnected(true);
+        // The socket typically opens after the initial fit, and the PTY
+        // starts at the creation default (80x24). Push the fitted size now;
+        // pre-open resizes are also queued in the socket, so this is a
+        // harmless resync if layout settled late.
+        handleResize();
       },
       onClose: () => {
         setConnected(false);
@@ -107,9 +112,25 @@ export function TerminalPanel({ terminal, onClose, fontFamily, fontSize }: Termi
       onControl: (control) => {
         if (control.type === "attached") {
           setHasSizeLease(control.hasSizeLease);
-          setDimensions({ cols: control.cols, rows: control.rows });
+          if (control.hasSizeLease) {
+            // We control the PTY size: don't adopt the server's creation
+            // default, push our fitted size instead. Without this the pane
+            // stays stuck at the default regardless of available space.
+            handleResize();
+          } else {
+            setDimensions({ cols: control.cols, rows: control.rows });
+            if (term.cols !== control.cols || term.rows !== control.rows) {
+              try {
+                term.resize(control.cols, control.rows);
+              } catch {}
+            }
+          }
         } else if (control.type === "lease_change") {
           setHasSizeLease(control.hasSizeLease);
+          if (control.hasSizeLease) {
+            // Just gained control (e.g. Take Control): our pane size wins.
+            handleResize();
+          }
         } else if (control.type === "resized") {
           setDimensions({ cols: control.cols, rows: control.rows });
           if (term.cols !== control.cols || term.rows !== control.rows) {
@@ -182,7 +203,9 @@ export function TerminalPanel({ terminal, onClose, fontFamily, fontSize }: Termi
 
   const handleTakeLease = () => {
     socketRef.current?.takeLease();
-    handleResize();
+    // The lease_change confirmation triggers the fitted-size push; sending
+    // a resize now would still be evaluated as a passive client and be
+    // rejected by the daemon.
   };
 
   const handleClear = () => {

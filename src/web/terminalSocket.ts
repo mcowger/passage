@@ -40,12 +40,51 @@ export function connectTerminalSocket(
   let ws: WebSocket | null = new WebSocket(url);
   ws.binaryType = "arraybuffer";
   let isClosed = false;
+  let isOpen = false;
+  // Messages sent before the socket opens (notably the first fit-driven
+  // resize) would otherwise be silently dropped, leaving the PTY at its
+  // creation default regardless of the actual pane size. Queue them and
+  // flush on open. Only the latest resize matters, so coalesce those.
+  const pending: string[] = [];
+  let pendingResize: string | null = null;
+
+  function sendText(text: string, isResize = false) {
+    if (ws && isOpen && ws.readyState === WebSocket.OPEN) {
+      ws.send(text);
+      return;
+    }
+    if (isClosed) return;
+    if (isResize) {
+      pendingResize = text;
+    } else {
+      pending.push(text);
+    }
+  }
+
+  function flushPending() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // Size first so any queued input is processed at the right dimensions.
+    if (pendingResize) {
+      const text = pendingResize;
+      pendingResize = null;
+      try {
+        ws.send(text);
+      } catch {}
+    }
+    for (const text of pending.splice(0)) {
+      try {
+        ws.send(text);
+      } catch {}
+    }
+  }
 
   ws.onopen = () => {
     if (isClosed) {
       ws?.close();
       return;
     }
+    isOpen = true;
+    flushPending();
     callbacks.onOpen?.();
   };
 
@@ -80,19 +119,13 @@ export function connectTerminalSocket(
   return {
     clientId,
     sendInput(data: string) {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "input", data }));
-      }
+      sendText(JSON.stringify({ type: "input", data }));
     },
     sendResize(cols: number, rows: number) {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "resize", cols, rows }));
-      }
+      sendText(JSON.stringify({ type: "resize", cols, rows }), true);
     },
     takeLease() {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "lease", take: true }));
-      }
+      sendText(JSON.stringify({ type: "lease", take: true }));
     },
     close() {
       isClosed = true;
