@@ -463,7 +463,7 @@ export function SettingsModal({
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
-      <DialogContent className="max-w-[640px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[calc(100vw-2rem)] min-w-0 max-w-[640px] max-h-[90dvh] overflow-y-auto overflow-x-hidden p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle className="text-lg font-semibold">Workspace Settings</DialogTitle>
         </DialogHeader>
@@ -476,7 +476,7 @@ export function SettingsModal({
             <TabsTrigger value="worktree-locations" className="h-auto min-h-10 min-w-0 px-1.5 text-center text-xs leading-snug whitespace-normal sm:text-[13px]">Worktree Locations</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="fonts-colors" className="flex flex-col gap-4 py-2">
+          <TabsContent value="fonts-colors" className="flex flex-col gap-4 py-2 min-w-0">
           <p className="text-xs text-muted-foreground">
             All settings are global and apply to every workspace.
           </p>
@@ -538,7 +538,7 @@ export function SettingsModal({
           </label>
           </TabsContent>
 
-          <TabsContent value="suggestion-output" className="flex flex-col gap-4 py-2">
+          <TabsContent value="suggestion-output" className="flex flex-col gap-4 py-2 min-w-0">
           <p className="text-xs text-muted-foreground">
             All settings are global and apply to every workspace.
           </p>
@@ -652,7 +652,7 @@ export function SettingsModal({
           />
           </TabsContent>
 
-          <TabsContent value="prompts" className="flex flex-col gap-4 py-2">
+          <TabsContent value="prompts" className="flex flex-col gap-4 py-2 min-w-0">
           <p className="text-xs text-muted-foreground">
             Prompt templates for AI-generated text. All settings are global. Leave a template blank to use the built-in default.
             Placeholders are replaced before sending to the model; if a template omits a placeholder, its value is appended automatically.
@@ -740,7 +740,7 @@ export function SettingsModal({
           </div>
           </TabsContent>
 
-          <TabsContent value="worktree-locations" className="flex flex-col gap-2 py-2">
+          <TabsContent value="worktree-locations" className="flex flex-col gap-2 py-2 min-w-0">
           {api ? (
             <section className="flex flex-col gap-2" aria-label="Worktree locations">
               <h3 className="text-sm font-semibold">Worktree Locations</h3>
@@ -789,7 +789,7 @@ export function SettingsModal({
                   ))}
                 </ul>
               )}
-              <form onSubmit={handleAddLocation} className="flex flex-col gap-1.5 rounded-md border border-border/50 p-2 bg-muted/20">
+              <form onSubmit={handleAddLocation} className="flex flex-col gap-1.5 rounded-md border border-border/50 p-2 bg-muted/20 min-w-0">
                 <Input
                   type="text"
                   className="h-8 text-xs"
@@ -804,11 +804,11 @@ export function SettingsModal({
                   value={newPath}
                   onChange={(e) => setNewPath(e.target.value)}
                 />
-                <div className="flex items-center gap-3 text-xs">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs min-w-0">
                   <RadioGroup
                     value={newScope}
                     onValueChange={(value) => setNewScope(value as "global" | "project")}
-                    className="flex items-center gap-3"
+                    className="flex flex-wrap items-center gap-3"
                     aria-label="Location scope"
                   >
                     <div className="flex items-center gap-1.5">
@@ -822,7 +822,7 @@ export function SettingsModal({
                   </RadioGroup>
                   {newScope === "project" && (
                     <Select value={newProjectId} onValueChange={setNewProjectId}>
-                      <SelectTrigger className="flex-1 h-8 text-xs" aria-label="Project for location">
+                      <SelectTrigger className="flex-1 min-w-0 max-w-full overflow-hidden h-8 text-xs" aria-label="Project for location">
                         <SelectValue placeholder="Select project" />
                       </SelectTrigger>
                       <SelectContent>

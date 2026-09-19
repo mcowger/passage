@@ -219,17 +219,17 @@ export function NewWorktreeModal({
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
-        className="max-w-[560px] max-h-[calc(100vh-2rem)] overflow-y-auto"
+        className="w-[calc(100vw-2rem)] min-w-0 max-w-[560px] max-h-[calc(100dvh-2rem)] overflow-y-auto overflow-x-hidden p-4 sm:p-6"
         onInteractOutside={(e) => e.preventDefault()}
       >
-        <DialogHeader>
+        <DialogHeader className="min-w-0">
           <DialogTitle className="text-lg font-semibold">Git Worktrees</DialogTitle>
           <Tabs
             value={activeTab}
             onValueChange={(value) => { setActiveTab(value as "create" | "discover"); setError(""); }}
-            className="pt-2 pb-2 border-b border-border/50 gap-0"
+            className="pt-2 pb-2 border-b border-border/50 gap-0 min-w-0"
           >
-            <TabsList>
+            <TabsList className="max-w-full overflow-x-auto">
               <TabsTrigger value="create" className="gap-1.5 text-xs">
                 <PlusCircle className="w-3.5 h-3.5" /> Create New
               </TabsTrigger>
@@ -243,11 +243,11 @@ export function NewWorktreeModal({
         {error && <Alert variant="destructive" className="my-1"><AlertDescription className="text-xs">{error}</AlertDescription></Alert>}
 
         {activeTab === "create" ? (
-          <form onSubmit={handleCreate} className="flex flex-col gap-3 pt-1">
-            <div className="flex flex-col gap-1 text-xs font-medium">
+          <form onSubmit={handleCreate} className="flex flex-col gap-3 pt-1 min-w-0 w-full max-w-full">
+            <div className="flex flex-col gap-1 text-xs font-medium min-w-0">
               <Label htmlFor="worktree-project" className="text-xs">Project</Label>
               {lockedProject ? (
-                <p id="worktree-project" className="text-xs text-foreground font-normal truncate" title={lockedProject.canonicalRootPath}>
+                <p id="worktree-project" className="text-xs text-foreground font-normal truncate min-w-0 max-w-full break-all" title={lockedProject.canonicalRootPath}>
                   {lockedProject.displayLabel} ({lockedProject.canonicalRootPath})
                 </p>
               ) : (
@@ -262,7 +262,7 @@ export function NewWorktreeModal({
                 }}
                 required
               >
-                <SelectTrigger id="worktree-project" className="w-full h-8 text-xs">
+                <SelectTrigger id="worktree-project" className="w-full min-w-0 max-w-full overflow-hidden h-8 text-xs">
                   <SelectValue placeholder="Select project" />
                 </SelectTrigger>
                 <SelectContent position="popper" align="start" className="w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
@@ -274,11 +274,11 @@ export function NewWorktreeModal({
               )}
             </div>
 
-            <div className="flex flex-col gap-1 text-xs font-medium">
+            <div className="flex flex-col gap-1 text-xs font-medium min-w-0">
               <span>Worktree Location</span>
               {availableLocations.length > 0 ? (
                 <Select value={locationId} onValueChange={setLocationId} required>
-                  <SelectTrigger className="w-full h-8 text-xs" aria-label="Worktree location">
+                  <SelectTrigger className="w-full min-w-0 max-w-full overflow-hidden h-8 text-xs" aria-label="Worktree location">
                     <SelectValue placeholder="Select location" />
                   </SelectTrigger>
                   <SelectContent position="popper" align="start" className="w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
@@ -323,7 +323,7 @@ export function NewWorktreeModal({
                   <RadioGroup
                     value={newLocationScope}
                     onValueChange={(value) => setNewLocationScope(value as "global" | "project")}
-                    className="flex items-center gap-3"
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1.5"
                     aria-label="Location scope"
                   >
                     <div className="flex items-center gap-1.5 text-xs font-normal">
@@ -357,13 +357,13 @@ export function NewWorktreeModal({
               )}
             </div>
 
-            <div className="flex flex-col gap-1">
-              <label className="flex flex-col gap-1 text-xs font-medium">
+            <div className="flex flex-col gap-1 min-w-0">
+              <label className="flex flex-col gap-1 text-xs font-medium min-w-0">
                 Task Purpose / Goal (Optional)
-                <div className="flex gap-2 mt-1">
+                <div className="flex gap-2 mt-1 min-w-0">
                   <Input
                     type="text"
-                    className="h-8 text-xs"
+                    className="h-8 text-xs flex-1 min-w-0 w-auto"
                     placeholder="e.g. Implement customer webhook retry backoff"
                     value={purpose}
                     onChange={(e) => setPurpose(e.target.value)}
@@ -375,13 +375,13 @@ export function NewWorktreeModal({
                     onClick={handleSuggest}
                     disabled={!purpose.trim() || suggesting || !projectId}
                     title="Generate label, branch and folder suggestions using AI"
-                    className="shrink-0 h-8 text-xs"
+                    className="shrink-0 h-8 text-xs max-w-[40vw] overflow-hidden text-ellipsis"
                   >
                     {suggesting ? "Thinking..." : "⚡ Suggest"}
                   </Button>
                 </div>
               </label>
-              <p className="text-[11px] text-muted-foreground">Type your goal and click Suggest to auto-fill metadata.{suggestModel?.trim() ? ` Uses model ${suggestModel.trim()}${suggestThinkingLevel?.trim() ? ` (${suggestThinkingLevel.trim()})` : ""} (Settings).` : " Uses the default model (change in Settings)."}</p>
+              <p className="text-[11px] text-muted-foreground break-words min-w-0">Type your goal and click Suggest to auto-fill metadata.{suggestModel?.trim() ? ` Uses model ${suggestModel.trim()}${suggestThinkingLevel?.trim() ? ` (${suggestThinkingLevel.trim()})` : ""} (Settings).` : " Uses the default model (change in Settings)."}</p>
             </div>
 
             <label className="flex flex-col gap-1 text-xs font-medium">
@@ -396,12 +396,12 @@ export function NewWorktreeModal({
               />
             </label>
 
-            <div className="flex flex-col gap-1 text-xs font-medium">
+            <div className="flex flex-col gap-1 text-xs font-medium min-w-0">
               <span>Git Branch</span>
               <RadioGroup
                 value={branchMode}
                 onValueChange={(value) => setBranchMode(value as "existing" | "new")}
-                className="flex items-center gap-3"
+                className="flex flex-wrap items-center gap-x-3 gap-y-1.5"
                 aria-label="Branch mode"
               >
                 <div className="flex items-center gap-1.5 text-xs font-normal">
@@ -453,19 +453,19 @@ export function NewWorktreeModal({
               />
             </label>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border/40">
+            <div className="flex justify-end flex-wrap gap-2 pt-2 border-t border-border/40">
               <Button type="button" variant="secondary" size="xs" onClick={onClose}>
                 Cancel
               </Button>
-              <Button type="submit" size="xs" disabled={creating}>
+              <Button type="submit" size="xs" disabled={creating} className="max-w-full">
                 {creating ? "Creating..." : "Create Worktree"}
               </Button>
             </div>
           </form>
         ) : (
-          <div className="flex flex-col gap-3 pt-1">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs font-medium flex-1">
+          <div className="flex flex-col gap-3 pt-1 min-w-0 w-full max-w-full">
+            <div className="flex items-center justify-between gap-2 min-w-0 flex-wrap">
+              <div className="flex items-center gap-2 text-xs font-medium flex-1 min-w-0">
                 <Label htmlFor="discover-project" className="text-xs shrink-0">Project:</Label>
                 {lockedProject ? (
                   <span id="discover-project" className="text-xs font-normal truncate" title={lockedProject.canonicalRootPath}>
@@ -473,7 +473,7 @@ export function NewWorktreeModal({
                   </span>
                 ) : (
                 <Select value={projectId} onValueChange={setProjectId}>
-                  <SelectTrigger id="discover-project" className="flex-1 h-8 text-xs">
+                  <SelectTrigger id="discover-project" className="flex-1 min-w-0 max-w-full overflow-hidden h-8 text-xs">
                     <SelectValue placeholder="Select project" />
                   </SelectTrigger>
                   <SelectContent position="popper" align="start" className="w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
@@ -558,9 +558,9 @@ export function NewWorktreeModal({
             </div>
 
             {/* Manual Path Import */}
-            <div className="pt-2 border-t border-border/50">
+            <div className="pt-2 border-t border-border/50 min-w-0">
               <span className="text-xs font-medium text-muted-foreground block mb-1.5">Or import by directory path:</span>
-              <div className="flex gap-2 min-w-0">
+              <div className="flex flex-col sm:flex-row gap-2 min-w-0">
                 <Input
                   type="text"
                   placeholder="/path/to/existing/worktree"
@@ -573,7 +573,7 @@ export function NewWorktreeModal({
                   placeholder="Label (optional)"
                   value={manualLabel}
                   onChange={(e) => setManualLabel(e.target.value)}
-                  className="h-8 text-xs w-32"
+                  className="h-8 text-xs w-full sm:w-32 min-w-0"
                 />
                 <Button
                   size="xs"
