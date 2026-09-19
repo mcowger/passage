@@ -20,6 +20,7 @@ import { MetadataRepositories, type Agent } from "../metadata/repositories.ts";
 import { AgentTitleSuggester, DEFAULT_AGENT_TITLE } from "./title-suggester.ts";
 import { normalizeAvailableModels } from "../models/catalog.ts";
 import { parsePiExtensionUiDialog } from "./ui.ts";
+import { AgentError, ID } from "./errors.ts";
 import { errorFields, logger } from "../logging.ts";
 import { AgentRuntime, type Cancellation } from "./runtime.ts";
 import type { AgentServiceEvent } from "./runtime.ts";
@@ -60,7 +61,6 @@ const COMPACT_TIMEOUT_MS = 300_000;
  *  still running can reach this even past Passage's own busy guard. */
 const PI_ALREADY_STREAMING_PATTERN = /already (processing|streaming)/i;
 /** Upper bound on the tool payload text scanned for a `git commit` invocation. */
-const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const encoder = new TextEncoder();
 
 /** Title sources: the first user message plus any thinking/assistant text
@@ -94,13 +94,6 @@ export type CompactResult =
  *  (genuine failures, aborts of the compaction itself) stays an error. */
 
 export type AgentHistoryResult = HistoryPage | { unpersisted: true; history: null };
-
-export class AgentError extends Error {
-  constructor(readonly code: "not-found" | "archived" | "not-running" | "invalid-input" | "limit" | "draining", message: string) {
-    super(message);
-    this.name = "AgentError";
-  }
-}
 
 /** True when a tool event looks like a successfully completed `git commit`
  *  invocation. Only completion events count: at call time the commit has not
