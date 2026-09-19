@@ -59,6 +59,15 @@
   height: 11px;
   justify-content: center;
 }
+/* The receiving state tints + pulses the same glyph with an opacity-only
+ * animation, which promotes the svg to a compositor layer. Without a
+ * stable layer in both states the glyph re-snaps ~1px higher while
+ * pulsing and drops back when it settles, so the pill visibly jumps.
+ * Pin the icon to its own layer always so both states round identically. */
+.composer-status-pill .live-stream-phase svg {
+  display: block;
+  transform: translateZ(0);
+}
 .composer-status-bytes {
   display: inline-block;
   text-align: right;
