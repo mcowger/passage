@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu.tsx";
-import { ArrowLeft, ChevronDown, Menu, MoreHorizontal, Plus } from "lucide-react";
+import { ArrowLeft, ChevronDown, Menu, MoreHorizontal, Plus, X } from "lucide-react";
 
 export type MobileDestinationKind =
   | "overview"
@@ -68,6 +68,13 @@ interface MobileContextBarProps {
   onOpenCommands: () => void;
   onOpenSettings: () => void;
   onOpenWorkspaceDetails: () => void;
+  /** Closes the currently visible agent / terminal / preview / file view.
+   *  Absent when the current destination has nothing to close (Files,
+   *  Changes, Overview). Without this there is no way to close anything
+   *  from mobile: the desktop close affordance lives in the canvas tab
+   *  strip, which mobile does not render. */
+  onCloseCurrent?: () => void;
+  closeLabel?: string;
 }
 
 export function MobileContextBar(props: MobileContextBarProps) {
@@ -87,6 +94,8 @@ export function MobileContextBar(props: MobileContextBarProps) {
     onOpenCommands,
     onOpenSettings,
     onOpenWorkspaceDetails,
+    onCloseCurrent,
+    closeLabel,
   } = props;
   return (
     <div className="mobile-context-wrap">
@@ -115,6 +124,17 @@ export function MobileContextBar(props: MobileContextBarProps) {
           </span>
         </button>
         <WsHealthIndicator health={wsHealth} className="mobile-context-health" />
+        {onCloseCurrent && (
+          <button
+            type="button"
+            className="mobile-context-icon-btn"
+            onClick={onCloseCurrent}
+            aria-label={closeLabel ?? "Close current view"}
+            title={closeLabel ?? "Close current view"}
+          >
+            <X className="size-5" aria-hidden="true" />
+          </button>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger
             className="mobile-context-icon-btn"
@@ -170,6 +190,13 @@ interface MobileSessionSheetProps {
   onOpenChanges: () => void;
   onNewAgent: () => void;
   onNewTerminal: () => void;
+  /** Close actions for the session rows. Each ends the underlying
+   *  resource (agents are archived, terminals terminated, previews
+   *  stopped and deleted) exactly like closing the desktop canvas tab.
+   *  Absent handlers hide the row close button. */
+  onCloseAgent?: (id: string) => void;
+  onCloseTerminal?: (id: string) => void;
+  onClosePreview?: (id: string) => void;
 }
 
 function SectionLabel({ children }: { children: string }) {
@@ -196,6 +223,9 @@ export function MobileSessionSheet(props: MobileSessionSheetProps) {
     onOpenChanges,
     onNewAgent,
     onNewTerminal,
+    onCloseAgent,
+    onCloseTerminal,
+    onClosePreview,
   } = props;
 
   const pick = (fn: () => void) => () => {
@@ -227,25 +257,40 @@ export function MobileSessionSheet(props: MobileSessionSheetProps) {
             const kind = getAgentStatusKind(agent);
             const current = isAgentCurrent(agent.id);
             return (
-              <button
+              <div
                 key={agent.id}
-                type="button"
                 role="listitem"
                 className={`mobile-sheet-row${current ? " current" : ""}`}
-                aria-current={current || undefined}
-                aria-label={`Go to agent ${agent.title}, ${AGENT_STATUS_LABEL[kind]}`}
-                onClick={pick(() => onSelectAgent(agent.id))}
               >
-                <span className={statusDotClass(kind)} aria-hidden="true" />
-                <span className="mobile-sheet-row-main">
-                  <span className="mobile-sheet-row-title">◈ {agent.title}</span>
-                  <span className="mobile-sheet-row-meta">
-                    {AGENT_STATUS_LABEL[kind]}
-                    {agent.modelPreference ? ` · ${agent.modelPreference}` : ""}
+                <button
+                  type="button"
+                  className="mobile-sheet-select"
+                  aria-current={current || undefined}
+                  aria-label={`Go to agent ${agent.title}, ${AGENT_STATUS_LABEL[kind]}`}
+                  onClick={pick(() => onSelectAgent(agent.id))}
+                >
+                  <span className={statusDotClass(kind)} aria-hidden="true" />
+                  <span className="mobile-sheet-row-main">
+                    <span className="mobile-sheet-row-title">◈ {agent.title}</span>
+                    <span className="mobile-sheet-row-meta">
+                      {AGENT_STATUS_LABEL[kind]}
+                      {agent.modelPreference ? ` · ${agent.modelPreference}` : ""}
+                    </span>
                   </span>
-                </span>
-                {current && <span className="mobile-sheet-check" aria-hidden="true">✓</span>}
-              </button>
+                  {current && <span className="mobile-sheet-check" aria-hidden="true">✓</span>}
+                </button>
+                {onCloseAgent && (
+                  <button
+                    type="button"
+                    className="mobile-sheet-close"
+                    aria-label={`Close agent ${agent.title}`}
+                    title={`Close agent ${agent.title}`}
+                    onClick={() => onCloseAgent(agent.id)}
+                  >
+                    <X className="size-5" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
             );
           })}
 
@@ -259,22 +304,37 @@ export function MobileSessionSheet(props: MobileSessionSheetProps) {
               ? "running"
               : `exited${terminal.exitCode != null ? ` (${terminal.exitCode})` : ""}`;
             return (
-              <button
+              <div
                 key={terminal.id}
-                type="button"
                 role="listitem"
                 className={`mobile-sheet-row${current ? " current" : ""}`}
-                aria-current={current || undefined}
-                aria-label={`Go to terminal ${terminal.title}, ${meta}`}
-                onClick={pick(() => onSelectTerminal(terminal.id))}
               >
-                <span className={statusDotClass(terminal.status === "running" ? "active" : "idle")} aria-hidden="true" />
-                <span className="mobile-sheet-row-main">
-                  <span className="mobile-sheet-row-title">&gt;_ {terminal.title}</span>
-                  <span className="mobile-sheet-row-meta">{meta}</span>
-                </span>
-                {current && <span className="mobile-sheet-check" aria-hidden="true">✓</span>}
-              </button>
+                <button
+                  type="button"
+                  className="mobile-sheet-select"
+                  aria-current={current || undefined}
+                  aria-label={`Go to terminal ${terminal.title}, ${meta}`}
+                  onClick={pick(() => onSelectTerminal(terminal.id))}
+                >
+                  <span className={statusDotClass(terminal.status === "running" ? "active" : "idle")} aria-hidden="true" />
+                  <span className="mobile-sheet-row-main">
+                    <span className="mobile-sheet-row-title">&gt;_ {terminal.title}</span>
+                    <span className="mobile-sheet-row-meta">{meta}</span>
+                  </span>
+                  {current && <span className="mobile-sheet-check" aria-hidden="true">✓</span>}
+                </button>
+                {onCloseTerminal && (
+                  <button
+                    type="button"
+                    className="mobile-sheet-close"
+                    aria-label={`Close terminal ${terminal.title}`}
+                    title={`Close terminal ${terminal.title}`}
+                    onClick={() => onCloseTerminal(terminal.id)}
+                  >
+                    <X className="size-5" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
             );
           })}
 
@@ -284,22 +344,37 @@ export function MobileSessionSheet(props: MobileSessionSheetProps) {
               {previews.map((preview) => {
                 const current = isPreviewCurrent(preview.id);
                 return (
-                  <button
+                  <div
                     key={preview.id}
-                    type="button"
                     role="listitem"
                     className={`mobile-sheet-row${current ? " current" : ""}`}
-                    aria-current={current || undefined}
-                    aria-label={`Go to preview ${preview.label}, ${preview.status}`}
-                    onClick={pick(() => onSelectPreview(preview.id))}
                   >
-                    <span className={statusDotClass(preview.status === "ready" ? "active" : "idle")} aria-hidden="true" />
-                    <span className="mobile-sheet-row-main">
-                      <span className="mobile-sheet-row-title">◉ {preview.label}</span>
-                      <span className="mobile-sheet-row-meta">{preview.status}</span>
-                    </span>
-                    {current && <span className="mobile-sheet-check" aria-hidden="true">✓</span>}
-                  </button>
+                    <button
+                      type="button"
+                      className="mobile-sheet-select"
+                      aria-current={current || undefined}
+                      aria-label={`Go to preview ${preview.label}, ${preview.status}`}
+                      onClick={pick(() => onSelectPreview(preview.id))}
+                    >
+                      <span className={statusDotClass(preview.status === "ready" ? "active" : "idle")} aria-hidden="true" />
+                      <span className="mobile-sheet-row-main">
+                        <span className="mobile-sheet-row-title">◉ {preview.label}</span>
+                        <span className="mobile-sheet-row-meta">{preview.status}</span>
+                      </span>
+                      {current && <span className="mobile-sheet-check" aria-hidden="true">✓</span>}
+                    </button>
+                    {onClosePreview && (
+                      <button
+                        type="button"
+                        className="mobile-sheet-close"
+                        aria-label={`Close preview ${preview.label}`}
+                        title={`Close preview ${preview.label}`}
+                        onClick={() => onClosePreview(preview.id)}
+                      >
+                        <X className="size-5" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </>

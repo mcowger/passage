@@ -1122,6 +1122,88 @@ function App() {
     if (tabId.startsWith("diff-")) setOpenDiffPath(undefined);
   }, [endTabResource, layout, selectedWorkspaceId, handleLayoutChange]);
 
+  // Mobile close actions: the desktop close affordance lives in the canvas
+  // tab strip, which mobile does not render, so without these there is no
+  // way to close an agent, terminal, preview, or file view from a phone.
+  // Resource semantics match closing the desktop tab (agents archived,
+  // terminals terminated, previews stopped and deleted); when the closed
+  // session was the one on screen, fall back to a sibling or Overview
+  // because there is no tab strip to fall back to. The sheet stays open so
+  // several sessions can be closed in a row.
+  const closeAgentOnMobile = (agentId: string) => {
+    const currentId = activeTab === "agent" ? (selectedAgentId ?? agents[0]?.id) : undefined;
+    const next = agents.filter((agent) => agent.id !== agentId)[0];
+    void closeAgentTab(`agent-${agentId}`).then(() => {
+      if (currentId === agentId) {
+        if (next) handleSelectAgent(next.id);
+        else setActiveTab("overview");
+      }
+    });
+  };
+
+  const closeTerminalOnMobile = (terminalId: string) => {
+    const currentId = activeTab === "terminal" ? (selectedTerminalId ?? terminals[0]?.id) : undefined;
+    const next = terminals.filter((terminal) => terminal.id !== terminalId)[0];
+    closeTabNow(`terminal-${terminalId}`);
+    if (currentId === terminalId) {
+      if (next) handleSelectTerminal(next.id);
+      else setActiveTab("overview");
+    }
+  };
+
+  const closePreviewOnMobile = (previewId: string) => {
+    const currentId = activeTab === "preview" ? (selectedPreviewId ?? previews[0]?.id) : undefined;
+    const next = previews.filter((preview) => preview.id !== previewId)[0];
+    closeTabNow(`preview-${previewId}`);
+    if (currentId === previewId) {
+      if (next) handleSelectPreview(next.id);
+      else setActiveTab("overview");
+    }
+  };
+
+  const closeEditorOnMobile = () => {
+    if (!openEditorPath) return;
+    const tabId = `editor-${openEditorPath}`;
+    // Same unsaved-changes gate as the editor header and desktop tab close.
+    const dirtyPath = dirtyEditors[tabId];
+    if (dirtyPath !== undefined) {
+      setPendingDirtyClose({ tabId, path: dirtyPath });
+      return;
+    }
+    closeTabNow(tabId);
+    setActiveTab("explorer");
+  };
+
+  const closeDiffOnMobile = () => {
+    if (!openDiffPath) return;
+    closeTabNow(`diff-${openDiffPath}`);
+    setActiveTab("changes");
+  };
+
+  const mobileCloseAction: { label: string; action: () => void } | null = (() => {
+    if (mobileDest.kind === "agent") {
+      const current = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
+      return current ? { label: `Close agent ${current.title}`, action: () => closeAgentOnMobile(current.id) } : null;
+    }
+    if (mobileDest.kind === "terminal") {
+      const current = terminals.find((terminal) => terminal.id === selectedTerminalId) ?? terminals[0];
+      return current ? { label: `Close terminal ${current.title}`, action: () => closeTerminalOnMobile(current.id) } : null;
+    }
+    if (mobileDest.kind === "preview") {
+      const current = previews.find((preview) => preview.id === selectedPreviewId) ?? previews[0];
+      return current ? { label: `Close preview ${current.label}`, action: () => closePreviewOnMobile(current.id) } : null;
+    }
+    if (mobileDest.kind === "editor") {
+      if (!openEditorPath) return null;
+      return { label: `Close editor ${openEditorPath.split("/").pop() ?? openEditorPath}`, action: closeEditorOnMobile };
+    }
+    if (mobileDest.kind === "diff") {
+      if (!openDiffPath) return null;
+      return { label: "Close diff", action: closeDiffOnMobile };
+    }
+    return null;
+  })();
+
   const handleEditorDirtyChange = useCallback((tabId: string, path: string, isDirty: boolean, save: () => Promise<boolean>) => {
     editorSaveHandlers.current.set(tabId, save);
     setDirtyEditors((prev) => {
@@ -1561,6 +1643,8 @@ function App() {
                 onOpenCommands={() => setCommandPaletteOpen(true)}
                 onOpenSettings={() => setSettingsModalOpen(true)}
                 onOpenWorkspaceDetails={() => setWorkspaceDetailsOpen(true)}
+                onCloseCurrent={mobileCloseAction?.action}
+                closeLabel={mobileCloseAction?.label}
               />
             ) : (
             <nav className="workspace-nav-bar" aria-label="Workspace views">
@@ -1738,6 +1822,9 @@ function App() {
         }}
         onNewAgent={() => { setMobileReturnTo(null); void createAgent(); }}
         onNewTerminal={() => { setMobileReturnTo(null); void createTerminal(); }}
+        onCloseAgent={closeAgentOnMobile}
+        onCloseTerminal={closeTerminalOnMobile}
+        onClosePreview={closePreviewOnMobile}
       />
       )}
 
