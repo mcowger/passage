@@ -49,7 +49,8 @@ import {
   ArrowUp,
   ArrowDownUp,
   Plus,
-  Pencil,
+  ReplaceAll,
+  File,
   Brain,
   MessageSquareMore,
   FilePenLine,
@@ -1795,13 +1796,12 @@ function AgentComposerInner({
         <div className="composer-meta-line">
           {changeSummary ? (
             <div
-              className="agent-change-summary"
+              className="agent-change-summary composer-status-pill"
               aria-label={`${changeSummary.fileCount} changed files, ${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}
             >
-              <span className="agent-change-files">
-                <Pencil size={12} aria-hidden="true" />
-                {changeSummary.fileCount} changed file{changeSummary.fileCount === 1 ? "" : "s"}
-              </span>
+              <ReplaceAll size={11} aria-hidden="true" />
+              <span className="agent-change-count">{changeSummary.fileCount}</span>
+              <File size={11} aria-hidden="true" />
               <span className="add-count">+{changeSummary.additions}</span>
               <span className="del-count">-{changeSummary.deletions}</span>
             </div>

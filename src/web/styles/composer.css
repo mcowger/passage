@@ -83,8 +83,9 @@
   gap: 2px;
   font-variant-numeric: tabular-nums;
 }
-.agent-change-summary { display: flex; align-items: center; gap: 7px; padding: 0; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
-.agent-change-files { display: inline-flex; align-items: center; gap: 4px; color: var(--foreground); font-family: var(--font-ui); }
+.agent-change-summary { display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 2px 8px; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 999px; white-space: nowrap; color: var(--muted); font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.agent-change-summary svg { flex: none; }
+.agent-change-count { font-weight: 600; color: var(--foreground); }
 .agent-change-summary .add-count, .agent-change-summary .del-count { font-weight: 650; }
 .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-running); animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
