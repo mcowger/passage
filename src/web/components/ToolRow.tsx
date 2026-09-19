@@ -30,6 +30,8 @@ import {
   Search,
   Settings,
   Folder,
+  CircleCheckBig,
+  CircleX,
 } from "lucide-react";
 
 export const MAX_INLINE_DIFF_LINES = 120;
@@ -827,7 +829,13 @@ function ToolRowInner({ item, open, onOpenChange, workspaceId, api }: ToolRowPro
           )}
         </span>
         <span className="tool-row-right">
-          <span className={`tool-badge ${item.status}`}>{item.status}</span>
+          {item.status === "complete" ? (
+            <CircleCheckBig size={15} className="tool-status-icon complete" aria-label="Complete" />
+          ) : item.status === "error" ? (
+            <CircleX size={15} className="tool-status-icon error" aria-label="Error" />
+          ) : (
+            <span className={`tool-badge ${item.status}`}>{item.status}</span>
+          )}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent forceMount>
