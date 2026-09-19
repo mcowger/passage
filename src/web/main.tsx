@@ -4,12 +4,9 @@ import type { AgentHistory, AgentSummary } from "../shared/domain/agents.ts";
 import type { Workspace } from "../shared/domain/workspaces.ts";
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
 import type { WebPreview } from "../shared/domain/previews.ts";
-import type { PaneTab, WorkspaceLayout, LayoutNode } from "../shared/domain/layout.ts";
-import { addTabToGroup, countTabsOfKind, createDefaultLayout, findFirstDeadTerminalTab, getFirstTabGroup, removeTabFromTree, replaceOverviewTabs, updateTabInTree } from "../shared/domain/layout.ts";
-import type { WorkspaceSettings } from "../shared/domain/settings.ts";
-import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
-import type { ThemePack, FontMapping, FontOption } from "../shared/domain/customization.ts";
-import { BUILTIN_THEMES, AVAILABLE_FONTS, resolveFontFamilies } from "../shared/domain/customization.ts";
+import type { PaneTab, LayoutNode } from "../shared/domain/layout.ts";
+import { addTabToGroup, countTabsOfKind, createDefaultLayout, findFirstDeadTerminalTab, getFirstTabGroup, removeTabFromTree, updateTabInTree } from "../shared/domain/layout.ts";
+import { resolveFontFamilies } from "../shared/domain/customization.ts";
 import { createWorkspaceApi, friendlyApiError } from "./api.ts";
 import { subscribeWorkspace } from "./workspaceSocket.ts";
 import type { WorkspaceActionRun } from "../shared/domain/workspace-actions.ts";
@@ -71,8 +68,6 @@ import "./styles.css";
 import {
   NonGitPane,
   FormDialog,
-  applyFontTokens,
-  applyThemeTokens,
   computeIsMobile,
   layoutContainsGitTabs,
   setupToastId,
@@ -82,6 +77,7 @@ import {
 } from "./app/appHelpers.tsx";
 import { useDaemon } from "./app/useDaemon.ts";
 import { useWorkspaceList } from "./app/useWorkspaceList.ts";
+import { useWorkspaceLayout } from "./app/useWorkspaceLayout.ts";
 
 function App() {
   const api = useMemo(() => createWorkspaceApi(), []);
@@ -95,6 +91,16 @@ function App() {
     setWorkspaceStatuses,
     refreshWorkspaces,
   } = useWorkspaceList(api);
+  const {
+    layout,
+    setLayout,
+    settings,
+    themes,
+    fontOptions,
+    loadLayoutAndSettings,
+    handleLayoutChange,
+    handleSaveSettings,
+  } = useWorkspaceLayout(api, selectedWorkspaceId);
   const [formError, setFormError] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>();
@@ -115,10 +121,6 @@ function App() {
   const [form, setForm] = useState<FormKind>();
   const [dirSuggestOpen, setDirSuggestOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [layout, setLayout] = useState<WorkspaceLayout>();
-  const [settings, setSettings] = useState<WorkspaceSettings>(DEFAULT_WORKSPACE_SETTINGS);
-  const [themes, setThemes] = useState<ThemePack[]>(BUILTIN_THEMES);
-  const [fontOptions, setFontOptions] = useState<FontOption[]>(AVAILABLE_FONTS);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [workspaceDetailsOpen, setWorkspaceDetailsOpen] = useState(false);
@@ -272,26 +274,6 @@ function App() {
     } catch {}
   }, [api]);
 
-  const loadLayoutAndSettings = useCallback(async (workspaceId: string) => {
-    try {
-      const [fetchedLayout, fetchedSettings, fetchedThemes, fetchedFontOptions] = await Promise.all([
-        api.getLayout(workspaceId)
-          .then((l) => ({ ...l, root: replaceOverviewTabs(l.root) }))
-          .catch(() => createDefaultLayout(workspaceId)),
-        api.getSettings(workspaceId).catch(() => DEFAULT_WORKSPACE_SETTINGS),
-        api.getThemes().catch(() => BUILTIN_THEMES),
-        api.getFontOptions().catch(() => AVAILABLE_FONTS),
-      ]);
-      setLayout(fetchedLayout);
-      setSettings(fetchedSettings);
-      setThemes(fetchedThemes);
-      setFontOptions(fetchedFontOptions);
-
-      const activeTheme = fetchedThemes.find((t) => t.id === fetchedSettings.themeId) ?? fetchedThemes[0];
-      applyThemeTokens(activeTheme);
-      applyFontTokens(fetchedSettings.fonts, fetchedFontOptions);
-    } catch {}
-  }, [api]);
 
 
   const { build, daemonLifecycle, drainBusy, wsHealth, handleBeginDrain, handleCancelDrain } = useDaemon(api);
@@ -461,32 +443,7 @@ function App() {
     return countTabsOfKind(layout.root, "preview", new Set(previews.map((preview) => preview.id)));
   }, [layout, previews]);
 
-  const handleLayoutChange = useCallback(
-    (nextLayout: WorkspaceLayout) => {
-      setLayout(nextLayout);
-      if (selectedWorkspaceId) {
-        void api.saveLayout(selectedWorkspaceId, nextLayout).catch(() => {});
-      }
-    },
-    [api, selectedWorkspaceId]
-  );
 
-  const handleSaveSettings = useCallback(
-    async (nextSettings: WorkspaceSettings) => {
-      // Shared fields (theme/fonts/prompts/suggestion model/default display
-      // options) are stored globally: adopt the server-merged snapshot so
-      // local state never diverges from what a restart or another workspace
-      // will read back.
-      const saved = selectedWorkspaceId
-        ? await api.saveSettings(selectedWorkspaceId, nextSettings)
-        : nextSettings;
-      setSettings(saved);
-      const activeTheme = themes.find((t) => t.id === saved.themeId) ?? themes[0];
-      applyThemeTokens(activeTheme);
-      applyFontTokens(saved.fonts, fontOptions);
-    },
-    [api, selectedWorkspaceId, themes, fontOptions]
-  );
 
   const openPaneTab = useCallback(
     (tab: PaneTab) => {
