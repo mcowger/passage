@@ -88,16 +88,24 @@ describe("applyUsageEvent", () => {
     expect(next?.contextUsage?.tokens).toBe(150);
   });
 
-  test("reads finalized per-turn usage nested in message (message_end/turn_end)", () => {
+  test("nested per-turn usage advances context only, never session totals", () => {
     const next = applyUsageEvent(base, { message: { role: "assistant", usage: { input: 100, output: 50, totalTokens: 150, cost: { total: 0.01 } } } });
-    expect(next?.usage.totalTokens).toBe(150);
     expect(next?.contextUsage?.tokens).toBe(150);
-    expect(next?.usage.cost).toBe(0.01);
+    expect(next?.usage).toMatchObject({ input: 0, output: 0, totalTokens: 0, cost: 0 });
+  });
+
+  test("session totals follow top-level cumulative usage, not nested per-turn usage", () => {
+    const afterFirst = applyUsageEvent(base, { usage: { input: 100, output: 50, totalTokens: 150, cost: { total: 0.01 } } });
+    expect(afterFirst?.usage).toMatchObject({ input: 100, output: 50, totalTokens: 150, cost: 0.01 });
+    const afterSecond = applyUsageEvent(afterFirst, { message: { role: "assistant", usage: { input: 200, output: 100, totalTokens: 300, cost: { total: 0.02 } } } });
+    expect(afterSecond?.contextUsage?.tokens).toBe(300);
+    expect(afterSecond?.usage).toMatchObject({ input: 100, output: 50, totalTokens: 150, cost: 0.01 });
   });
 
   test("a zero top-level placeholder does not hide nested finalized usage", () => {
     const next = applyUsageEvent(base, { usage: { input: 0, output: 0, totalTokens: 0 }, message: { role: "assistant", usage: { input: 100, output: 50, totalTokens: 150 } } });
     expect(next?.contextUsage?.tokens).toBe(150);
+    expect(next?.usage).toMatchObject({ input: 0, output: 0, totalTokens: 0, cost: 0 });
   });
 
   test("a zero or missing in-flight cost never clobbers the last known cost", () => {

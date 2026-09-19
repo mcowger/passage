@@ -303,17 +303,33 @@ describe("TranscriptState", () => {
     state.applyEvent("message_update", { usage: { input: 100, output: 50, totalTokens: 150 } });
     state.applyEvent("message_update", { usage: { input: 0, output: 0, totalTokens: 0 } });
     expect(state.snapshot().contextUsage.tokens).toBe(150);
+    // A zero in-flight placeholder carries no cumulative totals either.
+    expect(state.snapshot().usage).toMatchObject({ input: 100, output: 50, totalTokens: 150 });
   });
 
-  test("message_end and turn_end update context from nested message.usage", () => {
+  test("nested per-turn message.usage advances context only, never session totals", () => {
     const state = new TranscriptState();
+    // A finalized turn carrying only nested per-turn usage: occupancy advances
+    // to the latest turn, but there are no cumulative totals to take -- the
+    // session fields stay at zero instead of adopting the single turn.
     state.applyEvent("message_end", { message: { role: "assistant", content: "done", usage: { input: 100, output: 50, totalTokens: 150, cost: { total: 0.01 } } } });
     expect(state.snapshot().contextUsage.tokens).toBe(150);
-    expect(state.snapshot().usage.cost).toBe(0.01);
-    // turn_end repeats the finalized message: occupancy advances, cost stays monotonic.
+    expect(state.snapshot().usage).toMatchObject({ input: 0, output: 0, totalTokens: 0, cost: 0 });
+    // Cumulative session totals arrive top-level and move the usage fields.
+    state.applyEvent("message_update", { usage: { input: 100, output: 50, totalTokens: 150, cost: { total: 0.01 } } });
+    expect(state.snapshot().usage).toMatchObject({ input: 100, output: 50, totalTokens: 150, cost: 0.01 });
+    // The next turn's nested per-turn record advances occupancy but must not
+    // clobber the cumulative totals back down to one turn's size.
+    state.applyEvent("message_end", { message: { role: "assistant", content: "done", usage: { input: 200, output: 100, totalTokens: 300, cost: { total: 0.02 } } } });
+    expect(state.snapshot().contextUsage.tokens).toBe(300);
+    expect(state.snapshot().usage).toMatchObject({ input: 100, output: 50, totalTokens: 150, cost: 0.01 });
+    // turn_end repeats the finalized message: still no clobber of session totals.
     state.applyEvent("turn_end", { message: { role: "assistant", content: "done", usage: { input: 200, output: 100, totalTokens: 300, cost: { total: 0.02 } } } });
     expect(state.snapshot().contextUsage.tokens).toBe(300);
-    expect(state.snapshot().usage.cost).toBe(0.02);
+    expect(state.snapshot().usage).toMatchObject({ input: 100, output: 50, totalTokens: 150, cost: 0.01 });
+    // The cumulative top-level record for both turns advances the totals.
+    state.applyEvent("message_update", { usage: { input: 300, output: 150, totalTokens: 450, cost: { total: 0.03 } } });
+    expect(state.snapshot().usage).toMatchObject({ input: 300, output: 150, totalTokens: 450, cost: 0.03 });
   });
 
   test("a zero or missing in-flight cost never clobbers the last known cost", () => {

@@ -14,8 +14,10 @@ function liveUsageTokens(usage: UsageRecord | undefined): number {
   return total;
 }
 
-/** Prefers the top-level record when it carries a positive count, otherwise
- *  falls back to the finalized per-turn usage nested in `message.usage`. */
+/** Selects the live context-occupancy source: prefers the top-level record
+ *  when it carries a positive count, otherwise falls back to the finalized
+ *  per-turn usage nested in `message.usage`. The result sizes the context
+ *  meter only -- it must never feed the cumulative session totals. */
 function pickLiveUsage(top: UsageRecord | undefined, nested: UsageRecord | undefined): UsageRecord | undefined {
   if (top && liveUsageTokens(top) > 0) return top;
   return nested ?? top;
@@ -66,10 +68,13 @@ export function applyRowUpsert(history: AgentHistory | undefined, row: TimelineI
 }
 
 /** Applies the usage/context-window fields carried by live Pi events.
- *  `message_update` carries the latest cumulative usage top-level (often
- *  zero until the provider finalizes it); `message_end`/`turn_end` carry the
- *  finalized per-turn usage nested in `message.usage` with no top-level
- *  copy. Both must feed the pill or it only moves when the run settles.
+ *  `message_update` carries the latest cumulative session usage top-level
+ *  (often zero until the provider finalizes it); `message_end`/`turn_end`
+ *  carry the finalized per-turn usage nested in `message.usage` with no
+ *  top-level copy. The nested record is a single turn's size: it may feed
+ *  the context-occupancy meter (which tracks the latest turn) but must never
+ *  overwrite the cumulative session totals -- otherwise the cost pill shows
+ *  the last turn instead of the session sum.
  *  Never touches `timeline` -- that is `applyRowUpsert`'s job alone, so
  *  there remains exactly one path that can mutate it. */
 export function applyUsageEvent(history: AgentHistory | undefined, payload: Record<string, unknown> | undefined): AgentHistory | undefined {
@@ -77,33 +82,46 @@ export function applyUsageEvent(history: AgentHistory | undefined, payload: Reco
   const top = payload.usage as UsageRecord | undefined;
   const message = payload.message as Record<string, unknown> | undefined;
   const nested = (message !== null && typeof message === "object" && !Array.isArray(message) ? message.usage : undefined) as UsageRecord | undefined;
-  const usage = pickLiveUsage(top, nested);
-  if (!usage) return history;
-  // Session cost is cumulative and never decreases: some providers report
+  // Session totals are cumulative and never decrease: some providers report
   // zero (or no) cost while a turn is in flight and only finalize it on
   // completion, so a smaller incoming total must never clobber the last
   // known value -- otherwise the composer's cost pill blinks in and out as
-  // the call moves through sending/waiting/completed states.
-  const incomingCost = usage.cost?.total;
-  const cost = typeof incomingCost === "number" && Number.isFinite(incomingCost)
-    ? Math.max(history.usage.cost, incomingCost)
-    : history.usage.cost;
-  const nextUsage = {
-    input: usage.input ?? history.usage.input,
-    output: usage.output ?? history.usage.output,
-    cacheRead: usage.cacheRead ?? history.usage.cacheRead,
-    cacheWrite: usage.cacheWrite ?? history.usage.cacheWrite,
-    totalTokens: usage.totalTokens ?? history.usage.totalTokens,
-    cost,
-  };
+  // the call moves through sending/waiting/completed states. Only the
+  // top-level cumulative record may move these fields, so a zero in-flight
+  // placeholder can no longer zero the totals.
+  let nextUsage = history.usage;
+  if (top && typeof top === "object") {
+    const incomingCost = top.cost?.total;
+    const cost = typeof incomingCost === "number" && Number.isFinite(incomingCost)
+      ? Math.max(history.usage.cost, incomingCost)
+      : history.usage.cost;
+    if (liveUsageTokens(top) > 0) {
+      nextUsage = {
+        input: top.input ?? history.usage.input,
+        output: top.output ?? history.usage.output,
+        cacheRead: top.cacheRead ?? history.usage.cacheRead,
+        cacheWrite: top.cacheWrite ?? history.usage.cacheWrite,
+        totalTokens: top.totalTokens ?? history.usage.totalTokens,
+        cost,
+      };
+    } else if (cost !== history.usage.cost) {
+      nextUsage = { ...history.usage, cost };
+    }
+  }
   // Streaming usage is per-message, so its total is the live context size.
   // `message_update` records may report zero until the provider finalizes
   // usage, so only a positive count may replace the last known context
   // occupancy -- overwriting it with zero would flicker the composer's
-  // context pill on every response.
-  const streamed = usage.totalTokens && usage.totalTokens > 0
-    ? usage.totalTokens
-    : (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+  // context pill on every response. Prefer the cumulative top-level record;
+  // fall back to the finalized per-turn usage nested in `message.usage` on
+  // `message_end`/`turn_end`.
+  const live = pickLiveUsage(top, nested);
+  const streamed = live
+    ? (live.totalTokens && live.totalTokens > 0
+      ? live.totalTokens
+      : (live.input ?? 0) + (live.output ?? 0) + (live.cacheRead ?? 0) + (live.cacheWrite ?? 0))
+    : 0;
+  if (nextUsage === history.usage && streamed <= 0) return history;
   return {
     ...history,
     usage: nextUsage,

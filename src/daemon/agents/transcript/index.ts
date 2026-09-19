@@ -56,8 +56,10 @@ function liveUsageTokens(usage: UsageRecord | undefined): number {
   return total;
 }
 
-/** Prefers the top-level record when it carries a positive count, otherwise
- *  falls back to the finalized per-turn usage nested in `message.usage`. */
+/** Selects the live context-occupancy source: prefers the top-level record
+ *  when it carries a positive count, otherwise falls back to the finalized
+ *  per-turn usage nested in `message.usage`. The result sizes the context
+ *  meter only -- it must never feed the cumulative session totals. */
 function pickLiveUsage(top: UsageRecord | undefined, nested: UsageRecord | undefined): UsageRecord | undefined {
   if (top && liveUsageTokens(top) > 0) return top;
   return nested ?? top;
@@ -184,38 +186,50 @@ export class TranscriptState {
   }
 
   private applyUsage(payload: Record<string, unknown>): void {
-    // `message_update` carries the latest cumulative usage top-level (often
-    // zero until the provider finalizes it); `message_end`/`turn_end` carry
-    // the finalized per-turn usage nested in `message.usage` with no
-    // top-level copy. Both must feed the pill or it only moves on settle.
+    // `message_update` carries the latest cumulative session usage top-level
+    // (often zero until the provider finalizes it); `message_end`/`turn_end`
+    // carry the finalized per-turn usage nested in `message.usage` with no
+    // top-level copy. The nested record is a single turn's size: it may feed
+    // the context-occupancy meter (which tracks the latest turn) but must
+    // never overwrite the cumulative session totals -- otherwise the cost
+    // pill shows the last turn instead of the session sum.
     const top = object(payload.usage) as UsageRecord | undefined;
     const nested = object(object(payload.message)?.usage) as UsageRecord | undefined;
-    const usage = pickLiveUsage(top, nested);
-    if (!usage) return;
-    // Session cost is cumulative and never decreases: some providers report
+    // Session totals are cumulative and never decrease: some providers report
     // zero (or no) cost while a turn is in flight and only finalize it on
     // completion, so a smaller incoming total must never clobber the last
     // known value -- otherwise the composer's cost pill blinks in and out
-    // as the call moves through sending/waiting/completed states.
-    const incomingCost = usage.cost?.total;
-    const cost = typeof incomingCost === "number" && Number.isFinite(incomingCost)
-      ? Math.max(this.usage.cost, incomingCost)
-      : this.usage.cost;
-    this.usage = {
-      input: usage.input ?? this.usage.input,
-      output: usage.output ?? this.usage.output,
-      cacheRead: usage.cacheRead ?? this.usage.cacheRead,
-      cacheWrite: usage.cacheWrite ?? this.usage.cacheWrite,
-      totalTokens: usage.totalTokens ?? this.usage.totalTokens,
-      cost,
-    };
+    // as the call moves through sending/waiting/completed states. Only the
+    // top-level cumulative record may move these fields.
+    if (top) {
+      const incomingCost = top.cost?.total;
+      const cost = typeof incomingCost === "number" && Number.isFinite(incomingCost)
+        ? Math.max(this.usage.cost, incomingCost)
+        : this.usage.cost;
+      if (liveUsageTokens(top) > 0) {
+        this.usage = {
+          input: top.input ?? this.usage.input,
+          output: top.output ?? this.usage.output,
+          cacheRead: top.cacheRead ?? this.usage.cacheRead,
+          cacheWrite: top.cacheWrite ?? this.usage.cacheWrite,
+          totalTokens: top.totalTokens ?? this.usage.totalTokens,
+          cost,
+        };
+      } else if (cost !== this.usage.cost) {
+        this.usage = { ...this.usage, cost };
+      }
+    }
     // Streaming usage is per-message, so its total is the live context size.
     // `message_update` records may report zero until the provider finalizes
     // usage, so only a positive count may replace the last known occupancy --
     // overwriting it with zero would flicker the composer's context pill.
-    const streamed = usage.totalTokens && usage.totalTokens > 0
-      ? usage.totalTokens
-      : (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+    // Prefer the cumulative top-level record; fall back to the finalized
+    // per-turn usage nested in `message.usage` on `message_end`/`turn_end`.
+    const live = pickLiveUsage(top, nested);
+    if (!live) return;
+    const streamed = live.totalTokens && live.totalTokens > 0
+      ? live.totalTokens
+      : (live.input ?? 0) + (live.output ?? 0) + (live.cacheRead ?? 0) + (live.cacheWrite ?? 0);
     if (streamed > 0) this.contextTokens = streamed;
   }
 
