@@ -17,7 +17,7 @@ import {
   type PiRpcOptions,
 } from "./rpc/index.ts";
 import { MetadataRepositories, type Agent } from "../metadata/repositories.ts";
-import { AgentTitleSuggester, DEFAULT_AGENT_TITLE } from "./title-suggester.ts";
+import { AgentTitleSuggester } from "./title-suggester.ts";
 import { normalizeAvailableModels } from "../models/catalog.ts";
 import { parsePiExtensionUiDialog } from "./ui.ts";
 import { AgentError, ID } from "./errors.ts";
@@ -25,11 +25,11 @@ import { errorFields, logger } from "../logging.ts";
 import { AgentRuntime, MAX_RUNTIME_DIAGNOSTICS, type Cancellation } from "./runtime.ts";
 import { AgentViews } from "./agentViews.ts";
 import { AgentBlockers } from "./agentBlockers.ts";
+import { AgentTitles } from "./agentTitles.ts";
 import type { AgentServiceEvent } from "./runtime.ts";
 // Re-exported for existing importers; new code should import from ./runtime.ts directly.
 export type { AgentServiceEvent } from "./runtime.ts";
 import {
-  collectTitleSources,
   compactRefusalReason,
   isGitCommitToolEvent,
 } from "./serviceHelpers.ts";
@@ -99,6 +99,7 @@ export class AgentService {
   private readonly runtime = new AgentRuntime();
   private readonly views: AgentViews;
   private readonly blockers: AgentBlockers;
+  private readonly titles: AgentTitles;
   private readonly manager: PiRpcManager;
   private readonly listLimit: number;
   private readonly pi: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
@@ -176,6 +177,13 @@ export class AgentService {
       requireWorkspace: (workspaceId) => this.requireWorkspace(workspaceId),
     });
     this.blockers = new AgentBlockers(this.runtime, this.manager);
+    this.titles = new AgentTitles({
+      repositories: this.repositories,
+      runtime: this.runtime,
+      titleSuggester: this.titleSuggester,
+      getSuggestConfig: this.getSuggestConfig,
+      emit: (event) => this.emit(event),
+    });
   }
 
   /** Refuses new agent work while the daemon is draining/ready/stopping.
@@ -1113,7 +1121,7 @@ export class AgentService {
     // the completed assistant text, turn_end follows a thinking-only turn,
     // and agent_settled covers text-less responses (tools-only, errors).
     if (type === "message_end" || type === "turn_end" || type === "agent_settled") {
-      this.maybeAutoTitle(agentId, state.snapshot().timeline, type === "agent_settled");
+      this.titles.maybeAutoTitle(agentId, state.snapshot().timeline, type === "agent_settled");
     }
   }
 
@@ -1131,49 +1139,7 @@ export class AgentService {
     // first response contributed, or just the first user message.
     const userCount = timeline.filter((row) => row.kind === "user").length;
     if (userCount < 2) return;
-    this.maybeAutoTitle(agentId, timeline, true);
-  }
-
-  /** Fire-and-forget auto-title: once the transcript holds the first user
-   *  message plus the first agent response, asks the workspace's
-   *  suggestion model for a 3-4 word title and persists it. Only agents
-   *  still carrying the create() placeholder are eligible (a custom
-   *  create-time title or an already applied suggestion opts out). Never
-   *  throws and never blocks the message path -- failures simply leave the
-   *  placeholder in place and retry on the next titlable event. */
-  private maybeAutoTitle(agentId: string, timeline: TimelineItem[], allowUserOnly = false): void {
-    const sources = collectTitleSources(timeline);
-    if (sources.length === 0) return;
-    if (sources.length === 1 && !allowUserOnly) return;
-    const agent = this.repositories.agents.get(agentId);
-    if (!agent || agent.archivedAt) return;
-    if (agent.titleOverridden || agent.title !== DEFAULT_AGENT_TITLE) return;
-    if (this.runtime.titleSuggestions.has(agentId)) return;
-    this.runtime.titleSuggestions.add(agentId);
-    void (async () => {
-      try {
-        let model: string | undefined;
-        let thinkingLevel: string | undefined;
-        let titlePrompt = "";
-        try {
-          const config = this.getSuggestConfig?.(agent.workspaceId);
-          model = config?.model?.trim() || undefined;
-          thinkingLevel = config?.thinkingLevel?.trim() || undefined;
-          titlePrompt = config?.titlePrompt ?? "";
-        } catch { model = undefined; thinkingLevel = undefined; titlePrompt = ""; }
-        let cwd: string | undefined;
-        try { cwd = this.repositories.workspaces.get(agent.workspaceId)?.cwd; } catch { cwd = undefined; }
-        const title = await this.titleSuggester.suggestTitle(sources, cwd, model, thinkingLevel, titlePrompt);
-        if (!title) return;
-        const current = this.repositories.agents.get(agentId);
-        if (!current || current.archivedAt || current.titleOverridden || current.title !== DEFAULT_AGENT_TITLE) return;
-        this.repositories.agents.updateTitle(agentId, title);
-        const status = (this.repositories.agents.get(agentId)?.lastKnownStatus as AgentStatus) ?? "idle";
-        this.emit({ agentId, type: "title", status, payload: { title } });
-      } catch {} finally {
-        this.runtime.titleSuggestions.delete(agentId);
-      }
-    })();
+    this.titles.maybeAutoTitle(agentId, timeline, true);
   }
 
   /** Validates and writes file uploads into the shared attachment cache. */
