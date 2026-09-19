@@ -68,8 +68,32 @@ import { Spinner } from "./ui/spinner.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 
 const STREAMING_STATS_INTERVAL_MS = 300;
-/** Distance from the bottom that still counts as following the live tail. */
-const STICK_TO_BOTTOM_SLACK_PX = 48;
+/**
+ * Hysteresis for the live-tail pin: breaking away takes only a small upward
+ * motion, while rejoining takes a scroll back near the bottom. A single
+ * generous threshold (previously 48px both ways) felt like fighting on
+ * mobile -- small flicks kept snapping back to the bottom until the user
+ * made an exaggerated gesture to break free.
+ */
+export const UNPIN_SLACK_PX = 12;
+/** Distance from the bottom that re-pins an unpinned viewport. */
+export const REPIN_SLACK_PX = 48;
+
+/**
+ * Hysteresis for the live-tail pin. A pinned viewport breaks away on a
+ * small motion (`unpinSlack`); an unpinned one rejoins only near the
+ * bottom (`repinSlack`). Pure for testing; the scroll listener below is
+ * the only live caller.
+ */
+export function resolvePinned(
+  distanceFromBottom: number,
+  currentlyPinned: boolean,
+  unpinSlack: number = UNPIN_SLACK_PX,
+  repinSlack: number = REPIN_SLACK_PX,
+): boolean {
+  if (currentlyPinned) return distanceFromBottom <= unpinSlack;
+  return distanceFromBottom <= repinSlack;
+}
 /** Distance from the top that triggers backfilling the previous page of history. */
 const LOAD_MORE_HISTORY_SLACK_PX = 120;
 
@@ -859,8 +883,12 @@ export function AgentPanel({
     return () => clearInterval(interval);
   }, [streamActive, agent.runStartedAt]);
 
-  // Whether the viewport is following the live tail. A manual scroll away
-  // unpins it; scrolling back within the slack re-pins it. Row heights can
+  // Whether the viewport is following the live tail. A small upward motion
+  // unpins it (UNPIN_SLACK_PX); scrolling back near the bottom re-pins it
+  // (REPIN_SLACK_PX). Autoscroll never runs while a finger is down, so the
+  // per-frame re-assert below can't fight an active touch drag -- the
+  // scroll listener records the unpin during the gesture and the next
+  // frame after touchend honors it. Row heights can
   // change many times a second while streaming (tool output growing,
   // expansion resolving) -- driving autoscroll off a single post-commit
   // effect let that outpace React and yanked the viewport around. Instead
@@ -868,9 +896,17 @@ export function AgentPanel({
   // synchronously before paint on every other render), so it can only ever
   // sit exactly at the bottom or exactly where the user left it.
   const pinnedRef = useRef(true);
+  // True while a touch gesture is active on the timeline. Autoscroll stays
+  // parked for the whole gesture so it never fights the finger; the scroll
+  // listener (which still runs) decides the post-gesture pin state.
+  const userTouchingRef = useRef(false);
+  // Finger Y + scroll offset at touchstart, so an upward drag unpins
+  // immediately even before the scroll event catches up (iOS coalesces
+  // scroll events during a drag).
+  const touchStartRef = useRef<{ y: number; scrollTop: number } | null>(null);
   const scrollToBottomIfPinned = () => {
     const el = timelineRef.current;
-    if (!el || !pinnedRef.current) return;
+    if (!el || !pinnedRef.current || userTouchingRef.current) return;
     el.scrollTop = el.scrollHeight;
   };
   const questionRequest = useMemo(
@@ -930,14 +966,49 @@ export function AgentPanel({
     const el = timelineRef.current;
     if (!el) return;
     const onScroll = () => {
-      pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_TO_BOTTOM_SLACK_PX;
+      pinnedRef.current = resolvePinned(el.scrollHeight - el.scrollTop - el.clientHeight, pinnedRef.current);
       if (hasMoreHistoryRef.current && !loadingMoreHistoryRef.current && el.scrollTop <= LOAD_MORE_HISTORY_SLACK_PX) {
         pendingScrollRestoreRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
         onLoadMoreHistoryRef.current?.();
       }
     };
+    const onTouchStart = (event: TouchEvent) => {
+      userTouchingRef.current = true;
+      const touch = event.touches[0];
+      touchStartRef.current = touch ? { y: touch.clientY, scrollTop: el.scrollTop } : null;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      // Unpin on upward-drag intent right away instead of waiting for the
+      // coalesced scroll event: a downward finger move (clientY grows) or
+      // a scrollTop that already retreated past the unpin slack means the
+      // user is reading earlier output.
+      if (!pinnedRef.current) return;
+      const start = touchStartRef.current;
+      const touch = event.touches[0];
+      if (touch && start && touch.clientY - start.y > 10) {
+        pinnedRef.current = false;
+        return;
+      }
+      if (start && start.scrollTop - el.scrollTop > UNPIN_SLACK_PX) {
+        pinnedRef.current = false;
+      }
+    };
+    const onTouchEnd = () => {
+      userTouchingRef.current = false;
+      touchStartRef.current = null;
+    };
     el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
   }, []);
 
   useLayoutEffect(() => {

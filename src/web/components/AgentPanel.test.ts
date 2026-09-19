@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { createQueuedFollowUp, extractLatestThinkingSummary, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, resolveComposerGitOptions, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, shouldSuppressComposerClickAfterTouch, COMPOSER_TOUCH_SEND_SUPPRESS_MS, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
+import { createQueuedFollowUp, extractLatestThinkingSummary, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, resolveComposerGitOptions, resolvePinned, REPIN_SLACK_PX, UNPIN_SLACK_PX, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, shouldSuppressComposerClickAfterTouch, COMPOSER_TOUCH_SEND_SUPPRESS_MS, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 
@@ -668,6 +668,22 @@ describe("resolveActiveQuestionRequest", () => {
 
     expect(timelineWithoutBlockingTool(timeline, true).map((item) => item.id)).toEqual(["read-tool", "assistant"]);
     expect(timelineWithoutBlockingTool(timeline, false)).toEqual(timeline);
+  });
+});
+
+describe("resolvePinned", () => {
+  test("a small upward motion breaks the pin (no exaggerated gesture)", () => {
+    expect(resolvePinned(0, true)).toBe(true);
+    expect(resolvePinned(UNPIN_SLACK_PX, true)).toBe(true);
+    expect(resolvePinned(UNPIN_SLACK_PX + 1, true)).toBe(false);
+  });
+
+  test("scrolling back near the bottom re-pins", () => {
+    expect(resolvePinned(REPIN_SLACK_PX, false)).toBe(true);
+    expect(resolvePinned(REPIN_SLACK_PX + 1, false)).toBe(false);
+    // Hysteresis: the same distance that keeps an unpinned view unpinned
+    // would already have broken a pinned one.
+    expect(UNPIN_SLACK_PX).toBeLessThan(REPIN_SLACK_PX);
   });
 });
 
