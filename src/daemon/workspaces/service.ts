@@ -4,6 +4,7 @@ import { projectSchema, locationSchema, workspaceSchema, type Project, type Work
 import { workspaceLayoutSchema, createDefaultLayout, type WorkspaceLayout } from "../../shared/domain/layout.ts";
 import { appearanceSettingsSchema, workspaceSettingsSchema, DEFAULT_APPEARANCE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, type AppearanceSettings, type WorkspaceSettings } from "../../shared/domain/settings.ts";
 import { MetadataRepositories } from "../metadata/repositories.ts";
+import { sanitizedSubprocessEnv } from "../env.ts";
 
 const MAX_LIST = 100;
 const MAX_GIT_OUTPUT = 4096;
@@ -195,7 +196,7 @@ export class WorkspaceService {
   private async directory(path: string, code: "invalid-root"): Promise<string> { try { if (!(await stat(path)).isDirectory()) throw new Error(); return await realpath(path); } catch { throw new WorkspaceError(code, "Directory does not exist or is inaccessible"); } }
   private async within(root: string, requested: string): Promise<string> { const candidate = resolve(root, requested); const lexical = relative(root, candidate); if (lexical !== "" && lexical.split(/[\\/]/).some((part) => part === "..")) throw new WorkspaceError("outside-root", "Path is outside the registered workspace root"); let canonical: string; try { canonical = await realpath(candidate); } catch { throw new WorkspaceError("invalid-root", "Path does not exist or is inaccessible"); } const rel = relative(root, canonical); if (rel !== "" && rel.split(/[\\/]/).some((part) => part === "..")) throw new WorkspaceError("outside-root", "Path is outside the registered workspace root"); return canonical; }
   private async discoverGit(cwd: string): Promise<{ checkoutRoot: string; mainRepositoryRoot: string; branchRef: string | null } | null> {
-    const process = Bun.spawn(["git", "-C", cwd, "rev-parse", "--show-toplevel", "--git-common-dir", "--abbrev-ref", "HEAD"], { stdout: "pipe", stderr: "ignore" });
+    const process = Bun.spawn(["git", "-C", cwd, "rev-parse", "--show-toplevel", "--git-common-dir", "--abbrev-ref", "HEAD"], { stdout: "pipe", stderr: "ignore", env: sanitizedSubprocessEnv() });
     const timeout = setTimeout(() => {
       if (process.exitCode === null) process.kill();
     }, GIT_TIMEOUT_MS);

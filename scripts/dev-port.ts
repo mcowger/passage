@@ -4,7 +4,7 @@
 // Prints a single port number on STDOUT (nothing else); diagnostics go to
 // STDERR so the output composes with command substitution:
 //
-//   PORT="$(bun scripts/dev-port.ts)" bun --watch run src/daemon/index.ts
+//   bun --watch run src/daemon/index.ts --port "$(bun scripts/dev-port.ts)"
 //
 // Stability comes from hashing the canonical worktree root, so each checkout
 // keeps its own port across restarts.

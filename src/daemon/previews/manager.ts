@@ -13,6 +13,7 @@ import {
 import type { MetadataRepositories } from "../metadata/repositories.ts";
 import type { WorkspaceService } from "../workspaces/service.ts";
 import { errorFields, logger } from "../logging.ts";
+import { sanitizedSubprocessEnv } from "../env.ts";
 
 export const PREVIEW_SESSION_NAMESPACE = "passage";
 export const PREVIEW_SESSION_PREFIX = "pp-";
@@ -67,12 +68,11 @@ class RealAgentBrowserRunner implements AgentBrowserRunner {
     const child = Bun.spawn([this.binary, ...args], {
       stdout: "pipe",
       stderr: "pipe",
-      env: {
-        ...process.env,
+      env: sanitizedSubprocessEnv({
         AGENT_BROWSER_NAMESPACE: PREVIEW_SESSION_NAMESPACE,
         AGENT_BROWSER_IDLE_TIMEOUT_MS: String(PREVIEW_IDLE_TIMEOUT_MS),
         AGENT_BROWSER_ALLOWED_DOMAINS: "localhost,127.0.0.1,::1",
-      },
+      }),
     });
     const timeout = setTimeout(() => {
       try {

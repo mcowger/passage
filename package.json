@@ -7,7 +7,7 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "PORT=\"$(bun scripts/dev-port.ts)\" bun --watch run src/daemon/index.ts",
+    "dev": "bun --watch run src/daemon/index.ts --port \"$(bun scripts/dev-port.ts)\"",
     "dev:stop": "bun scripts/dev-stop.ts",
     "stop": "bun scripts/dev-stop.ts",
     "frpc": "bun run scripts/run-frpc.ts",

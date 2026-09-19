@@ -1,4 +1,5 @@
 import type { BuildInfo } from "../shared/build-info.ts";
+import { sanitizedSubprocessEnv } from "./env.ts";
 
 /** Values injected by scripts/build.ts via Bun.build `define`. In dev they
  *  are undefined and we fall back to runtime env / live git / "dev". */
@@ -19,7 +20,7 @@ function injected(name: "PASSAGE_BUILD_COMMIT" | "PASSAGE_BUILD_TIME" | "PASSAGE
 
 function liveGitCommit(): string | undefined {
   try {
-    const result = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe", stderr: "ignore" });
+    const result = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe", stderr: "ignore", env: sanitizedSubprocessEnv() });
     if (result.exitCode !== 0) return undefined;
     const commit = new TextDecoder().decode(result.stdout).trim();
     return /^[0-9a-f]{4,40}$/i.test(commit) ? commit : undefined;
@@ -30,7 +31,7 @@ function liveGitCommit(): string | undefined {
 
 function liveGitDirty(): boolean {
   try {
-    const result = Bun.spawnSync(["git", "status", "--porcelain"], { stdout: "pipe", stderr: "ignore" });
+    const result = Bun.spawnSync(["git", "status", "--porcelain"], { stdout: "pipe", stderr: "ignore", env: sanitizedSubprocessEnv() });
     if (result.exitCode !== 0) return false;
     return new TextDecoder().decode(result.stdout).trim().length > 0;
   } catch {

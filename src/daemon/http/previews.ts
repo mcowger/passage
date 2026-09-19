@@ -24,7 +24,7 @@ function previewId(value: string): string {
   return parsed.data;
 }
 
-export const createPreviewRoutes = (previews: WebPreviewManager, _workspaceEvents: WorkspaceEventHub): Hono => {
+export const createPreviewRoutes = (previews: WebPreviewManager, _workspaceEvents: WorkspaceEventHub, options?: { serverPort?: number }): Hono => {
   const app = new Hono();
   app.use("*", async (c, next) => {
     c.header("Cache-Control", "no-store");
@@ -53,7 +53,11 @@ export const createPreviewRoutes = (previews: WebPreviewManager, _workspaceEvent
   app.get("/api/workspaces/:workspaceId/previews/candidates", async (c) => {
     try {
       const workspaceId = previewId(c.req.param("workspaceId"));
-      return ok(await previews.portCandidates(workspaceId, [Number(process.env.PORT ?? 3333)]));
+      // Exclude the daemon's own listen port so it is never suggested as a
+      // user dev-server candidate. The resolved bind port is injected by
+      // the daemon entrypoint; never read PORT/PASEO_PORT here, which
+      // commonly leak in from a different checkout's shell.
+      return ok(await previews.portCandidates(workspaceId, options?.serverPort !== undefined ? [options.serverPort] : []));
     } catch (e) {
       return error(e instanceof Error ? e.message : "invalid-request");
     }

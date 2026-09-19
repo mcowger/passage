@@ -13,6 +13,7 @@ import {
 } from "../../shared/protocol/terminals.ts";
 import { WorkspaceError, type WorkspaceService } from "../workspaces/service.ts";
 import { errorFields, logger } from "../logging.ts";
+import { sanitizedSubprocessEnv } from "../env.ts";
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
@@ -96,11 +97,13 @@ class TerminalInstance {
     try {
       this.process = Bun.spawn(resolvePtyShellArgv(shell), {
         cwd,
-        env: {
-          ...process.env,
+        // Strip the daemon's own PORT/PASEO_PORT so shells (and everything
+        // they launch, e.g. Vite honoring PORT) never inherit this
+        // worktree's bind port from a different checkout's launch env.
+        env: sanitizedSubprocessEnv({
           TERM: "xterm-256color",
           COLORTERM: "truecolor",
-        },
+        }),
         terminal: this.terminal,
       });
 

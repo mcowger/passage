@@ -2,6 +2,7 @@ import { realpath, stat, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { DiffHunk, DiffLine, GitChangeKind, GitDiff, GitDiscovery, GitFileStatus, GitStatus } from "../../shared/domain/git.ts";
 import { errorFields, logger } from "../logging.ts";
+import { sanitizedSubprocessEnv } from "../env.ts";
 
 const DEFAULT_LIMIT = 512 * 1024;
 const DEFAULT_TIMEOUT = 3000;
@@ -32,7 +33,7 @@ export class GitService {
     const operation = args[0] ?? "unknown";
     const release = await this.slot(); const max = options.maxOutputBytes ?? DEFAULT_LIMIT; const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT;
     let p: Bun.Subprocess;
-    try { p = Bun.spawn(["git", "-C", cwd, ...args], { cwd, env: { ...process.env, LC_ALL: "C" }, stdout: "pipe", stderr: "pipe" }); } catch (error) {
+    try { p = Bun.spawn(["git", "-C", cwd, ...args], { cwd, env: sanitizedSubprocessEnv({ LC_ALL: "C" }), stdout: "pipe", stderr: "pipe" }); } catch (error) {
       release();
       logger("git").error("Git process could not start", { event: "git.start_failed", operation, durationMs: performance.now() - startedAt, ...errorFields(error) });
       throw new GitError("Unable to start Git", String(error));

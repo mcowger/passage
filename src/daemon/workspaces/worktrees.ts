@@ -6,6 +6,7 @@ import { WorkspaceActionsService } from "./actions.ts";
 import { GitService } from "./git.ts";
 import type { MetadataRepositories } from "../metadata/repositories.ts";
 import { MetadataGenerator, withProjectPrefix, type WorktreeSuggestion } from "./metadata-generator.ts";
+import { sanitizedSubprocessEnv } from "../env.ts";
 
 export class WorktreeError extends Error { constructor(public readonly code: string, message: string) { super(message); } }
 export type DiscoveredWorktree = {
@@ -300,18 +301,18 @@ export class WorktreeService {
   }
 
   private async command(cwd: string, args: string[]): Promise<{ code: number; stderr: string }> {
-    const p = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "ignore", stderr: "pipe" });
+    const p = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "ignore", stderr: "pipe", env: sanitizedSubprocessEnv() });
     const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text().catch(() => "")]);
     return { code, stderr: stderr.slice(0, 2000) };
   }
 
   private async refExists(cwd: string, ref: string): Promise<boolean> {
-    const p = Bun.spawn(["git", "-C", cwd, "rev-parse", "--verify", "--quiet", ref], { stdout: "ignore", stderr: "ignore" });
+    const p = Bun.spawn(["git", "-C", cwd, "rev-parse", "--verify", "--quiet", ref], { stdout: "ignore", stderr: "ignore", env: sanitizedSubprocessEnv() });
     return (await p.exited) === 0;
   }
 
   private async branchExists(cwd: string, branch: string): Promise<boolean> {
-    const p = Bun.spawn(["git", "-C", cwd, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { stdout: "ignore", stderr: "ignore" });
+    const p = Bun.spawn(["git", "-C", cwd, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { stdout: "ignore", stderr: "ignore", env: sanitizedSubprocessEnv() });
     return (await p.exited) === 0;
   }
 

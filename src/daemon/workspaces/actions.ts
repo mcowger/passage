@@ -10,6 +10,7 @@ import {
   type WorkspaceActionRunStatus,
 } from "../../shared/domain/workspace-actions.ts";
 import type { MetadataRepositories } from "../metadata/repositories.ts";
+import { sanitizedSubprocessEnv } from "../env.ts";
 
 export const PASEO_CONFIG_FILE_NAME = "paseo.json";
 const MAX_COMMANDS = 50;
@@ -91,8 +92,10 @@ async function execSetupCommand(
   }
   // Project-authored command strings run under a stable non-login shell so
   // shell startup files cannot rewrite the environment behind our back.
-  // BASH_ENV is stripped for the same reason (mirrors paseo).
-  const env = { ...process.env };
+  // BASH_ENV is stripped for the same reason (mirrors paseo). PORT/
+  // PASEO_PORT are stripped so setup commands (and the dev servers they
+  // launch) never inherit the daemon's own bind port.
+  const env = sanitizedSubprocessEnv();
   delete env.BASH_ENV;
   const process_ = Bun.spawn(["bash", "-c", command], {
     cwd,

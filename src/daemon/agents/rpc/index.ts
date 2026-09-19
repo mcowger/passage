@@ -11,6 +11,7 @@ import {
 } from "../../../shared/protocol/agents.ts";
 import { parsePiExtensionUiDialog, type PiExtensionUiDialog } from "../ui.ts";
 import { errorFields, logger } from "../../logging.ts";
+import { sanitizedSubprocessEnv } from "../../env.ts";
 
 export type PiRecord = { type?: string; id?: string; [key: string]: unknown };
 export type PiImageBlock = AgentImage;
@@ -120,7 +121,10 @@ export class PiRpcProcess {
     if (options.disableTools) command.push("--no-tools");
     this.child = Bun.spawn(command, {
       cwd: options.cwd,
-      env: { ...process.env, PI_CODING_AGENT_DIR: piAgentDirectory() },
+      // Pi tool calls (bash, dev servers) inherit this env: strip the
+      // daemon's own PORT/PASEO_PORT so agent children never see this
+      // worktree's bind port.
+      env: sanitizedSubprocessEnv({ PI_CODING_AGENT_DIR: piAgentDirectory() }),
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",

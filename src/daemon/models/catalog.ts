@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { agentCapabilitiesSchema } from "../../shared/domain/agents.ts";
+import { sanitizedSubprocessEnv } from "../env.ts";
 
 export type CatalogModel = z.infer<typeof agentCapabilitiesSchema>["models"][number];
 
@@ -84,7 +85,7 @@ export async function queryModelCatalog(options: ModelCatalogProbeOptions = {}):
 
   const proc = Bun.spawn([executable, ...(options.executableArgs ?? []), "--mode", "rpc"], {
     cwd: options.cwd,
-    env: { ...process.env, NO_COLOR: "1" },
+    env: sanitizedSubprocessEnv({ NO_COLOR: "1" }),
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",

@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import fuzzysort from "fuzzysort";
 import { MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES, type FileEntry, type FileListing, type FileRead, type FileRevision, type FileWrite } from "../../shared/domain/files.ts";
 import { WorkspaceService, WorkspaceError } from "./service.ts";
+import { sanitizedSubprocessEnv } from "../env.ts";
 
 export class FileError extends Error { constructor(public readonly code: "not-found" | "invalid-path" | "outside-root" | "archived" | "not-file" | "not-directory" | "binary" | "oversize" | "conflict" | "io", message: string) { super(message); this.name = "FileError"; } }
 
@@ -187,7 +188,7 @@ export class FileService {
     try {
       process = Bun.spawn(
         ["git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-        { stdout: "pipe", stderr: "ignore" },
+        { stdout: "pipe", stderr: "ignore", env: sanitizedSubprocessEnv() },
       );
     } catch {
       return null;

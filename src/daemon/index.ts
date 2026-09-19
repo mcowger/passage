@@ -68,8 +68,8 @@ import manifest from "../web/manifest.webmanifest" with { type: "text" };
 import icon from "../web/icon.svg" with { type: "text" };
 import swScript from "../web/sw.js" with { type: "text" };
 import { getBuildInfo } from "./build-info.ts";
+import { resolveDaemonPort } from "./env.ts";
 
-const DEFAULT_PORT = 3333;
 const MAX_WEBSOCKET_COMMAND_BYTES = 64 * 1024;
 const MAX_AGENT_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_WORKSPACE_SUBSCRIPTIONS_PER_SOCKET = 32;
@@ -105,7 +105,10 @@ function resolveShutdownTimeoutMs(): number {
   return minutes * 60_000;
 }
 const shutdownTimeoutMs = resolveShutdownTimeoutMs();
-const port = Number(process.env.PORT ?? DEFAULT_PORT);
+// `--port` wins over `PORT` so a stale PORT inherited from a different
+// checkout's shell can never steal this worktree's bind. Fails fast on an
+// invalid value instead of binding 0/NaN.
+const port = resolveDaemonPort(process.env, Bun.argv.slice(1));
 const isStandaloneExecutable = (Bun as { isStandaloneExecutable?: boolean }).isStandaloneExecutable === true;
 // Standalone binaries are portable: keep their data beside the working
 // directory instead of resolving relative to the source tree layout.
@@ -332,7 +335,7 @@ app.route("/", createFileRoutes(fileService, workspaceEvents));
 app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (workspaceId) => teardownWorkspace(workspaceId) }, workspaceEvents));
 app.route("/", createWorkspaceActionRoutes(workspaceActionsService));
 app.route("/", createTerminalRoutes(terminalManager));
-app.route("/", createPreviewRoutes(previewManager, workspaceEvents));
+app.route("/", createPreviewRoutes(previewManager, workspaceEvents, { serverPort: port }));
 app.route("/", createPushRoutes(pushService));
 app.route("/", createAgentRoutes(agentService));
 app.route("/", createModelRoutes());
