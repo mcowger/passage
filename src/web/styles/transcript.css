@@ -55,6 +55,59 @@
 .assistant-prose { font-size: 14.5px; line-height: 1.62; color: var(--foreground); }
 .assistant-prose p { margin: 0 0 8px; white-space: pre-wrap; }
 .assistant-prose p:last-child { margin-bottom: 0; }
+
+/* Assistant fenced code blocks (Streamdown): keep the header actions quiet so
+ * they read like the tool-row copy buttons instead of a floating toolbar.
+ * Streamdown ships the actions as a bordered, blurred pill (border-sidebar /
+ * bg-sidebar) with 14px icons — bright and oversized next to the 11px
+ * tool-row chrome, so strip the pill and shrink the buttons to match. */
+.assistant-prose [data-streamdown="code-block"],
+.thinking-body [data-streamdown="code-block"] {
+  border-radius: 8px;
+  padding: 6px;
+}
+.assistant-prose [data-streamdown="code-block-header"],
+.thinking-body [data-streamdown="code-block-header"] {
+  height: 26px;
+}
+.assistant-prose [data-streamdown="code-block-actions"],
+.thinking-body [data-streamdown="code-block-actions"] {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.assistant-prose [data-streamdown="code-block-copy-button"],
+.assistant-prose [data-streamdown="code-block-download-button"],
+.thinking-body [data-streamdown="code-block-copy-button"],
+.thinking-body [data-streamdown="code-block-download-button"] {
+  padding: 3px;
+  border-radius: 4px;
+  color: var(--muted);
+}
+.assistant-prose [data-streamdown="code-block-copy-button"]:hover,
+.assistant-prose [data-streamdown="code-block-download-button"]:hover,
+.thinking-body [data-streamdown="code-block-copy-button"]:hover,
+.thinking-body [data-streamdown="code-block-download-button"]:hover {
+  color: var(--foreground);
+  background: var(--surface-hover);
+}
+.assistant-prose [data-streamdown="code-block-copy-button"] svg,
+.assistant-prose [data-streamdown="code-block-download-button"] svg,
+.thinking-body [data-streamdown="code-block-copy-button"] svg,
+.thinking-body [data-streamdown="code-block-download-button"] svg {
+  width: 13px;
+  height: 13px;
+}
+.assistant-prose [data-streamdown="code-block-body"],
+.thinking-body [data-streamdown="code-block-body"] {
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
 .assistant-error-alert { margin: 4px 0; }
 .assistant-abort-alert { border-color: var(--badge-orange); background: var(--badge-orange-subtle); color: var(--badge-orange); }
 
