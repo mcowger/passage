@@ -289,7 +289,6 @@ function ProjectRow({
         </span>
         <Folder className="w-3.5 h-3.5 text-muted-foreground/80 shrink-0" />
         <strong className="min-w-0 flex-1 truncate" title={project.displayLabel}>{project.displayLabel}</strong>
-        <code title={project.canonicalRootPath}>{project.canonicalRootPath}</code>
         {onNewWorktree && (
           <button
             type="button"

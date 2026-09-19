@@ -45,7 +45,6 @@
 .project-title:hover { background: var(--surface-hover); }
 .project-chevron { font-size: 10px; color: var(--muted); width: 12px; text-align: center; }
 .project-title strong { font-size: 12.5px; font-weight: 600; color: var(--foreground); }
-.project-title code { margin-left: auto; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; max-width: 90px; }
 /* New-worktree affordance: desktop shows a hover "+" in the project header
    to cut repetition; touch/small screens keep the explicit row button
    (hover doesn't exist there). Defaults are the desktop state; the
