@@ -113,6 +113,7 @@
   min-height: 26px;
   max-height: 26px;
   width: 28px;
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -136,6 +137,7 @@
   padding: 0 8px;
   box-sizing: border-box;
   line-height: 1;
+  flex: none;
 }
 .composer-action-btn svg { flex: none; }
 

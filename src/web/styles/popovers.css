@@ -1,5 +1,5 @@
 /* ModelPicker & Custom Popovers */
-.model-picker-container { display: flex; align-items: center; gap: 6px; }
+.model-picker-container { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .picker-chip-wrapper { position: relative; }
 
 .composer-chip-btn {
@@ -22,6 +22,10 @@
   line-height: 1;
   transition: background 120ms ease, border-color 120ms ease;
   user-select: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .composer-chip-btn:hover { background: var(--surface-hover); }
 .composer-chip-btn.blue {
@@ -34,7 +38,15 @@
   background: var(--chip-blue-hover, #bae6fd);
 }
 .chip-sparkle { font-size: 11px; opacity: 0.85; }
-.chip-label { font-family: var(--font-ui); }
+.chip-label {
+  font-family: var(--font-ui);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Model Chooser Popover (Upward Floating Dropdown) */
 .model-chooser-popover {
@@ -224,6 +236,7 @@
   font-weight: 600;
   box-sizing: border-box;
   line-height: 1;
+  flex: none;
 }
 .send-btn { min-width: 58px; background: var(--accent); color: #ffffff; border: 0; }
 .send-btn:hover { background: var(--accent-hover); }
