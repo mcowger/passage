@@ -9,8 +9,6 @@ import { PiRpcManager, type PiEvent, type PiProcessHandle, type PiRpcOptions } f
  *  title sets `titleOverridden`; an applied suggestion changes the title
  *  itself -- either one takes the agent out of eligibility. */
 export const DEFAULT_AGENT_TITLE = "Agent";
-/** Auto-titles fire once the transcript holds this many user messages. */
-export const TITLE_SUGGEST_AFTER_USER_MESSAGES = 2;
 /** Per-message characters forwarded to the suggestion model. */
 export const MAX_TITLE_SOURCE_CHARS = 1000;
 /** Display cap for an applied suggestion (domain allows 256). */
@@ -18,9 +16,11 @@ export const MAX_SUGGESTED_TITLE_CHARS = 60;
 
 type TitleSuggesterPiOptions = Pick<PiRpcOptions, "executable" | "executableArgs">;
 
+/** Builds the suggestion prompt over the title sources: the first user
+ *  message followed by thinking/assistant excerpts from the first agent
+ *  response. All provided sources are included (each truncated). */
 export function buildTitlePrompt(messages: string[], template = ""): string {
   const excerpt = messages
-    .slice(0, TITLE_SUGGEST_AFTER_USER_MESSAGES)
     .map((message, index) => `Message ${index + 1}: "${message.slice(0, MAX_TITLE_SOURCE_CHARS).trim()}"`)
     .join("\n");
   if (template.trim() !== "") {
@@ -51,7 +51,9 @@ export function sanitizeAgentTitle(raw: string | null | undefined): string | nul
 }
 
 /** Deterministic fallback from the first user message (first few words),
- *  used when the suggestion model is unavailable or returns nothing usable. */
+ *  used when the suggestion model is unavailable or returns nothing usable.
+ *  `messages[0]` is the first user message; any agent response excerpts
+ *  after it are ignored here. */
 export function fallbackAgentTitle(messages: string[]): string | null {
   const first = messages[0]?.trim().replace(/\s+/g, " ") ?? "";
   if (!first) return null;
@@ -68,7 +70,9 @@ export class AgentTitleSuggester {
 
   constructor(private readonly timeoutMs = 30_000, private readonly pi: TitleSuggesterPiOptions = {}) {}
 
-  /** Best-effort 3-4 word title for the given user messages. Never throws:
+  /** Best-effort 3-4 word title for the first user message plus the first
+   *  agent response excerpts (`messages[0]` is the user message, the rest
+   *  are thinking/assistant text). Never throws:
    *  returns null when the model is unavailable, times out, or answers
    *  with nothing usable (the caller keeps the placeholder / falls back). */
   async suggestTitle(messages: string[], cwd?: string, model?: string, thinkingLevel?: string, promptTemplate = ""): Promise<string | null> {

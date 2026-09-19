@@ -36,12 +36,12 @@ describe("fallbackAgentTitle", () => {
 });
 
 describe("buildTitlePrompt", () => {
-  test("asks for a 3-4 word title over the first messages", () => {
-    const prompt = buildTitlePrompt(["first message", "second message", "third is ignored"]);
+  test("asks for a 3-4 word title over the user message and agent response", () => {
+    const prompt = buildTitlePrompt(["first message", "agent thinking excerpt", "agent response"]);
     expect(prompt).toContain("3-4 words");
     expect(prompt).toContain("first message");
-    expect(prompt).toContain("second message");
-    expect(prompt).not.toContain("third is ignored");
+    expect(prompt).toContain("agent thinking excerpt");
+    expect(prompt).toContain("agent response");
   });
 
   test("renders a custom template with {{messages}}", () => {

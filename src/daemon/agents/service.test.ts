@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { MetadataStore } from "../metadata/database.ts";
 import { MetadataRepositories, type Workspace } from "../metadata/repositories.ts";
-import { AgentService, isGitCommitToolEvent } from "./service.ts";
+import { AgentService, collectTitleSources, isGitCommitToolEvent } from "./service.ts";
 import { PiRpcManager } from "./rpc/index.ts";
 
 const script = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'||r.type==='steer'||r.type==='follow_up')process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');const data=r.type==='get_available_models'?{models:[{provider:'test',id:'model',name:'Model',api:'test',input:['text'],authenticated:true,supportedThinkingLevels:['medium','high']}]}:r.type==='get_available_thinking_levels'?{levels:['medium','high']}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
@@ -740,7 +740,7 @@ describe("drain admission gate (docs/BACKTOSQUAREONE.md step 5)", () => {
   });
 });
 
-describe("agent auto-titles (after the first two user messages)", () => {
+describe("agent auto-titles (after the first agent response)", () => {
   const makeWithTitles = async (suggestTitle: (messages: string[], cwd?: string, model?: string, thinkingLevel?: string) => Promise<string | null>, suggestModel = "test/model", suggestThinkingLevel = "high") => {
     const root = await mkdtemp(join("/tmp", "passage-agent-"));
     roots.push(root);
@@ -783,7 +783,7 @@ describe("agent auto-titles (after the first two user messages)", () => {
     }
   };
 
-  test("titles the agent after the second user message and emits a title event", async () => {
+  test("titles the agent after the first agent response and emits a title event", async () => {
     const f = await makeWithTitles(async () => "Fix login retry bug");
     const seen: { type: string; title?: string }[] = [];
     f.service.subscribe((event) => {
@@ -791,16 +791,16 @@ describe("agent auto-titles (after the first two user messages)", () => {
     });
     const agent = await f.service.create("w");
     await settlePrompt(f.service, agent.id, "the login retry is broken");
-    expect(f.calls).toHaveLength(0);
-    await settlePrompt(f.service, agent.id, "it fails after three attempts");
+    // The mock Pi settles with no assistant text, so the sources fall back
+    // to just the first user message.
     expect(await waitForTitle(f.repos, agent.id)).toBe("Fix login retry bug");
     expect(f.calls).toHaveLength(1);
-    expect(f.calls[0]?.messages).toEqual(["the login retry is broken", "it fails after three attempts"]);
+    expect(f.calls[0]?.messages).toEqual(["the login retry is broken"]);
     expect(f.calls[0]?.model).toBe("test/model");
     expect(f.calls[0]?.thinkingLevel).toBe("high");
     expect(seen).toEqual([{ type: "title", title: "Fix login retry bug" }]);
-    // A third message does not retitle.
-    await settlePrompt(f.service, agent.id, "one more thing");
+    // A second message does not retitle.
+    await settlePrompt(f.service, agent.id, "it fails after three attempts");
     await Bun.sleep(30);
     expect(f.calls).toHaveLength(1);
     expect(f.repos.agents.get(agent.id)?.title).toBe("Fix login retry bug");
@@ -808,12 +808,15 @@ describe("agent auto-titles (after the first two user messages)", () => {
     f.store.close();
   });
 
-  test("steer and follow-up count as user messages", async () => {
+  test("does not retitle on steer after a title is applied", async () => {
     const f = await makeWithTitles(async () => "Steered session title");
     const agent = await f.service.create("w");
     await settlePrompt(f.service, agent.id, "first");
-    await f.service.steer(agent.id, "second via steer");
     expect(await waitForTitle(f.repos, agent.id)).toBe("Steered session title");
+    await f.service.steer(agent.id, "second via steer");
+    await Bun.sleep(30);
+    expect(f.calls).toHaveLength(1);
+    expect(f.repos.agents.get(agent.id)?.title).toBe("Steered session title");
     await f.service.shutdown();
     f.store.close();
   });
@@ -835,13 +838,37 @@ describe("agent auto-titles (after the first two user messages)", () => {
     const f = await makeWithTitles(async () => (++attempts === 1 ? null : "Second try title"));
     const agent = await f.service.create("w");
     await settlePrompt(f.service, agent.id, "first");
-    await settlePrompt(f.service, agent.id, "second");
     await Bun.sleep(50);
     expect(f.repos.agents.get(agent.id)?.title).toBe("Agent");
-    await settlePrompt(f.service, agent.id, "third");
+    await settlePrompt(f.service, agent.id, "second");
     expect(await waitForTitle(f.repos, agent.id)).toBe("Second try title");
     expect(attempts).toBe(2);
     await f.service.shutdown();
     f.store.close();
+  });
+});
+
+describe("collectTitleSources", () => {
+  test("uses the first user message plus the first response thinking/assistant text", () => {
+    expect(collectTitleSources([
+      { kind: "user", id: "u1", text: "the login retry is broken" },
+      { kind: "thinking", id: "t1", text: "considering retry logic" },
+      { kind: "assistant", id: "a1", text: "I will fix the retry loop" },
+    ])).toEqual(["the login retry is broken", "considering retry logic", "I will fix the retry loop"]);
+  });
+
+  test("stops at the second user message and ignores tool rows", () => {
+    expect(collectTitleSources([
+      { kind: "user", id: "u1", text: "first" },
+      { kind: "assistant", id: "a1", text: "first response" },
+      { kind: "tool", id: "tool1", name: "bash", input: null, status: "complete" },
+      { kind: "user", id: "u2", text: "second" },
+      { kind: "assistant", id: "a2", text: "second response" },
+    ])).toEqual(["first", "first response"]);
+  });
+
+  test("returns just the user message when the response has no text yet", () => {
+    expect(collectTitleSources([{ kind: "user", id: "u1", text: "hello" }])).toEqual(["hello"]);
+    expect(collectTitleSources([])).toEqual([]);
   });
 });

@@ -67,9 +67,10 @@ export const DEFAULT_WORKTREE_PROMPT = [
 ].join("\n");
 
 /** Default agent auto-title prompt. `{{messages}}` is replaced with the
- *  numbered first user messages before sending to the suggestion model. */
+ *  numbered title sources (the first user message plus the first agent
+ *  response excerpts) before sending to the suggestion model. */
 export const DEFAULT_TITLE_PROMPT = [
-  "Suggest a short title for an AI agent conversation based on the user's first messages below.",
+  "Suggest a short title for an AI agent conversation based on the user's first message and the agent's first response below.",
   "{{messages}}",
   "Return ONLY the title itself: 3-4 words, plain text, no quotes, no markdown, no trailing period.",
 ].join("\n");
@@ -102,11 +103,11 @@ export function renderWorktreePrompt(template: string, purpose: string): string 
   return `${base}\nPurpose: "${clean}"`;
 }
 
-/** Render a title prompt template over the first user messages. */
+/** Render a title prompt template over the title sources (the first user
+ *  message plus the first agent response excerpts). */
 export function renderTitlePrompt(template: string, messages: string[]): string {
   const base = template.trim() === "" ? DEFAULT_TITLE_PROMPT : template;
   const excerpt = messages
-    .slice(0, 2)
     .map((message, index) => `Message ${index + 1}: "${message.slice(0, 1000).trim()}"`)
     .join("\n");
   if (base.includes("{{messages}}")) return base.split("{{messages}}").join(excerpt);

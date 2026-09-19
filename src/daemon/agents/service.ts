@@ -17,7 +17,7 @@ import {
   type PiRpcOptions,
 } from "./rpc/index.ts";
 import { MetadataRepositories, type Agent } from "../metadata/repositories.ts";
-import { AgentTitleSuggester, DEFAULT_AGENT_TITLE, TITLE_SUGGEST_AFTER_USER_MESSAGES } from "./title-suggester.ts";
+import { AgentTitleSuggester, DEFAULT_AGENT_TITLE } from "./title-suggester.ts";
 import { normalizeAvailableModels } from "../models/catalog.ts";
 import { parsePiExtensionUiDialog } from "./ui.ts";
 import { errorFields, logger } from "../logging.ts";
@@ -59,6 +59,27 @@ const MAX_GIT_SCAN_BYTES = 8192;
 const GIT_COMMIT_PATTERN = /\bgit(?:\.exe)?\b[^|;&\n]*\bcommit\b/;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const encoder = new TextEncoder();
+
+/** Title sources: the first user message plus any thinking/assistant text
+ *  from the first agent response (rows after the first user message but
+ *  before the second user message). Returns [] when no usable first user
+ *  message exists yet. A text-less first response yields just [user]. */
+export function collectTitleSources(timeline: TimelineItem[]): string[] {
+  const firstUserIndex = timeline.findIndex(
+    (row) => row.kind === "user" && row.text.trim() !== "",
+  );
+  if (firstUserIndex === -1) return [];
+  const firstUserText = (timeline[firstUserIndex] as { text: string }).text.trim();
+  const sources = [firstUserText];
+  for (let index = firstUserIndex + 1; index < timeline.length; index += 1) {
+    const row = timeline[index];
+    if (row.kind === "user") break;
+    if (row.kind !== "thinking" && row.kind !== "assistant") continue;
+    const text = (row as { text: string }).text.trim();
+    if (text) sources.push(text);
+  }
+  return sources;
+}
 
 type RuntimeSubscription = {
   generation: number;
@@ -1282,7 +1303,14 @@ export class AgentService {
    *  wire event, so there is never a second, differently-ordered view of it. */
   private async applyTranscriptEvent(agentId: string, type: string, payload: Record<string, unknown>): Promise<void> {
     const state = await this.getTranscript(agentId);
-    for (const row of state.applyEvent(type, payload)) this.emitRowUpsert(agentId, row);
+    const changed = state.applyEvent(type, payload);
+    for (const row of changed) this.emitRowUpsert(agentId, row);
+    // Auto-title once the first agent response lands: message_end carries
+    // the completed assistant text, turn_end follows a thinking-only turn,
+    // and agent_settled covers text-less responses (tools-only, errors).
+    if (type === "message_end" || type === "turn_end" || type === "agent_settled") {
+      this.maybeAutoTitle(agentId, state.snapshot().timeline, type === "agent_settled");
+    }
   }
 
   private emitRowUpsert(agentId: string, row: TimelineItem): void {
@@ -1293,21 +1321,26 @@ export class AgentService {
   private async appendUserRow(agentId: string, text: string, images?: UserImageRef[], files?: UserFileRef[]): Promise<void> {
     const state = await this.getTranscript(agentId);
     this.emitRowUpsert(agentId, state.addUserMessage(text, images, files));
-    const userTexts = state.snapshot().timeline
-      .filter((row): row is Extract<TimelineItem, { kind: "user" }> => row.kind === "user")
-      .map((row) => row.text);
-    this.maybeAutoTitle(agentId, userTexts);
+    const timeline = state.snapshot().timeline;
+    // Backstop: a second (or later) user message means the first response
+    // was missed or produced no titlable event -- title with whatever the
+    // first response contributed, or just the first user message.
+    const userCount = timeline.filter((row) => row.kind === "user").length;
+    if (userCount < 2) return;
+    this.maybeAutoTitle(agentId, timeline, true);
   }
 
-  /** Fire-and-forget auto-title: once the transcript holds the first two
-   *  user messages, asks the workspace's suggestion model for a 3-4 word
-   *  title and persists it. Only agents still carrying the create()
-   *  placeholder are eligible (a custom create-time title or an already
-   *  applied suggestion opts out). Never throws and never blocks the
-   *  message path -- failures simply leave the placeholder in place and
-   *  retry on the next user message. */
-  private maybeAutoTitle(agentId: string, userTexts: string[]): void {
-    if (userTexts.length < TITLE_SUGGEST_AFTER_USER_MESSAGES) return;
+  /** Fire-and-forget auto-title: once the transcript holds the first user
+   *  message plus the first agent response, asks the workspace's
+   *  suggestion model for a 3-4 word title and persists it. Only agents
+   *  still carrying the create() placeholder are eligible (a custom
+   *  create-time title or an already applied suggestion opts out). Never
+   *  throws and never blocks the message path -- failures simply leave the
+   *  placeholder in place and retry on the next titlable event. */
+  private maybeAutoTitle(agentId: string, timeline: TimelineItem[], allowUserOnly = false): void {
+    const sources = collectTitleSources(timeline);
+    if (sources.length === 0) return;
+    if (sources.length === 1 && !allowUserOnly) return;
     const agent = this.repositories.agents.get(agentId);
     if (!agent || agent.archivedAt) return;
     if (agent.titleOverridden || agent.title !== DEFAULT_AGENT_TITLE) return;
@@ -1326,7 +1359,7 @@ export class AgentService {
         } catch { model = undefined; thinkingLevel = undefined; titlePrompt = ""; }
         let cwd: string | undefined;
         try { cwd = this.repositories.workspaces.get(agent.workspaceId)?.cwd; } catch { cwd = undefined; }
-        const title = await this.titleSuggester.suggestTitle(userTexts, cwd, model, thinkingLevel, titlePrompt);
+        const title = await this.titleSuggester.suggestTitle(sources, cwd, model, thinkingLevel, titlePrompt);
         if (!title) return;
         const current = this.repositories.agents.get(agentId);
         if (!current || current.archivedAt || current.titleOverridden || current.title !== DEFAULT_AGENT_TITLE) return;
