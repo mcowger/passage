@@ -61,6 +61,13 @@ import {
   shouldSuppressComposerClickAfterTouch,
   type QueuedFollowUp,
 } from "./agentPanelState.ts";
+import {
+  attachmentLabel,
+  toOptimisticFiles,
+  toOptimisticImages,
+  toPayloadFiles,
+  toPayloadImages,
+} from "./composerAttachments.ts";
 import { QueuedFollowUpList } from "./QueuedFollowUpList.tsx";
 import { ComposerMergeButton } from "./ComposerMergeButton.tsx";
 import {
@@ -328,50 +335,13 @@ function AgentComposerInner({
   const send = (kind: "prompt" | "steer" | "followUp") => {
     const value = draft.trim();
     if (!value && images.length === 0 && uploadFiles.length === 0) return;
-    const finalMessage = value || (images.length > 0 ? "Attached image" : uploadFiles.length > 0 ? `Attached file: ${uploadFiles.map((file) => file.name).join(", ")}` : "");
-    const payloadImages: AgentImage[] = images.map(({ type, data, mimeType, name }) => ({
-      type,
-      data,
-      mimeType,
-      name,
-    }));
-    const payloadFiles: AgentFile[] = uploadFiles.map(({ type, data, mimeType, name }) => ({
-      type,
-      data,
-      mimeType,
-      name,
-    }));
-    // Instant pre-echo: the daemon hasn't hashed/cached these yet, so the
-    // optimistic row carries data URLs and no hashes; the real row_upsert
-    // (with cache refs) replaces this row when it arrives. File paths are
-    // unknown until the daemon writes them, so the pre-echo uses the plain
-    // filename as a placeholder path.
-    const optimisticImages: UserImageRef[] = images.map(({ mimeType, name, data }) => ({
-      hash: "",
-      mimeType,
-      name,
-      previewUrl: `data:${mimeType};base64,${data}`,
-    }));
-    const optimisticFiles: UserFileRef[] = uploadFiles.map(({ name, mimeType, data }) => ({
-      hash: "",
-      name,
-      path: name,
-      size: Math.floor((data.length * 3) / 4),
-      mimeType,
-    }));
-    onOptimisticMessage?.(
-      finalMessage,
-      optimisticImages.length > 0 ? optimisticImages : undefined,
-      optimisticFiles.length > 0 ? optimisticFiles : undefined,
-    );
+    const finalMessage = attachmentLabel(value, images, uploadFiles);
+    const payloadImages = toPayloadImages(images);
+    const payloadFiles = toPayloadFiles(uploadFiles);
+    onOptimisticMessage?.(finalMessage, toOptimisticImages(images), toOptimisticFiles(uploadFiles));
     void run(
       async () => {
-        await api[kind](
-          agentId,
-          finalMessage,
-          payloadImages.length > 0 ? payloadImages : undefined,
-          payloadFiles.length > 0 ? payloadFiles : undefined,
-        );
+        await api[kind](agentId, finalMessage, payloadImages, payloadFiles);
         setImages([]);
         setUploadFiles([]);
         reservedImageCount.current = 0;
@@ -394,7 +364,7 @@ function AgentComposerInner({
   const queueFollowUp = () => {
     const value = draft.trim();
     if ((!value && images.length === 0 && uploadFiles.length === 0) || stopping || loading) return;
-    const label = value || (images.length > 0 ? "Attached image" : `Attached file: ${uploadFiles.map((file) => file.name).join(", ")}`);
+    const label = attachmentLabel(value, images, uploadFiles);
     setQueue((current) => [...current, createQueuedFollowUp(label, images, uploadFiles)]);
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     setDraft("");
@@ -433,39 +403,10 @@ function AgentComposerInner({
       const pending = [...queue];
       setQueue([]);
       for (const [index, item] of pending.entries()) {
-        const payloadImages: AgentImage[] = item.images.map(({ type, data, mimeType, name }) => ({
-          type,
-          data,
-          mimeType,
-          name,
-        }));
-        const optimisticImages: UserImageRef[] = item.images.map(({ mimeType, name, data }) => ({
-          hash: "",
-          mimeType,
-          name,
-          previewUrl: `data:${mimeType};base64,${data}`,
-        }));
-        const payloadFiles: AgentFile[] = item.files.map(({ type, data, mimeType, name }) => ({
-          type,
-          data,
-          mimeType,
-          name,
-        }));
-        const optimisticFiles: UserFileRef[] = item.files.map(({ name, mimeType, data }) => ({
-          hash: "",
-          name,
-          path: name,
-          size: Math.floor((data.length * 3) / 4),
-          mimeType,
-        }));
-        onOptimisticMessage?.(
-          item.text,
-          optimisticImages.length > 0 ? optimisticImages : undefined,
-          optimisticFiles.length > 0 ? optimisticFiles : undefined,
-        );
+        const imagesArg = toPayloadImages(item.images);
+        const filesArg = toPayloadFiles(item.files);
+        onOptimisticMessage?.(item.text, toOptimisticImages(item.images), toOptimisticFiles(item.files));
         try {
-          const imagesArg = payloadImages.length > 0 ? payloadImages : undefined;
-          const filesArg = payloadFiles.length > 0 ? payloadFiles : undefined;
           // The agent is idle at drain start, so the first item must start a
           // new turn via `prompt`. Anything after it rides behind the now
           // active run via `follow_up` (a sequential `prompt` would 409 as
