@@ -5,7 +5,7 @@ import { opaqueDomainIdSchema } from "../../shared/domain/workspaces.ts";
 import { MAX_FILE_PATH_LENGTH } from "../../shared/domain/files.ts";
 import type { GitStatusChangedReason } from "../../shared/protocol/index.ts";
 import { GitError, GitService } from "../workspaces/git.ts";
-import { CommitGenerator, fallbackCommitMessage, serializeDiffsForPrompt } from "../workspaces/commit-generator.ts";
+import { CommitGenerator, fallbackCommitMessage, formatConversationMessages, serializeDiffsForPrompt } from "../workspaces/commit-generator.ts";
 import type { WorkspaceEventHub } from "../workspaces/events.ts";
 import { WorkspaceService } from "../workspaces/service.ts";
 import { readJsonBody } from "./body.ts";
@@ -20,7 +20,17 @@ const commitAutoInput = z.object({
   model: z.string().trim().max(256).optional(),
   thinkingLevel: z.string().trim().max(256).optional(),
   commitPrompt: z.string().max(8000).optional(),
+  agentId: z.string().min(1).max(128).optional(),
 }).strict();
+
+/** Best-effort conversation excerpts for the commit prompt (plain text only).
+ *  The daemon wires this to `AgentService.getCommitConversation`; tests and
+ *  other hosts may supply their own. Never throws from the caller's
+ *  perspective -- failures resolve to empty excerpts. */
+export type CommitConversationProvider = (
+  workspaceId: string,
+  agentId?: string,
+) => Promise<{ userMessages: string[]; finalAssistantMessages: string[] }>;
 
 const gitMessage = (e: GitError): string | undefined => {
   const detail = (e.stderr || e.message || "").split("\n")[0].trim().replace(/^fatal:\s*/i, "");
@@ -60,7 +70,7 @@ const resolveRepoPath = async (workspaces: WorkspaceService, workspaceId: string
   return { cwd, rel };
 };
 
-export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, events?: WorkspaceEventHub, commitGenerator?: Pick<CommitGenerator, "suggestCommit">): Hono => {
+export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, events?: WorkspaceEventHub, commitGenerator?: Pick<CommitGenerator, "suggestCommit">, getConversation?: CommitConversationProvider): Hono => {
   const commits = commitGenerator ?? new CommitGenerator();
   const app = new Hono();
   app.use("*", async (c, next) => { c.header("Cache-Control", "no-store"); return next(); });
@@ -163,6 +173,20 @@ export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, e
         // Stored settings are best-effort; explicit body fields still apply.
       }
       const files = before.files.map((f) => ({ path: f.oldPath ? `${f.oldPath} -> ${f.path}` : f.path, kind: f.kind }));
+      // Conversation context for {{user_messages}} /
+      // {{final_assistant_messages}}: plain-text excerpts only, best-effort.
+      let conversation = { userMessages: "(none)", finalAssistantMessages: "(none)" };
+      try {
+        const raw = await getConversation?.(workspaceId, input.agentId);
+        if (raw) {
+          conversation = {
+            userMessages: formatConversationMessages(raw.userMessages ?? []),
+            finalAssistantMessages: formatConversationMessages(raw.finalAssistantMessages ?? []),
+          };
+        }
+      } catch {
+        // Conversation context is advisory; the diff still generates a message.
+      }
       const message = (await commits.suggestCommit(
         files,
         combined,
@@ -170,6 +194,7 @@ export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, e
         input.model ?? storedModel,
         input.thinkingLevel ?? storedThinking,
         input.commitPrompt ?? storedPrompt,
+        conversation,
       )) ?? fallbackCommitMessage(files);
       const head = await git.commit(cwd, message);
       const status = await git.status(cwd);

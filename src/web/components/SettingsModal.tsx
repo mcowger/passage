@@ -735,7 +735,7 @@ export function SettingsModal({
               aria-label="Auto-commit prompt template"
             />
             <small className="text-xs font-normal text-muted-foreground">
-              Placeholders: <code className="font-mono">{"{{files}}"}</code> — the changed file list (one per line with its change kind); <code className="font-mono">{"{{diff}}"}</code> — the overall unified diff (truncated for size).
+              Placeholders: <code className="font-mono">{"{{files}}"}</code> — the changed file list (one per line with its change kind); <code className="font-mono">{"{{diff}}"}</code> — the overall unified diff (truncated for size); <code className="font-mono">{"{{user_messages}}"}</code> — user requests and coaching (plain text, no images or attachments); <code className="font-mono">{"{{final_assistant_messages}}"}</code> — the agent&apos;s recent replies, often a wrap-up (plain text, no reasoning).
             </small>
           </div>
           </TabsContent>

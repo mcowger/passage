@@ -80,6 +80,22 @@ describe("workspace font mapping", () => {
     expect(renderCommitPrompt("F: {{files}} D: {{diff}}", "a", "b")).toBe("F: a D: b");
     expect(DEFAULT_COMMIT_PROMPT).toContain("{{files}}");
     expect(DEFAULT_COMMIT_PROMPT).toContain("{{diff}}");
+    expect(DEFAULT_COMMIT_PROMPT).toContain("{{user_messages}}");
+    expect(DEFAULT_COMMIT_PROMPT).toContain("{{final_assistant_messages}}");
+  });
+
+  test("renders commit conversation placeholders", () => {
+    const rendered = renderCommitPrompt("U: {{user_messages}} A: {{final_assistant_messages}}", "a", "b", "req", "wrap");
+    expect(rendered).toContain("U: req A: wrap");
+    expect(rendered).toContain("a");
+    expect(rendered).toContain("b");
+    // Pre-existing custom templates without the new placeholders render
+    // unchanged when there is no conversation context.
+    expect(renderCommitPrompt("F: {{files}} D: {{diff}}", "a", "b")).toBe("F: a D: b");
+    // Missing conversation placeholders are appended only when non-empty.
+    expect(renderCommitPrompt("Custom", "a", "b", "req", "wrap")).toContain("req");
+    expect(renderCommitPrompt("Custom", "a", "b", "req", "wrap")).toContain("wrap");
+    expect(renderCommitPrompt("Custom", "a", "b")).not.toContain("User requests");
   });
 
   test("defaults ask to collapsed and backfills legacy expansion without ask", () => {

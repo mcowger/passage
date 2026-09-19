@@ -322,7 +322,7 @@ const teardownWorkspace = async (workspaceId: string): Promise<void> => {
   });
 };
 app.route("/", createWorkspaceRoutes(workspaceService, { onArchiveWorkspace: (workspaceId) => teardownWorkspace(workspaceId) }, workspaceEvents));
-app.route("/", createGitRoutes(workspaceService, gitService, workspaceEvents, commitGenerator));
+app.route("/", createGitRoutes(workspaceService, gitService, workspaceEvents, commitGenerator, (workspaceId, agentId) => agentService.getCommitConversation(workspaceId, agentId)));
 app.route("/", createFileRoutes(fileService, workspaceEvents));
 app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (workspaceId) => teardownWorkspace(workspaceId) }, workspaceEvents));
 app.route("/", createWorkspaceActionRoutes(workspaceActionsService));

@@ -1335,6 +1335,7 @@ function App() {
             suggestModel={settings.suggestModel}
             suggestThinkingLevel={settings.suggestThinkingLevel}
             commitPrompt={settings.commitPrompt}
+            selectedAgentId={selectedAgent?.id}
           />
         );
       }

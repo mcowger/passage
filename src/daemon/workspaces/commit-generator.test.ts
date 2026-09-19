@@ -1,8 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import {
   buildCommitPrompt,
+  extractCommitConversation,
   fallbackCommitMessage,
   formatChangedFiles,
+  formatConversationMessages,
   sanitizeCommitMessage,
   serializeDiffsForPrompt,
   truncateCommitDiff,
@@ -71,6 +73,49 @@ describe("buildCommitPrompt", () => {
     const out = buildCommitPrompt("a.ts (modified)", "+x", "");
     expect(out).toContain("a.ts (modified)");
     expect(out).toContain("+x");
+  });
+  it("replaces {{user_messages}} and {{final_assistant_messages}}", () => {
+    const out = buildCommitPrompt("F", "D", "U: {{user_messages}} A: {{final_assistant_messages}}", {
+      userMessages: 'Message 1: "add retries"',
+      finalAssistantMessages: 'Message 1: "done"',
+    });
+    expect(out).toContain("add retries");
+    expect(out).toContain("done");
+    expect(out).not.toContain("{{user_messages}}");
+    expect(out).not.toContain("{{final_assistant_messages}}");
+  });
+  it("renders (none) conversation excerpts in the default template", () => {
+    const out = buildCommitPrompt("a.ts (modified)", "+x", "");
+    expect(out).toContain("(none)");
+  });
+});
+
+describe("extractCommitConversation", () => {
+  it("keeps user and assistant text while excluding reasoning, tools, and attachments", () => {
+    const { userMessages, finalAssistantMessages } = extractCommitConversation([
+      { kind: "user", id: "u1", text: "Add retries to fetch", images: [{ hash: "a".repeat(64), mimeType: "image/png", name: "shot.png" }], files: [{ hash: "b".repeat(64), name: "spec.txt", path: "/tmp/spec.txt", size: 3, mimeType: "text/plain" }] },
+      { kind: "thinking", id: "t1", text: "secret chain of thought" },
+      { kind: "tool", id: "tool1", name: "bash", input: null, status: "complete", result: "tool output" },
+      { kind: "assistant", id: "a1", text: "Wrapped up the retry helper" },
+      { kind: "summary", id: "s1", summaryType: "compaction", text: "summary text" },
+      { kind: "error", id: "e1", text: "boom" },
+    ]);
+    expect(userMessages).toEqual(["Add retries to fetch"]);
+    expect(finalAssistantMessages).toEqual(["Wrapped up the retry helper"]);
+  });
+  it("keeps only the most recent assistant messages", () => {
+    const timeline = ["one", "two", "three", "four"].map((text, i) => ({ kind: "assistant" as const, id: `a${i}`, text }));
+    const { finalAssistantMessages } = extractCommitConversation(timeline);
+    expect(finalAssistantMessages).toEqual(["two", "three", "four"]);
+  });
+  it("skips empty texts", () => {
+    const { userMessages, finalAssistantMessages } = extractCommitConversation([
+      { kind: "user", id: "u1", text: "   " },
+      { kind: "assistant", id: "a1", text: "" },
+    ]);
+    expect(userMessages).toEqual([]);
+    expect(finalAssistantMessages).toEqual([]);
+    expect(formatConversationMessages([])).toBe("(none)");
   });
 });
 

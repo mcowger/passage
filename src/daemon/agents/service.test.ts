@@ -901,3 +901,22 @@ describe("collectTitleSources", () => {
     expect(collectTitleSources([])).toEqual([]);
   });
 });
+
+describe("getCommitConversation", () => {
+  test("returns workspace user messages without spawning or throwing", async () => {
+    const f = await make();
+    const agent = await f.service.create("w", "one");
+    await f.service.prompt(agent.id, "Add retries to fetch");
+    await Bun.sleep(50);
+    await f.service.steer(agent.id, "Also coach: keep it small");
+    const convo = await f.service.getCommitConversation("w");
+    expect(convo.userMessages).toEqual(["Add retries to fetch", "Also coach: keep it small"]);
+    expect(convo.finalAssistantMessages).toEqual([]);
+    // Scoped to a single agent, and safe on unknown workspaces/agents.
+    expect(await f.service.getCommitConversation("w", agent.id)).toEqual(convo);
+    expect(await f.service.getCommitConversation("missing")).toEqual({ userMessages: [], finalAssistantMessages: [] });
+    expect(await f.service.getCommitConversation("w", "agt_missing")).toEqual({ userMessages: [], finalAssistantMessages: [] });
+    await f.service.shutdown();
+    f.store.close();
+  });
+});

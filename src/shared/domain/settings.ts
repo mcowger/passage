@@ -76,20 +76,28 @@ export const DEFAULT_TITLE_PROMPT = [
 ].join("\n");
 
 /** Default auto-commit prompt. `{{files}}` is replaced with the changed
- *  file list and `{{diff}}` with the overall unified diff. */
+ *  file list, `{{diff}}` with the overall unified diff, `{{user_messages}}`
+ *  with the workspace conversation's user requests/coaching, and
+ *  `{{final_assistant_messages}}` with the agent's most recent replies
+ *  (often a wrap-up). Conversation excerpts are plain text only: no
+ *  images, attachments, or reasoning. */
 export const DEFAULT_COMMIT_PROMPT = [
   "Write a concise git commit message for the changes below.",
   "Changed files:",
   "{{files}}",
   "Diff:",
   "{{diff}}",
+  "User requests:",
+  "{{user_messages}}",
+  "Recent agent notes:",
+  "{{final_assistant_messages}}",
   "Return ONLY the commit message: a short imperative subject line (max 72 chars),",
   "optionally followed by a blank line and a brief body. No quotes, no markdown, no code fence.",
 ].join("\n");
 
 export const WORKTREE_PROMPT_PLACEHOLDERS = ["{{purpose}}"] as const;
 export const TITLE_PROMPT_PLACEHOLDERS = ["{{messages}}"] as const;
-export const COMMIT_PROMPT_PLACEHOLDERS = ["{{files}}", "{{diff}}"] as const;
+export const COMMIT_PROMPT_PLACEHOLDERS = ["{{files}}", "{{diff}}", "{{user_messages}}", "{{final_assistant_messages}}"] as const;
 
 const promptTemplateSchema = z.string().max(8000).default("");
 
@@ -114,11 +122,26 @@ export function renderTitlePrompt(template: string, messages: string[]): string 
   return `${base}\n${excerpt}`;
 }
 
-/** Render a commit prompt template over the changed file list + diff. */
-export function renderCommitPrompt(template: string, files: string, diff: string): string {
+/** Render a commit prompt template over the changed file list, diff, and
+ *  conversation excerpts (plain text only). Missing `{{files}}`/`{{diff}}`
+ *  placeholders are always appended so the model still sees them; missing
+ *  conversation placeholders are appended only when their value is
+ *  non-empty, so pre-existing custom templates without them render
+ *  exactly as before when there is no conversation context. */
+export function renderCommitPrompt(template: string, files: string, diff: string, userMessages = "", finalAssistantMessages = ""): string {
   const base = template.trim() === "" ? DEFAULT_COMMIT_PROMPT : template;
   let out = base.includes("{{files}}") ? base.split("{{files}}").join(files) : `${base}\nChanged files:\n${files}`;
   out = out.includes("{{diff}}") ? out.split("{{diff}}").join(diff) : `${out}\nDiff:\n${diff}`;
+  out = out.includes("{{user_messages}}")
+    ? out.split("{{user_messages}}").join(userMessages)
+    : userMessages.trim() !== ""
+      ? `${out}\nUser requests:\n${userMessages}`
+      : out;
+  out = out.includes("{{final_assistant_messages}}")
+    ? out.split("{{final_assistant_messages}}").join(finalAssistantMessages)
+    : finalAssistantMessages.trim() !== ""
+      ? `${out}\nRecent agent notes:\n${finalAssistantMessages}`
+      : out;
   return out;
 }
 

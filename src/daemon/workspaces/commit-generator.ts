@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderCommitPrompt } from "../../shared/domain/settings.ts";
+import type { TimelineItem } from "../../shared/domain/agents.ts";
 import type { GitDiff } from "../../shared/domain/git.ts";
 import { PiRpcManager, type PiEvent, type PiProcessHandle, type PiRpcOptions } from "../agents/rpc/index.ts";
 
@@ -9,6 +10,16 @@ import { PiRpcManager, type PiEvent, type PiProcessHandle, type PiRpcOptions } f
 export const MAX_COMMIT_DIFF_CHARS = 100000;
 /** Max changed-file list characters forwarded to the model. */
 export const MAX_COMMIT_FILES_CHARS = 4000;
+/** Max user-message excerpt characters forwarded to the model. */
+export const MAX_COMMIT_USER_MESSAGES_CHARS = 8000;
+/** Max final-assistant-message excerpt characters forwarded to the model. */
+export const MAX_COMMIT_FINAL_ASSISTANT_CHARS = 4000;
+/** Max user messages included (oldest first, chronological). */
+export const MAX_COMMIT_USER_MESSAGE_COUNT = 20;
+/** Max final assistant messages included (most recent last). */
+export const MAX_COMMIT_FINAL_ASSISTANT_COUNT = 3;
+/** Per-message character cap before the overall truncation applies. */
+export const MAX_COMMIT_CONVERSATION_MESSAGE_CHARS = 2000;
 /** Display cap for a generated subject line (git convention ~72). */
 export const MAX_COMMIT_SUBJECT_CHARS = 72;
 /** Hard cap for the full generated message (subject + body). */
@@ -16,8 +27,67 @@ export const MAX_COMMIT_MESSAGE_CHARS = 1000;
 
 type CommitGeneratorPiOptions = Pick<PiRpcOptions, "executable" | "executableArgs">;
 
-export function buildCommitPrompt(files: string, diff: string, template = ""): string {
-  return renderCommitPrompt(template, files, diff);
+export type CommitConversation = {
+  /** Plain-text user requests/coaching, oldest first. */
+  userMessages?: string;
+  /** Plain-text final agent replies (wrap-ups), most recent last. */
+  finalAssistantMessages?: string;
+};
+
+export function buildCommitPrompt(files: string, diff: string, template = "", conversation: CommitConversation = {}): string {
+  return renderCommitPrompt(
+    template,
+    files,
+    diff,
+    truncateCommitConversation(conversation.userMessages ?? "", MAX_COMMIT_USER_MESSAGES_CHARS),
+    truncateCommitConversation(conversation.finalAssistantMessages ?? "", MAX_COMMIT_FINAL_ASSISTANT_CHARS),
+  );
+}
+
+/** Truncate a pre-formatted conversation excerpt for the commit prompt. */
+export function truncateCommitConversation(text: string, maxChars: number): string {
+  const clean = text.trim();
+  if (!clean) return "(none)";
+  return clean.length > maxChars
+    ? `${clean.slice(0, maxChars).trimEnd()}\n…(truncated)`
+    : clean;
+}
+
+/** Format raw message texts as a numbered excerpt block, or `(none)`. */
+export function formatConversationMessages(messages: string[]): string {
+  const clean = messages.map((m) => m.trim()).filter(Boolean);
+  if (clean.length === 0) return "(none)";
+  return clean.map((m, i) => `Message ${i + 1}: "${m}"`).join("\n");
+}
+
+/** Extract plain-text conversation context from a timeline for the commit
+ *  prompt. Only `user` rows feed `userMessages` and only `assistant` rows
+ *  feed `finalAssistantMessages` (most recent last, capped). `thinking`
+ *  (reasoning), `tool`, `summary`, `error`, and `unknown` rows are excluded,
+ *  and image/file attachments are never included: only each row's `text`
+ *  field is read, never its `images`/`files` refs. */
+export function extractCommitConversation(
+  timeline: TimelineItem[],
+  options: { maxUserMessages?: number; maxFinalAssistant?: number; maxMessageChars?: number } = {},
+): { userMessages: string[]; finalAssistantMessages: string[] } {
+  const maxUser = options.maxUserMessages ?? MAX_COMMIT_USER_MESSAGE_COUNT;
+  const maxAssistant = options.maxFinalAssistant ?? MAX_COMMIT_FINAL_ASSISTANT_COUNT;
+  const maxChars = options.maxMessageChars ?? MAX_COMMIT_CONVERSATION_MESSAGE_CHARS;
+  const users: string[] = [];
+  const assistants: string[] = [];
+  for (const row of timeline) {
+    if (row.kind === "user") {
+      const text = row.text.trim();
+      if (text) users.push(text.slice(0, maxChars).trim());
+    } else if (row.kind === "assistant") {
+      const text = row.text.trim();
+      if (text) assistants.push(text.slice(0, maxChars).trim());
+    }
+  }
+  return {
+    userMessages: users.slice(-maxUser),
+    finalAssistantMessages: assistants.slice(-maxAssistant),
+  };
 }
 
 /** Format a changed-file list for the commit prompt. */
@@ -127,6 +197,7 @@ export class CommitGenerator {
     model?: string,
     thinkingLevel?: string,
     promptTemplate = "",
+    conversation: CommitConversation = {},
   ): Promise<string | null> {
     if (files.length === 0) return null;
     let sessionDir: string | undefined;
@@ -136,6 +207,7 @@ export class CommitGenerator {
         formatChangedFiles(files),
         truncateCommitDiff(diff),
         promptTemplate,
+        conversation,
       );
       sessionDir = await mkdtemp(join(tmpdir(), "passage-commit-message-"));
       agentId = `commit-message-${crypto.randomUUID()}`;

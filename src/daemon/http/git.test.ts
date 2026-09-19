@@ -345,6 +345,68 @@ describe("git HTTP API", () => {
     store.close();
   });
 
+  test("auto-commit forwards conversation excerpts and the selected agent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "passage-git-auto-conv-"));
+    roots.push(root);
+    await runGit(root, ["init", "-b", "main"]);
+    await runGit(root, ["config", "user.email", "test@passage.dev"]);
+    await runGit(root, ["config", "user.name", "Passage Test"]);
+    await writeFile(join(root, "README.md"), "# Init");
+    await runGit(root, ["add", "README.md"]);
+    await runGit(root, ["commit", "-m", "Initial commit"]);
+
+    const store = new MetadataStore(join(root, "metadata.sqlite"));
+    const repos = new MetadataRepositories(store.db);
+    const workspaces = new WorkspaceService(repos);
+    const git = new GitService();
+    let capturedConversation: unknown;
+    let seenAgent: string | undefined;
+    const stub = {
+      suggestCommit: async (_files: Array<{ path: string; kind: string }>, _diff: string, _cwd?: string, _model?: string, _thinking?: string, _template = "", conversation: unknown = {}) => {
+        capturedConversation = conversation;
+        return "Update README";
+      },
+    };
+    const app = createGitRoutes(workspaces, git, undefined, stub, async (workspaceId, agentId) => {
+      seenAgent = agentId;
+      expect(workspaceId).toBe("wsp_conv");
+      return { userMessages: ["Add retries"], finalAssistantMessages: ["Wrapped up"] };
+    });
+    repos.projects.save(projectSchema.parse({
+      id: "prj_conv",
+      configuredRootPath: root,
+      canonicalRootPath: root,
+      displayLabel: "Conv Project",
+      archivedAt: null,
+    }));
+    repos.workspaces.save(workspaceSchema.parse({
+      id: "wsp_conv",
+      projectId: "prj_conv",
+      kind: "directory",
+      cwd: root,
+      checkoutRoot: root,
+      mainRepositoryRoot: root,
+      branchRef: "main",
+      displayLabel: "Conv Workspace",
+      locationId: null,
+      ownershipState: "not-owned",
+      markerId: null,
+      markerPath: null,
+      repairDetail: null,
+      archivedAt: null,
+    }));
+
+    await writeFile(join(root, "README.md"), "# Init\nUpdated line");
+    const res = await app.fetch(request(`/api/workspaces/wsp_conv/git/commit-auto`, { method: "POST", body: JSON.stringify({ agentId: "agt_123" }) }));
+    expect(res.status).toBe(200);
+    expect(seenAgent).toBe("agt_123");
+    const convo = capturedConversation as { userMessages: string; finalAssistantMessages: string };
+    expect(convo.userMessages).toContain("Add retries");
+    expect(convo.finalAssistantMessages).toContain("Wrapped up");
+
+    store.close();
+  });
+
   test("reports a conflicted pre-merge rebase as a 422 with a specific message", async () => {
     const f = await fixture();
     const worktree = join(f.root, "rebase-conflict-worktree");

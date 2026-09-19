@@ -37,6 +37,7 @@ type ChangesProps = {
   suggestModel?: string;
   suggestThinkingLevel?: string;
   commitPrompt?: string;
+  selectedAgentId?: string;
 };
 
 type BulkOp = "stage-all" | "unstage-all" | "commit" | "commit-auto" | "pull" | "fetch" | "merge";
@@ -50,7 +51,7 @@ const loadDraft = (workspaceId: string): string => {
   }
 };
 
-export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorkspaceDeleted, agentSettled = true, agentStatusLabel, suggestModel, suggestThinkingLevel, commitPrompt }: ChangesProps) {
+export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorkspaceDeleted, agentSettled = true, agentStatusLabel, suggestModel, suggestThinkingLevel, commitPrompt, selectedAgentId }: ChangesProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -195,7 +196,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
   const handleAutoCommit = () => {
     if (!canAutoCommit) return;
     setBulkOp("commit-auto");
-    void api.gitCommitAuto(workspaceId, { model: suggestModel, thinkingLevel: suggestThinkingLevel, commitPrompt }).then(
+    void api.gitCommitAuto(workspaceId, { model: suggestModel, thinkingLevel: suggestThinkingLevel, commitPrompt, agentId: selectedAgentId }).then(
       (r) => {
         setStatus(r.status);
         setError("");

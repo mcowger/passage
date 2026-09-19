@@ -859,6 +859,62 @@ export class AgentService {
     return pageHistory(history, before, limit);
   }
 
+  /** Plain-text conversation excerpts for commit-message generation.
+   *  Best-effort and side-effect-free: never spawns a Pi process and never
+   *  throws. When `agentId` names a live workspace agent it is used alone;
+   *  otherwise all non-archived workspace agents contribute in list order.
+   *  Only `user`/`assistant` row text is returned (chronological); `thinking`
+   *  (reasoning), `tool`, `summary`, `error`, and `unknown` rows are skipped,
+   *  and image/file attachments are excluded because only each row's `text`
+   *  field is read, never its `images`/`files` refs. */
+  async getCommitConversation(workspaceId: string, agentId?: string): Promise<{ userMessages: string[]; finalAssistantMessages: string[] }> {
+    const empty = { userMessages: [], finalAssistantMessages: [] };
+    try {
+      let ids: string[];
+      if (agentId?.trim()) {
+        const agent = this.repositories.agents.get(agentId.trim());
+        if (!agent || agent.workspaceId !== workspaceId || agent.archivedAt) return empty;
+        ids = [agent.id];
+      } else {
+        try {
+          ids = this.repositories.agents.listForWorkspace(workspaceId, this.listLimit).map((a) => a.id);
+        } catch {
+          return empty;
+        }
+      }
+      const users: string[] = [];
+      const finals: string[] = [];
+      for (const id of ids.slice(0, 10)) {
+        let timeline: TimelineItem[];
+        try {
+          timeline = (await this.getTranscript(id)).snapshot().timeline;
+        } catch {
+          continue;
+        }
+        for (const row of timeline) {
+          if (row.kind !== "user") continue;
+          const text = row.text.trim();
+          if (text) users.push(text);
+        }
+        for (let i = timeline.length - 1; i >= 0; i -= 1) {
+          const row = timeline[i];
+          if (row.kind !== "assistant") continue;
+          const text = row.text.trim();
+          if (text) {
+            finals.push(text);
+            break;
+          }
+        }
+      }
+      return {
+        userMessages: users.slice(-20),
+        finalAssistantMessages: finals.slice(-3),
+      };
+    } catch {
+      return empty;
+    }
+  }
+
   async archive(agentId: string): Promise<void> {
     // Serialize behind a still-booting create() so the background start
     // can't attach/reconcile (or leak a process) around the archival.
