@@ -116,7 +116,10 @@ function AlertDialogAction({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Action>) {
   return (
     <AlertDialogPrimitive.Action
-      className={cn(buttonVariants(), className)}
+      // NOTE: pass size explicitly -- the app-wide Button default is `xs`,
+      // which made dialog actions tiny. `max-sm:min-h-11` restores a
+      // 44px touch target on phones while desktop stays at h-9.
+      className={cn(buttonVariants({ size: "default" }), "max-sm:min-h-11", className)}
       {...props}
     />
   )
@@ -128,7 +131,8 @@ function AlertDialogCancel({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Cancel>) {
   return (
     <AlertDialogPrimitive.Cancel
-      className={cn(buttonVariants({ variant: "outline" }), className)}
+      // See AlertDialogAction: explicit size + a phone-sized touch target.
+      className={cn(buttonVariants({ variant: "outline", size: "default" }), "max-sm:min-h-11", className)}
       {...props}
     />
   )

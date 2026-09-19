@@ -6,6 +6,7 @@ import { DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
 import { MAX_AGENT_FILES, MAX_AGENT_FILE_DATA_BYTES, MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentFile, type AgentImage } from "../../shared/protocol/agents.ts";
 import { WorkspaceApiError, friendlyApiError, type WorkspaceApi } from "../api.ts";
 import { toast } from "sonner";
+import { commitToast } from "./ui/sonner.tsx";
 import { subscribeWorkspace } from "../workspaceSocket.ts";
 import type { GitStatus } from "../../shared/domain/git.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
@@ -690,7 +691,7 @@ export function ComposerMergeButton({
         const commit = await api.gitCommitAuto(workspaceId);
         setStatus(commit.status);
         if (!mergeable) {
-          toast.success("Committed changes", { description: commit.message });
+          commitToast("Committed changes", commit.message);
           // A commit-only Send It (main branch or detached HEAD) still
           // leaves a disposable worktree behind, so offer the same delete
           // workspace prompt -- except on the main checkout, which the
@@ -705,7 +706,7 @@ export function ComposerMergeButton({
         setStatus(next);
         setDeleteError("");
         setDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true });
-        toast.success(`Sent ${next.branchRef ?? branchRef} to main`, { description: commit.message });
+        commitToast(`Sent ${next.branchRef ?? branchRef} to main`, commit.message);
       } catch (err: unknown) {
         const message = friendlyApiError(err, "Could not send changes. Resolve any conflicts and try again.");
         toast.error("Send It failed", { description: message });

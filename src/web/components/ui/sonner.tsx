@@ -6,7 +6,7 @@ import {
   OctagonXIcon,
   TriangleAlertIcon,
 } from "lucide-react"
-import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { Toaster as Sonner, toast, type ToasterProps } from "sonner"
 
 // The app manages its own light/dark theme packs via `data-theme-mode` and the
 // `dark` class on <html> (see applyThemeTokens in main.tsx). There is no
@@ -36,6 +36,95 @@ function useAppTheme(): "light" | "dark" {
   return theme
 }
 
+// Commit messages can be very long (subject + body). Toasts only get a
+// one-line summary so the card stays small and never covers the prompt.
+const COMMIT_TOAST_SUMMARY_MAX = 160;
+
+export function summarizeCommitMessage(message: string): string | undefined {
+  const firstLine = message.split("\n")[0]?.trim() ?? "";
+  if (!firstLine) return undefined;
+  return firstLine.length > COMMIT_TOAST_SUMMARY_MAX
+    ? `${firstLine.slice(0, COMMIT_TOAST_SUMMARY_MAX - 1).trimEnd()}…`
+    : firstLine;
+}
+
+// Long enough to actually read the summary; the close button + swipe/
+// hover-pause let the user hold it on screen as long as needed.
+export const COMMIT_TOAST_DURATION_MS = 15000;
+
+// Tap-to-expand toast description: collapsed it shows the one-line summary
+// (so the card stays small); tapping "Show more" reveals the full commit
+// message in a height-capped scroll region, so even expanded it can't
+// swallow the screen. Tapping "Show less" collapses it back.
+// While expanded the toast holds until explicitly closed (close button /
+// swipe); collapsing restores the auto-dismiss timer.
+export function CommitToastDescription({
+  message,
+  toastId,
+  title,
+  initialExpanded = false,
+}: {
+  message: string;
+  toastId?: string;
+  title?: string;
+  initialExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = React.useState(initialExpanded);
+  const full = message.trim();
+  const summary = summarizeCommitMessage(message) ?? full;
+  if (full.length <= summary.length) return <>{summary}</>;
+  return (
+    <span>
+      {expanded ? (
+        <span className="mt-0.5 block max-h-64 overflow-y-auto whitespace-pre-wrap">{full}</span>
+      ) : (
+        <span>{summary} </span>
+      )}
+      <button
+        type="button"
+        className="font-medium underline underline-offset-2"
+        onClick={(event) => {
+          event.stopPropagation();
+          const next = !expanded;
+          setExpanded(next);
+          if (toastId !== undefined && title !== undefined) {
+            toast.success(title, {
+              id: toastId,
+              description: (
+                <CommitToastDescription message={message} toastId={toastId} title={title} initialExpanded={next} />
+              ),
+              duration: next ? Infinity : COMMIT_TOAST_DURATION_MS,
+              dismissible: true,
+            });
+          }
+        }}
+      >
+        {expanded ? "Show less" : "Show more"}
+      </button>
+    </span>
+  );
+}
+
+export function commitToastDescription(message: string): React.ReactNode | undefined {
+  return message.trim() ? <CommitToastDescription message={message} /> : undefined;
+}
+
+let commitToastSeq = 0;
+
+// Commit/send-it success toast with a tap-to-expand description. The toast
+// gets a stable id so expanding can switch it to hold-until-closed.
+export function commitToast(title: string, message: string): void {
+  const id = `commit-toast-${++commitToastSeq}`;
+  toast.success(title, {
+    id,
+    description: message.trim() ? (
+      <CommitToastDescription message={message} toastId={id} title={title} />
+    ) : undefined,
+    duration: COMMIT_TOAST_DURATION_MS,
+    dismissible: true,
+  });
+}
+
 const Toaster = ({ ...props }: ToasterProps) => {
   const theme = useAppTheme()
 
@@ -45,6 +134,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
       position="top-center"
       className="toaster group"
       gap={8}
+      closeButton
+      expand
       // PWA edge-to-edge (black-translucent): top-center toasts paint under
       // the status bar / Dynamic Island frost without this. Offset (not
       // layout padding) moves only the toast layer, so the safe-area

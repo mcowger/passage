@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { commitToast } from "./ui/sonner.tsx";
 import type { GitChangeKind, GitFileStatus, GitStatus } from "../../shared/domain/git.ts";
 import { friendlyApiError, type WorkspaceApi } from "../api.ts";
 import { subscribeWorkspace } from "../workspaceSocket.ts";
@@ -201,7 +202,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
         setStatus(r.status);
         setError("");
         handleCommitMessageChange("");
-        toast.success("Auto-committed all changes", { description: r.message });
+        commitToast("Auto-committed all changes", r.message);
       },
       (err: unknown) => setError(friendlyApiError(err, "Auto-commit failed. Try again.")),
     ).finally(() => setBulkOp(null));
