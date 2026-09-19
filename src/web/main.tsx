@@ -11,11 +11,7 @@ import { DEFAULT_WORKSPACE_SETTINGS } from "../shared/domain/settings.ts";
 import type { ThemePack, FontMapping, FontOption } from "../shared/domain/customization.ts";
 import { BUILTIN_THEMES, AVAILABLE_FONTS, resolveFontFamilies } from "../shared/domain/customization.ts";
 import { createWorkspaceApi, friendlyApiError } from "./api.ts";
-import type { BuildInfo } from "../shared/build-info.ts";
 import { subscribeWorkspace, subscribeWorkspaces } from "./workspaceSocket.ts";
-import { subscribeDaemon } from "./daemonSocket.ts";
-import type { ConnectionHealth } from "./socketLifecycle.ts";
-import type { DaemonLifecycleSnapshot } from "./api.ts";
 import type { WorkspaceActionRun } from "../shared/domain/workspace-actions.ts";
 import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
 import { MobileContextBar, MobileSessionSheet, type MobileDestinationKind, type MobileReturn } from "./components/MobileNav.tsx";
@@ -86,14 +82,12 @@ import {
   type FormKind,
   type TabKind,
 } from "./app/appHelpers.tsx";
+import { useDaemon } from "./app/useDaemon.ts";
 
 function App() {
   const api = useMemo(() => createWorkspaceApi(), []);
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
   const [snapshotError, setSnapshotError] = useState("");
-  const [build, setBuild] = useState<BuildInfo | null>(null);
-  const [daemonLifecycle, setDaemonLifecycle] = useState<DaemonLifecycleSnapshot | null>(null);
-  const [drainBusy, setDrainBusy] = useState(false);
   const [formError, setFormError] = useState("");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>();
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
@@ -353,76 +347,7 @@ function App() {
 
   useEffect(() => { void refreshWorkspaces(); }, [refreshWorkspaces]);
 
-  // Daemon build identity for the sidebar footer + deploy verification,
-  // plus lifecycle phase/blockers (DaemonLifecycle drain state).
-  // Best-effort: the sidebar falls back to dev when unknown
-  // and hides the drain control entirely when the phase is unknown.
-  const refreshDaemon = useCallback(async () => {
-    try {
-      const daemon = await api.daemonSnapshot();
-      setBuild(daemon.build);
-      setDaemonLifecycle(daemon);
-    } catch {
-      setBuild(null);
-      setDaemonLifecycle(null);
-    }
-  }, [api]);
-
-  useEffect(() => { void refreshDaemon(); }, [refreshDaemon]);
-
-  // Live daemon lifecycle invalidation: begin/cancel drain and readiness
-  // changes made here or in another window/tab. Reconnects, missed
-  // sequences, and mobile suspension reconcile immediately -- a stale
-  // drain phase must never linger silently.
-  const refreshDaemonRef = useRef(refreshDaemon);
-  refreshDaemonRef.current = refreshDaemon;
-  // Real WS transport health for the sidebar's connection indicator, not a
-  // hardcoded label (docs/IOSWEBSOCKETS.md): the daemon socket is the one
-  // always-mounted `/ws` connection, so its heartbeat status stands in for
-  // overall reachability.
-  const [wsHealth, setWsHealth] = useState<ConnectionHealth>("checking");
-  useEffect(() => {
-    let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
-    const subscription = subscribeDaemon(
-      () => {
-        if (invalidateTimer) clearTimeout(invalidateTimer);
-        invalidateTimer = setTimeout(() => {
-          invalidateTimer = undefined;
-          void refreshDaemonRef.current();
-        }, 300);
-      },
-      async () => { void refreshDaemonRef.current(); },
-      setWsHealth,
-    );
-    return () => {
-      if (invalidateTimer) clearTimeout(invalidateTimer);
-      subscription.close();
-    };
-  }, []);
-
-  const handleBeginDrain = useCallback(async () => {
-    setDrainBusy(true);
-    try {
-      const daemon = await api.beginDrain();
-      setDaemonLifecycle((current) => current ? { ...current, ...daemon } : null);
-    } catch {
-      // The live subscription/reconcile above will still catch up if this
-      // request actually landed despite a dropped response.
-    } finally {
-      setDrainBusy(false);
-    }
-  }, [api]);
-
-  const handleCancelDrain = useCallback(async () => {
-    setDrainBusy(true);
-    try {
-      const daemon = await api.cancelDrain();
-      setDaemonLifecycle((current) => current ? { ...current, ...daemon } : null);
-    } catch {
-    } finally {
-      setDrainBusy(false);
-    }
-  }, [api]);
+  const { build, daemonLifecycle, drainBusy, wsHealth, handleBeginDrain, handleCancelDrain } = useDaemon(api);
 
   // Live workspace-list invalidation from other windows/tabs: the mutating
   // window already reloaded its snapshot inline, so WS echoes (own or
