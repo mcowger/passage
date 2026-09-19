@@ -8,14 +8,6 @@ import type {
   UserImageRef,
 } from "../../shared/domain/agents.ts";
 import type { TimelineExpansionSettings } from "../../shared/domain/settings.ts";
-import {
-  MAX_AGENT_FILES,
-  MAX_AGENT_FILE_DATA_BYTES,
-  MAX_AGENT_IMAGES,
-  MAX_AGENT_IMAGE_DATA_BYTES,
-  type AgentFile,
-  type AgentImage,
-} from "../../shared/protocol/agents.ts";
 import { WorkspaceApiError, friendlyApiError, type WorkspaceApi } from "../api.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { DisplayOptionsPopover } from "./DisplayOptionsPopover.tsx";
@@ -62,6 +54,7 @@ import {
   type QueuedFollowUp,
 } from "./agentPanelState.ts";
 import { useComposerDraft } from "./useComposerDraft.ts";
+import { useComposerAttachments } from "./useComposerAttachments.ts";
 import {
   attachmentLabel,
   toOptimisticFiles,
@@ -163,14 +156,12 @@ function AgentComposerInner({
   const { draftKey, draft, updateDraft, clearDraft } = useComposerDraft(agentId);
   const [composerError, setComposerError] = useState("");
   const [composerNotice, setComposerNotice] = useState<{ tone: "info" | "success"; text: string } | null>(null);
-  const [images, setImages] = useState<Array<AgentImage & { name: string }>>([]);
-  const [uploadFiles, setUploadFiles] = useState<AgentFile[]>([]);
+  const { images, uploadFiles, addAttachments, removeImage, removeFile, resetAttachments } =
+    useComposerAttachments(agentId, setComposerError);
   const [ctxDetailsOpen, setCtxDetailsOpen] = useState(false);
   const ctxDetailsRef = useRef<HTMLDivElement>(null);
   const composerInputRef = useRef<ComposerEditorHandle>(null);
   const lastComposerTouchSendRef = useRef<number | null>(null);
-  const reservedImageCount = useRef(0);
-  const reservedFileCount = useRef(0);
   const [queue, setQueue] = useState<QueuedFollowUp[]>([]);
   const dispatchingRef = useRef(false);
   const [caret, setCaret] = useState<number | null>(null);
@@ -249,11 +240,7 @@ function AgentComposerInner({
   };
 
   useEffect(() => {
-    setImages([]);
-    setUploadFiles([]);
     setCtxDetailsOpen(false);
-    reservedImageCount.current = 0;
-    reservedFileCount.current = 0;
     // The attached queue is ephemeral and browser-local: switching agents drops it.
     setQueue([]);
     dispatchingRef.current = false;
@@ -320,10 +307,7 @@ function AgentComposerInner({
     void run(
       async () => {
         await api[kind](agentId, finalMessage, payloadImages, payloadFiles);
-        setImages([]);
-        setUploadFiles([]);
-        reservedImageCount.current = 0;
-        reservedFileCount.current = 0;
+        resetAttachments();
       },
       true,
       false,
@@ -345,10 +329,7 @@ function AgentComposerInner({
     const label = attachmentLabel(value, images, uploadFiles);
     setQueue((current) => [...current, createQueuedFollowUp(label, images, uploadFiles)]);
     clearDraft();
-    setImages([]);
-    setUploadFiles([]);
-    reservedImageCount.current = 0;
-    reservedFileCount.current = 0;
+    resetAttachments();
     setComposerError("");
     composerInputRef.current?.blur();
   };
@@ -404,92 +385,6 @@ function AgentComposerInner({
       dispatchingRef.current = false;
     })();
   }, [idle, stopping, busy, queue, agentId, api, onOptimisticMessage, onRefresh, setBusy]);
-
-  const readAsBase64 = (file: File): Promise<string> =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = String(reader.result ?? "");
-        const comma = result.indexOf(",");
-        resolve(comma >= 0 ? result.slice(comma + 1) : result);
-      };
-      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-      reader.readAsDataURL(file);
-    });
-
-  const isSupportedImage = (mimeType: string): boolean =>
-    /^image\/(png|jpeg|gif|webp)$/.test(mimeType);
-
-  /** One attach path for everything (button + drag-drop): supported images
-   *  ride as model API blocks, all other files land in the shared
-   *  attachment cache and are referenced by path in the same message. */
-  const addAttachments = async (files: FileList | File[] | null) => {
-    if (!files) return;
-    const selected = Array.from(files);
-    const imageCandidates = selected.filter((file) => {
-      const normalized = file.type === "image/jpg" ? "image/jpeg" : file.type;
-      return isSupportedImage(normalized) && file.size <= MAX_AGENT_IMAGE_DATA_BYTES;
-    });
-    const fileCandidates = selected.filter((file) => !imageCandidates.includes(file));
-    let reservedImages = 0;
-    let reservedFiles = 0;
-    try {
-      if (imageCandidates.length + reservedImageCount.current > MAX_AGENT_IMAGES)
-        throw new Error(`Attach at most ${MAX_AGENT_IMAGES} images`);
-      if (fileCandidates.length + reservedFileCount.current + uploadFiles.length > MAX_AGENT_FILES)
-        throw new Error(`Attach at most ${MAX_AGENT_FILES} files`);
-      reservedImageCount.current += imageCandidates.length;
-      reservedFileCount.current += fileCandidates.length;
-      reservedImages = imageCandidates.length;
-      reservedFiles = fileCandidates.length;
-      const imageAttachments = await Promise.all(
-        imageCandidates.map(async (file) => {
-          const mimeType = file.type === "image/jpg" ? "image/jpeg" : file.type;
-          const base64 = await readAsBase64(file);
-          return {
-            type: "image" as const,
-            data: base64,
-            mimeType: mimeType as AgentImage["mimeType"],
-            name: file.name,
-          };
-        })
-      );
-      const fileAttachments: AgentFile[] = await Promise.all(
-        fileCandidates.map(async (file) => {
-          if (file.size > MAX_AGENT_FILE_DATA_BYTES) throw new Error(`${file.name} is too large`);
-          if (!file.name.trim()) throw new Error("File is missing a name");
-          const base64 = await readAsBase64(file);
-          return {
-            type: "file" as const,
-            data: base64,
-            mimeType: file.type || "application/octet-stream",
-            name: file.name,
-          };
-        })
-      );
-      setImages((current) => {
-        const available = MAX_AGENT_IMAGES - current.length;
-        if (imageAttachments.length > available) {
-          reservedImageCount.current -= imageAttachments.length;
-          return current;
-        }
-        return [...current, ...imageAttachments];
-      });
-      setUploadFiles((current) => {
-        const available = MAX_AGENT_FILES - current.length;
-        if (fileAttachments.length > available) {
-          reservedFileCount.current -= fileAttachments.length;
-          return current;
-        }
-        return [...current, ...fileAttachments];
-      });
-      setComposerError("");
-    } catch (cause) {
-      reservedImageCount.current -= reservedImages;
-      reservedFileCount.current -= reservedFiles;
-      setComposerError(cause instanceof Error ? cause.message : "Unable to attach file");
-    }
-  };
 
   useEffect(() => {
     if (!attachFilesRef) return;
@@ -699,10 +594,7 @@ function AgentComposerInner({
                 <button
                   type="button"
                   className="attachment-remove"
-                  onClick={() => {
-                    setImages((current) => current.filter((item) => item !== image));
-                    reservedImageCount.current -= 1;
-                  }}
+                  onClick={() => removeImage(image)}
                   aria-label={`Remove ${image.name}`}
                 >
                   ×
@@ -720,10 +612,7 @@ function AgentComposerInner({
                 <button
                   type="button"
                   className="attachment-remove"
-                  onClick={() => {
-                    setUploadFiles((current) => current.filter((item) => item !== file));
-                    reservedFileCount.current -= 1;
-                  }}
+                  onClick={() => removeFile(file)}
                   aria-label={`Remove ${file.name}`}
                 >
                   ×
