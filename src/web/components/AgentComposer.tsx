@@ -61,6 +61,7 @@ import {
   shouldSuppressComposerClickAfterTouch,
   type QueuedFollowUp,
 } from "./agentPanelState.ts";
+import { useComposerDraft } from "./useComposerDraft.ts";
 import {
   attachmentLabel,
   toOptimisticFiles,
@@ -159,8 +160,7 @@ function AgentComposerInner({
   gitStatusRefreshKey,
   attachFilesRef,
 }: AgentComposerProps) {
-  const draftKey = `passage:agent:${agentId}:draft`;
-  const [draft, setDraft] = useState(() => localStorage.getItem(draftKey) ?? "");
+  const { draftKey, draft, updateDraft, clearDraft } = useComposerDraft(agentId);
   const [composerError, setComposerError] = useState("");
   const [composerNotice, setComposerNotice] = useState<{ tone: "info" | "success"; text: string } | null>(null);
   const [images, setImages] = useState<Array<AgentImage & { name: string }>>([]);
@@ -171,7 +171,6 @@ function AgentComposerInner({
   const lastComposerTouchSendRef = useRef<number | null>(null);
   const reservedImageCount = useRef(0);
   const reservedFileCount = useRef(0);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [queue, setQueue] = useState<QueuedFollowUp[]>([]);
   const dispatchingRef = useRef(false);
   const [caret, setCaret] = useState<number | null>(null);
@@ -250,7 +249,6 @@ function AgentComposerInner({
   };
 
   useEffect(() => {
-    setDraft(localStorage.getItem(draftKey) ?? "");
     setImages([]);
     setUploadFiles([]);
     setCtxDetailsOpen(false);
@@ -277,14 +275,6 @@ function AgentComposerInner({
   }, []);
 
   useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
     if (!ctxDetailsOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
       if (ctxDetailsRef.current && !ctxDetailsRef.current.contains(e.target as Node)) {
@@ -295,17 +285,9 @@ function AgentComposerInner({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [ctxDetailsOpen]);
 
-  const updateDraft = (value: string) => {
-    setDraft(value);
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      localStorage.setItem(draftKey, value);
-    }, 250);
-  };
-
   const run = async (
     action: () => Promise<unknown>,
-    clearDraft = false,
+    shouldClearDraft = false,
     refreshAfter = true,
   ) => {
     setBusy(true);
@@ -313,11 +295,7 @@ function AgentComposerInner({
     setComposerNotice(null);
     try {
       await action();
-      if (clearDraft) {
-        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        setDraft("");
-        localStorage.removeItem(draftKey);
-      }
+      if (shouldClearDraft) clearDraft();
       if (refreshAfter) await onRefresh();
     } catch (cause) {
       setComposerError(friendlyApiError(cause, "Agent command failed"));
@@ -366,9 +344,7 @@ function AgentComposerInner({
     if ((!value && images.length === 0 && uploadFiles.length === 0) || stopping || loading) return;
     const label = attachmentLabel(value, images, uploadFiles);
     setQueue((current) => [...current, createQueuedFollowUp(label, images, uploadFiles)]);
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    setDraft("");
-    localStorage.removeItem(draftKey);
+    clearDraft();
     setImages([]);
     setUploadFiles([]);
     reservedImageCount.current = 0;
