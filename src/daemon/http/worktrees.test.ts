@@ -49,7 +49,8 @@ describe("worktrees HTTP API", () => {
     const json = await res.json() as { label: string; branch: string; folder: string };
     expect(json.label).toBeDefined();
     expect(json.branch).toMatch(/^feature\//);
-    expect(json.folder).toMatch(/--wk_/);
+    expect(json.folder.startsWith("test-project-")).toBe(true);
+    expect(json.folder).toMatch(/--wk_[a-z0-9]{4}$/);
     f.store.close();
   }, 15_000);
 

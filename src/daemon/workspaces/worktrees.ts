@@ -5,7 +5,7 @@ import { WORKSPACE_SETUP_ACTION_ID, type WorkspaceActionRun } from "../../shared
 import { WorkspaceActionsService } from "./actions.ts";
 import { GitService } from "./git.ts";
 import type { MetadataRepositories } from "../metadata/repositories.ts";
-import { MetadataGenerator, type WorktreeSuggestion } from "./metadata-generator.ts";
+import { MetadataGenerator, withProjectPrefix, type WorktreeSuggestion } from "./metadata-generator.ts";
 
 export class WorktreeError extends Error { constructor(public readonly code: string, message: string) { super(message); } }
 export type DiscoveredWorktree = {
@@ -46,14 +46,17 @@ export class WorktreeService {
   async suggest(projectId: string, purpose: string, model?: string, thinkingLevel?: string, promptTemplate = ""): Promise<WorktreeSuggestion> {
     const project = this.repositories.projects.get(projectId);
     if (!project || project.archivedAt) throw new WorktreeError("invalid-project", "Active project required");
-    return this.metadataGenerator.suggest(purpose, project.canonicalRootPath, model, thinkingLevel, promptTemplate);
+    const suggestion = await this.metadataGenerator.suggest(purpose, project.canonicalRootPath, model, thinkingLevel, promptTemplate, project.displayLabel);
+    // Enforce the `<project>-<folder>` convention here, not in the model:
+    // whatever the model returns is re-prefixed deterministically.
+    return { ...suggestion, folder: withProjectPrefix(project.displayLabel, suggestion.folder) };
   }
   async create(projectId: string, locationId: string, ref: string, label: string, folder?: string, options?: { createBranch?: boolean; baseRef?: string }): Promise<CreateWorktreeResult> {
     const project = this.repositories.projects.get(projectId); if (!project || project.archivedAt) throw new WorktreeError("invalid-project", "Active project required");
     const location = this.repositories.worktreeLocations.get(locationId); if (!location || !location.enabled || (location.projectId && location.projectId !== projectId)) throw new WorktreeError("invalid-location", "An enabled worktree location is required. Configure one before creating a worktree.");
     if (!ref || ref.startsWith("-") || ref.includes("..")) throw new WorktreeError("invalid-ref", `Invalid Git ref "${ref}". Use an existing branch name, or choose "New branch" to create one.`);
     if (options?.createBranch && !isValidNewBranchName(ref)) throw new WorktreeError("invalid-ref", `Invalid branch name "${ref}". Use lowercase letters, numbers, hyphens, dots, underscores, and slashes (e.g. fix/short-name), with no spaces.`);
-    const parent = await realpath(location.canonicalRootPath); let name = (folder ?? label).trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "") || "worktree";
+    const parent = await realpath(location.canonicalRootPath); let name = withProjectPrefix(project.displayLabel, (folder ?? label).trim() || "worktree") || "worktree";
     let destination = join(parent, name); for (let n = 2; true; n++) { try { await realpath(destination); destination = join(parent, `${name}-${n}`); } catch { break; } }
     if (!inside(parent, destination)) throw new WorktreeError("outside-location", "Destination is outside the configured location");
     let args: string[];

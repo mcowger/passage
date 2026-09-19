@@ -451,6 +451,9 @@ export function NewWorktreeModal({
                 value={folder}
                 onChange={(e) => setFolder(e.target.value)}
               />
+              <p className="text-[11px] text-muted-foreground font-normal">
+                The sanitized project name is prepended automatically (e.g. myproject-webhook-retries--wk_7d2a).
+              </p>
             </label>
 
             <div className="flex justify-end flex-wrap gap-2 pt-2 border-t border-border/40">

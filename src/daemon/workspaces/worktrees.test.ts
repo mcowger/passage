@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { MetadataRepositories, MetadataStore } from "../metadata/index.ts";
 import { WorkspaceService } from "./service.ts";
 import { WorktreeService } from "./worktrees.ts";
+import { MetadataGenerator } from "./metadata-generator.ts";
 import { GitService } from "./git.ts";
 
 const roots: string[] = [];
@@ -278,5 +279,46 @@ describe("WorktreeService removal and reconciliation", () => {
     // Should gracefully clean up without throwing
     await f.worktreeService.remove(workspace.id);
     expect(f.repositories.workspaces.get(workspace.id)).toBeUndefined();
+  });
+});
+
+describe("WorktreeService folder naming", () => {
+  test("prefixes created folders with the sanitized project name", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "prefixed-branch");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "prefixed-branch", "Some Label", "wt-feature");
+    // Fixture project is "Test Project" -> prefix "test-project".
+    expect(workspace.cwd.split("/").pop()).toBe("test-project-wt-feature");
+  });
+
+  test("derives the prefixed folder from the label when no folder is given", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "label-branch");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "label-branch", "Webhook Retries");
+    expect(workspace.cwd.split("/").pop()).toBe("test-project-webhook-retries");
+  });
+
+  test("does not double-prefix an already-prefixed folder", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "double-branch");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "double-branch", "Label", "test-project-thing--wk_abcd");
+    expect(workspace.cwd.split("/").pop()).toBe("test-project-thing--wk_abcd");
+  });
+
+  test("suggest returns a prefixed folder without trusting the model", async () => {
+    const f = await fixture();
+    const stub = new WorktreeService(f.repositories, f.gitService, new MetadataGenerator(50, { executable: "/does/not/exist" }));
+    const suggestion = await stub.suggest(f.project.id, "Add retry queue to stripe webhooks");
+    expect(suggestion.folder.startsWith("test-project-")).toBe(true);
+    expect(suggestion.folder).toMatch(/--wk_[a-z0-9]{4}$/);
   });
 });

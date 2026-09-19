@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { deterministicSlugSuggestion, MetadataGenerator, sanitizeBranchName, sanitizeFolderName, sanitizeSuggestion, worktreeSuggestionSchema } from "./metadata-generator.ts";
+import { deterministicSlugSuggestion, MetadataGenerator, sanitizeBranchName, sanitizeFolderName, sanitizeProjectPrefix, sanitizeSuggestion, withProjectPrefix, worktreeSuggestionSchema } from "./metadata-generator.ts";
 
 const piScript = `let buffer = ""; process.stdin.on("data", (chunk) => { buffer += chunk; const lines = buffer.split("\\n"); buffer = lines.pop() ?? ""; for (const line of lines) { if (!line) continue; const request = JSON.parse(line); if (request.type === "get_state") { process.stdout.write(JSON.stringify({ type: "response", id: request.id, command: "get_state", success: true }) + "\\n"); continue; } if (request.type !== "prompt") continue; process.stdout.write(JSON.stringify({ type: "response", id: request.id, command: "prompt", success: true }) + "\\n"); process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "{\\\"label\\\":\\\"Webhook retries\\\",\\\"branch\\\":\\\"fix/webhook-retries\\\"," } }) + "\\n"); process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "{\\\"label\\\":\\\"Webhook retries\\\",\\\"branch\\\":\\\"fix/webhook-retries\\\",\\\"folder\\\":\\\"webhook-retries--wk_abcd\\\"}" }] } }) + "\\n"); process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n"); } });`;
 
@@ -75,5 +75,45 @@ describe("MetadataGenerator thinking level", () => {
     const generator = new MetadataGenerator(1_000, { executable: process.execPath, executableArgs: ["-e", piScript] });
     const result = await generator.suggest("Refactor websocket client reconnect loop", "/tmp", "test/model");
     expect(result.folder).toBe("webhook-retries--wk_abcd");
+  });
+});
+
+describe("MetadataGenerator project prefix", () => {
+  it("prefixes deterministic fallback folders with the sanitized project name", () => {
+    const suggestion = deterministicSlugSuggestion("Fix invoice retry calculation", "My Cool Project");
+    expect(suggestion.folder).toMatch(/^my-cool-project-fix-invoice-retry-calculation--wk_[a-z0-9]{4}$/);
+    expect(worktreeSuggestionSchema.safeParse(suggestion).success).toBe(true);
+  });
+
+  it("sanitizes hostile project names into safe prefixes", () => {
+    expect(sanitizeProjectPrefix("  My_Cool Project! ")).toBe("my-cool-project");
+    expect(sanitizeProjectPrefix("...")).toBe("");
+    expect(sanitizeProjectPrefix("")).toBe("");
+    expect(sanitizeProjectPrefix(undefined)).toBe("");
+  });
+
+  it("enforces the prefix on model output instead of trusting it", () => {
+    const fallback = deterministicSlugSuggestion("Some purpose", "My Project");
+    const result = sanitizeSuggestion(
+      { label: "Thing", branch: "feature/thing", folder: "unprefixed-slug--wk_abcd" },
+      fallback,
+      "My Project",
+    );
+    expect(result.folder).toBe("my-project-unprefixed-slug--wk_abcd");
+  });
+
+  it("does not double-prefix folders that already carry it", () => {
+    expect(withProjectPrefix("My Project", "my-project-thing--wk_abcd")).toBe("my-project-thing--wk_abcd");
+    expect(withProjectPrefix("My Project", "MY PROJECT thing")).toBe("my-project-thing");
+  });
+
+  it("falls back to an unprefixed folder when the project name is unusable", () => {
+    expect(withProjectPrefix("...", "Some Folder")).toBe("some-folder");
+  });
+
+  it("applies the prefix to live Pi suggestions", async () => {
+    const generator = new MetadataGenerator(1_000, { executable: process.execPath, executableArgs: ["-e", piScript] });
+    const result = await generator.suggest("Refactor websocket client reconnect loop", "/tmp", "test/model", undefined, "", "My Project");
+    expect(result.folder).toBe("my-project-webhook-retries--wk_abcd");
   });
 });

@@ -63,7 +63,7 @@ export const DEFAULT_WORKTREE_PROMPT = [
   "Return ONLY a valid JSON object (no markdown, no backticks, no code fence) with exactly these keys:",
   "- label: concise human-readable title (max 60 chars)",
   "- branch: valid git branch name like 'feature/short-name' or 'fix/short-name' (lowercase, hyphen-separated, no spaces)",
-  "- folder: collision-safe directory name like 'short-name--wk_abcd' (lowercase, alphanumeric with hyphens/underscores, ending with a short suffix)",
+  "- folder: collision-safe directory slug like 'short-name--wk_abcd' (lowercase, alphanumeric with hyphens/underscores, ending with a short suffix). Do NOT include any project name prefix; the server prepends a sanitized '<project>-' prefix deterministically.",
 ].join("\n");
 
 /** Default agent auto-title prompt. `{{messages}}` is replaced with the

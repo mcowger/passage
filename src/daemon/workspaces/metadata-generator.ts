@@ -70,6 +70,45 @@ export function sanitizeFolderName(raw: unknown): string {
   return folder;
 }
 
+/** Sanitize a project name into a folder-safe prefix segment: lowercase,
+ *  hyphen-separated, no spaces or slashes. Returns "" when nothing usable
+ *  remains (caller falls back to an unprefixed folder name). */
+export function sanitizeProjectPrefix(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const prefix = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    .slice(0, 64)
+    .replace(/-+$/g, "");
+  return prefix;
+}
+
+/** Enforce the `<project>-<folder>` naming convention deterministically.
+ *  The folder segment is always sanitized via `sanitizeFolderName` first,
+ *  so model-suggested or user-typed values can never smuggle in an
+ *  unprefixed, unsafe, or double-prefixed name. Idempotent: a folder that
+ *  already carries the prefix is returned unchanged. Overlong results
+ *  truncate the folder body while preserving the prefix and any trailing
+ *  `--wk_xxxx` collision suffix. */
+export function withProjectPrefix(projectName: unknown, folder: unknown): string {
+  const clean = sanitizeFolderName(folder) || "worktree";
+  const prefix = sanitizeProjectPrefix(projectName);
+  if (!prefix) return clean;
+  if (clean === prefix || clean.startsWith(`${prefix}-`)) return clean;
+  const combined = `${prefix}-${clean}`;
+  if (combined.length <= MAX_DOMAIN_LABEL_LENGTH) return combined;
+  const suffix = clean.match(/--wk_[a-z0-9]{4}$/)?.[0] ?? "";
+  const room = MAX_DOMAIN_LABEL_LENGTH - prefix.length - 1 - suffix.length;
+  if (room <= 0) return prefix.slice(0, MAX_DOMAIN_LABEL_LENGTH);
+  const body = suffix ? clean.slice(0, clean.length - suffix.length) : clean;
+  const truncated = body.slice(0, room).replace(/[-.]+$/g, "") || "worktree";
+  return `${prefix}-${truncated}${suffix}`;
+}
+
 /** Sanitize a workspace label: human-readable, single line. */
 export function sanitizeLabel(raw: unknown): string {
   const text = cleanText(raw).replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
@@ -79,20 +118,24 @@ export function sanitizeLabel(raw: unknown): string {
 /** Coerce raw model output into a valid suggestion. Model answers
  *  frequently include spaces or punctuation in branch/folder names
  *  (e.g. `fix/bad-overlap settings-tabs`); without this the validated
- *  value passes the length schema but fails `git worktree add`. Falls
- *  back to the deterministic suggestion when nothing usable remains. */
-export function sanitizeSuggestion(raw: unknown, fallback: WorktreeSuggestion): WorktreeSuggestion {
+ *  value passes the length schema but fails `git worktree add`. The folder
+ *  is never taken from the model as-is: it is re-sanitized and the
+ *  sanitized project prefix is enforced via `withProjectPrefix`, so the
+ *  model cannot omit, forge, or duplicate the prefix. Falls back to the
+ *  deterministic suggestion when nothing usable remains. */
+export function sanitizeSuggestion(raw: unknown, fallback: WorktreeSuggestion, projectName = ""): WorktreeSuggestion {
   if (!raw || typeof raw !== "object") return fallback;
   const record = raw as Record<string, unknown>;
   const label = sanitizeLabel(record.label) || fallback.label;
   const branch = sanitizeBranchName(record.branch) || fallback.branch;
-  const folder = sanitizeFolderName(record.folder) || fallback.folder;
+  const folderRaw = sanitizeFolderName(record.folder) || fallback.folder;
+  const folder = projectName.trim() ? withProjectPrefix(projectName, folderRaw) : folderRaw;
   const validated = worktreeSuggestionSchema.safeParse({ label, branch, folder });
   if (validated.success) return validated.data;
   return fallback;
 }
 
-export function deterministicSlugSuggestion(purpose: string): WorktreeSuggestion {
+export function deterministicSlugSuggestion(purpose: string, projectName = ""): WorktreeSuggestion {
   const clean = purpose.trim().replace(/[\r\n]+/g, " ");
   const words = clean
     .toLowerCase()
@@ -107,7 +150,8 @@ export function deterministicSlugSuggestion(purpose: string): WorktreeSuggestion
     .replace(/^-|-$/g, "") || "worktree";
   const suffix = crypto.randomUUID().slice(0, 4);
   const branch = `feature/${slug}`;
-  const folder = `${slug}--wk_${suffix}`;
+  const folderBase = `${slug}--wk_${suffix}`;
+  const folder = projectName.trim() ? withProjectPrefix(projectName, folderBase) : folderBase;
   return { label, branch, folder };
 }
 
@@ -116,8 +160,8 @@ export class MetadataGenerator {
 
   constructor(private readonly timeoutMs = 10_000, private readonly pi: MetadataGeneratorPiOptions = {}) {}
 
-  async suggest(purpose: string, cwd?: string, model?: string, thinkingLevel?: string, promptTemplate = ""): Promise<WorktreeSuggestion> {
-    const fallback = deterministicSlugSuggestion(purpose);
+  async suggest(purpose: string, cwd?: string, model?: string, thinkingLevel?: string, promptTemplate = "", projectName = ""): Promise<WorktreeSuggestion> {
+    const fallback = deterministicSlugSuggestion(purpose, projectName);
     if (!purpose.trim()) return fallback;
 
     let sessionDir: string | undefined;
@@ -150,7 +194,7 @@ export class MetadataGenerator {
       if (!jsonMatch) return fallback;
 
       const parsed = JSON.parse(jsonMatch[0]);
-      return sanitizeSuggestion(parsed, fallback);
+      return sanitizeSuggestion(parsed, fallback, projectName);
     } catch {
       return fallback;
     } finally {
