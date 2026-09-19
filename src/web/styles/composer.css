@@ -312,9 +312,9 @@
   font-size: 11.5px;
 }
 
-.composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--surface-subtle); min-height: 28px; }
-.composer-toolbar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: none; }
-.composer-toolbar-right { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex: 1 1 auto; min-width: 0; margin-left: auto; }
+.composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--surface-subtle); min-height: 28px; flex-wrap: nowrap; }
+.composer-toolbar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: none; flex-wrap: nowrap; }
+.composer-toolbar-right { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex: 1 1 auto; min-width: 0; margin-left: auto; flex-wrap: nowrap; }
 @media (max-width: 640px) {
   .composer-chip-btn .chip-label { max-width: min(38vw, 180px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
@@ -336,6 +336,8 @@
   cursor: pointer;
   box-sizing: border-box;
   line-height: 1;
+  flex: none;
+  white-space: nowrap;
 }
 .composer-attach-btn:hover { color: var(--foreground); background: var(--surface-hover); }
 .composer-attach-btn input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }

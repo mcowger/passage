@@ -1,5 +1,5 @@
 /* ModelPicker & Custom Popovers */
-.model-picker-container { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.model-picker-container { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; }
 .picker-chip-wrapper { position: relative; }
 
 .composer-chip-btn {
@@ -26,6 +26,7 @@
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
+  white-space: nowrap;
 }
 .composer-chip-btn:hover { background: var(--surface-hover); }
 .composer-chip-btn.blue {
@@ -237,6 +238,7 @@
   box-sizing: border-box;
   line-height: 1;
   flex: none;
+  white-space: nowrap;
 }
 .send-btn { min-width: 58px; background: var(--accent); color: #ffffff; border: 0; }
 .send-btn:hover { background: var(--accent-hover); }

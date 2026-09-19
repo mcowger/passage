@@ -495,7 +495,8 @@ export function QueuedFollowUpList({
  * not disabled, when the tree is clean or conflicted). Merge still runs only
  * after explicit confirmation; send-it runs its merge step without a second prompt.
  */
-function ComposerMergeButton({
+/** Exported for regression tests (stale git-status sequencing). */
+export function ComposerMergeButton({
   workspaceId,
   api,
   disabled,
@@ -523,16 +524,29 @@ function ComposerMergeButton({
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
+  // Git-status fetches from several triggers (mount, history-load refresh,
+  // settle re-check, WS invalidations) overlap freely. Without sequencing,
+  // the last response to *resolve* wins -- e.g. the previous workspace's
+  // fetch landing after the new workspace's -- and a stale dirty snapshot
+  // sticks commit/send-it onto a clean tree (or a stale clean hides them
+  // on a dirty one) until the next invalidation. Only the latest request
+  // may write state; older resolutions are dropped on the floor.
+  const statusSeqRef = useRef(0);
   const refresh = useCallback(async () => {
+    const seq = ++statusSeqRef.current;
     try {
-      setStatus(await api.gitStatus(workspaceId));
+      const next = await api.gitStatus(workspaceId);
+      if (statusSeqRef.current === seq) setStatus(next);
     } catch {
       // Non-Git workspaces (or transient failures): hide the button.
-      setStatus(null);
+      if (statusSeqRef.current === seq) setStatus(null);
     }
   }, [api, workspaceId]);
 
   useEffect(() => {
+    // Invalidate any in-flight fetch from the previous workspace before the
+    // fresh fetch below: its resolution must not overwrite this workspace.
+    statusSeqRef.current += 1;
     setStatus(null);
     setConfirmOpen(false);
     setMenuOpen(false);
@@ -735,6 +749,11 @@ function ComposerMergeButton({
   // Keep the button mounted mid-run: committing cleans the tree, which
   // would otherwise hide the spinner while the merge step is still going.
   const showSendIt = status !== null && (sendItEnabled || sendItBusy);
+  // Mobile: horizontal space is scarce and Send It already occupies a labeled
+  // button, so any other git option collapses into the FolderGit2 menu even
+  // when it is the only one -- a lone Commit next to Send It crowds the
+  // model chip off the single composer row.
+  const collapseSingleOption = hideIcons === true && showSendIt && options.length === 1;
   const dirtyCount = status?.files.length ?? 0;
   const sendItTitle = status?.conflicted
     ? "Resolve merge conflicts before sending"
@@ -798,7 +817,7 @@ function ComposerMergeButton({
           Send It
         </Button>
       )}
-      {options.length === 1 && options[0] !== undefined ? (() => {
+      {options.length === 1 && options[0] !== undefined && !collapseSingleOption ? (() => {
         const only = options[0];
         const meta = optionMeta[only];
         const MetaIcon = meta.Icon;
@@ -816,7 +835,7 @@ function ComposerMergeButton({
             {meta.label}
           </Button>
         );
-      })() : options.length > 1 ? (
+      })() : options.length > 1 || collapseSingleOption ? (
         <Popover open={menuOpen} onOpenChange={setMenuOpen}>
           <PopoverTrigger asChild>
             <Button
