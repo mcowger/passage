@@ -236,6 +236,35 @@ test("keeps an agent stopping until Pi confirms cancellation", async () => {
   f.store.close();
 });
 
+test("aborted runs still invalidate workspace Git views", async () => {
+  const f = await make();
+  // No `agent_settled` is emitted here at all: the abort handshake alone
+  // settles the run, so without an explicit invalidation the Git views
+  // would keep rendering their stale clean snapshot (hiding the commit
+  // affordance) even though the interrupted run may have left a dirty tree.
+  const abortOnlyScript = `let streaming=true;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n')}const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};if(r.type==='abort'){streaming=false;process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');continue}process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+  const invalidated: string[] = [];
+  const service = new AgentService(f.repos, {
+    sessionsRoot: join(f.root, "abort-git-sessions"),
+    manager: new PiRpcManager(1),
+    abortTimeoutMs: 100,
+    pi: { executable: process.execPath, executableArgs: ["-e", abortOnlyScript] },
+    onWorkspaceGitChanged: (workspaceId) => invalidated.push(workspaceId),
+  });
+  const agent = await service.create("w");
+  await service.prompt(agent.id, "keep running");
+  await Bun.sleep(10);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+  expect(invalidated).toEqual([]);
+
+  await service.abort(agent.id);
+  await Bun.sleep(100);
+  expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  expect(invalidated).toEqual(["w"]);
+  await service.shutdown();
+  f.store.close();
+});
+
 test("tolerates abort_bash rejection when no bash command is running", async () => {
   const f = await make();
   const abortScript = `let streaming=false;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n')}const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};if(r.type==='abort')setTimeout(()=>{streaming=false;process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n')},20);else if(r.type==='abort_bash')process.stdout.write(JSON.stringify({type:'response',id:r.id,success:false,error:'No bash command is running'})+'\\n');else process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;

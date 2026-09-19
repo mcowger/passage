@@ -1164,6 +1164,13 @@ export class AgentService {
       await Promise.all([clearQueue, abortBash, abort]);
       if (this.manager.get(agentId) !== process || process.generation !== generation) return;
       await this.enqueue(agentId, () => this.reconcile(agentId, true));
+      // An aborted run may still have mutated the worktree before it was
+      // stopped, and unlike natural settlement there is no `agent_settled`
+      // event to invalidate Git views -- so a dirty tree would otherwise
+      // keep rendering its stale clean snapshot (hiding the commit
+      // affordance) until the next unrelated invalidation.
+      const workspaceId = this.repositories.agents.get(agentId)?.workspaceId;
+      if (workspaceId) this.notifyWorkspaceGitChanged(workspaceId);
     } catch (cause) {
       if (this.manager.get(agentId) !== process || process.generation !== generation) return;
       if (this.requireAgent(agentId).lastKnownStatus === "idle") return;

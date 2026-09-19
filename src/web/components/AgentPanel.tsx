@@ -429,11 +429,14 @@ function ComposerMergeButton({
   workspaceId,
   api,
   disabled,
+  settled = true,
   onWorkspaceDeleted,
 }: {
   workspaceId: string;
   api: WorkspaceApi;
   disabled?: boolean;
+  /** True once the owning agent is settled. Drives a status re-check (see below); not a commit gate. */
+  settled?: boolean;
   onWorkspaceDeleted?: () => void | Promise<void>;
 }) {
   const [status, setStatus] = useState<GitStatus | null>(null);
@@ -464,6 +467,17 @@ function ComposerMergeButton({
 
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
+  // Commit is the only option when the tree is dirty but the branch is
+  // otherwise up to date, so a stale clean snapshot hides this button
+  // entirely. The `git-status-changed` invalidation can be missed, so also
+  // re-check when the owning agent settles (run writes are on disk by
+  // then). Skips the initial mount, which already fetches.
+  const wasSettledRef = useRef(settled);
+  useEffect(() => {
+    const wasSettled = wasSettledRef.current;
+    wasSettledRef.current = settled;
+    if (settled && !wasSettled) void refreshRef.current();
+  }, [settled]);
   useEffect(() => {
     let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
     const subscription = subscribeWorkspace(
@@ -2024,7 +2038,7 @@ function AgentComposerInner({
             )}
           </div>
           <div className="composer-toolbar-right">
-            <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} onWorkspaceDeleted={onWorkspaceDeleted} />
+            <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} settled={!running && !stopping} onWorkspaceDeleted={onWorkspaceDeleted} />
             <DisplayOptionsPopover
               expansion={sessionExpansion}
               onExpansionChange={onSessionExpansionChange}

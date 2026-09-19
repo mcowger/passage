@@ -87,6 +87,17 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
   // reconcile immediately.
   const refreshRef = useRef(refreshStatus);
   refreshRef.current = refreshStatus;
+  // The agent just settled: run file writes are on disk, but the
+  // `git-status-changed` invalidation can be missed (reconnect race, or a
+  // debounce timer cancelled by unmount). Re-check on the false -> true
+  // transition (skipping the initial mount, which already fetches) so the
+  // commit affordance sees fresh files.
+  const wasSettledRef = useRef(agentSettled);
+  useEffect(() => {
+    const wasSettled = wasSettledRef.current;
+    wasSettledRef.current = agentSettled;
+    if (agentSettled && !wasSettled) void refreshRef.current(true);
+  }, [agentSettled]);
   useEffect(() => {
     let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
     const subscription = subscribeWorkspace(
