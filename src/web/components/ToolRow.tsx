@@ -834,7 +834,7 @@ function ToolRowInner({ item, open, onOpenChange, workspaceId, api }: ToolRowPro
           ) : item.status === "error" ? (
             <CircleX size={15} className="tool-status-icon error" aria-label="Error" />
           ) : (
-            <span className={`tool-badge ${item.status}`}>{item.status}</span>
+            <Spinner className="size-[15px] text-[#d97706]" aria-label="Running" />
           )}
         </span>
       </CollapsibleTrigger>
