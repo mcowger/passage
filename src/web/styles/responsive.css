@@ -18,7 +18,7 @@
   .agent-header-actions { flex-wrap: wrap; margin-top: 8px; }
   .agent-header, .timeline, .composer-container, .usage-strip { padding-left: 12px; padding-right: 12px; }
   .agent-panel { min-height: 0; }
-  .composer-container { padding-bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px))); overflow: hidden; }
+  .composer-container { padding-bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px))); overflow-x: clip; overflow-y: visible; }
   .user-message-card { max-width: 90%; }
   /* Narrow-viewport header: keep brand, view tabs, and actions on one
      scrollable row instead of colliding. */
