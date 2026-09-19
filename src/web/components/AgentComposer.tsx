@@ -47,14 +47,10 @@ import {
   ReplaceAll,
   Square,
 } from "lucide-react";
-import {
-  createQueuedFollowUp,
-  removeQueuedFollowUp,
-  shouldSuppressComposerClickAfterTouch,
-  type QueuedFollowUp,
-} from "./agentPanelState.ts";
+import { shouldSuppressComposerClickAfterTouch } from "./agentPanelState.ts";
 import { useComposerDraft } from "./useComposerDraft.ts";
 import { useComposerAttachments } from "./useComposerAttachments.ts";
+import { useFollowUpQueue } from "./useFollowUpQueue.ts";
 import {
   attachmentLabel,
   toOptimisticFiles,
@@ -158,12 +154,21 @@ function AgentComposerInner({
   const [composerNotice, setComposerNotice] = useState<{ tone: "info" | "success"; text: string } | null>(null);
   const { images, uploadFiles, addAttachments, removeImage, removeFile, resetAttachments } =
     useComposerAttachments(agentId, setComposerError);
+  const { queue, enqueueFollowUp, retractQueued, clearQueued } = useFollowUpQueue({
+    agentId,
+    idle,
+    stopping,
+    busy,
+    setBusy,
+    api,
+    onOptimisticMessage,
+    onRefresh,
+    onError: setComposerError,
+  });
   const [ctxDetailsOpen, setCtxDetailsOpen] = useState(false);
   const ctxDetailsRef = useRef<HTMLDivElement>(null);
   const composerInputRef = useRef<ComposerEditorHandle>(null);
   const lastComposerTouchSendRef = useRef<number | null>(null);
-  const [queue, setQueue] = useState<QueuedFollowUp[]>([]);
-  const dispatchingRef = useRef(false);
   const [caret, setCaret] = useState<number | null>(null);
   const [compactConfirmOpen, setCompactConfirmOpen] = useState(false);
   const [isMobileComposer, setIsMobileComposer] = useState(() => currentViewportIsMobileComposer());
@@ -241,9 +246,6 @@ function AgentComposerInner({
 
   useEffect(() => {
     setCtxDetailsOpen(false);
-    // The attached queue is ephemeral and browser-local: switching agents drops it.
-    setQueue([]);
-    dispatchingRef.current = false;
   }, [draftKey]);
 
   useEffect(() => {
@@ -326,65 +328,12 @@ function AgentComposerInner({
   const queueFollowUp = () => {
     const value = draft.trim();
     if ((!value && images.length === 0 && uploadFiles.length === 0) || stopping || loading) return;
-    const label = attachmentLabel(value, images, uploadFiles);
-    setQueue((current) => [...current, createQueuedFollowUp(label, images, uploadFiles)]);
+    enqueueFollowUp(attachmentLabel(value, images, uploadFiles), images, uploadFiles);
     clearDraft();
     resetAttachments();
     setComposerError("");
     composerInputRef.current?.blur();
   };
-
-  const retractQueued = (id: string) => {
-    if (dispatchingRef.current) return;
-    setQueue((current) => removeQueuedFollowUp(current, id));
-  };
-
-  const clearQueued = () => {
-    if (dispatchingRef.current) return;
-    setQueue([]);
-  };
-
-  // Attached follow-ups enter the chat only once the run settles: while the
-  // agent is idle the queue drains in order, starting a new turn with
-  // `prompt` and queueing any remainder behind it with `follow_up` (a bare
-  // `follow_up` on an idle agent only queues in Pi and never starts a run).
-  // A failed send stops the drain, restores the unsent remainder to the
-  // front, and surfaces the error -- nothing silently disappears from
-  // the queue.
-  useEffect(() => {
-    if (!idle || stopping || busy || dispatchingRef.current || queue.length === 0) return;
-    dispatchingRef.current = true;
-    setBusy(true);
-    setComposerError("");
-    void (async () => {
-      const pending = [...queue];
-      setQueue([]);
-      for (const [index, item] of pending.entries()) {
-        const imagesArg = toPayloadImages(item.images);
-        const filesArg = toPayloadFiles(item.files);
-        onOptimisticMessage?.(item.text, toOptimisticImages(item.images), toOptimisticFiles(item.files));
-        try {
-          // The agent is idle at drain start, so the first item must start a
-          // new turn via `prompt`. Anything after it rides behind the now
-          // active run via `follow_up` (a sequential `prompt` would 409 as
-          // "agent is active").
-          if (index === 0) {
-            await api.prompt(agentId, item.text, imagesArg, filesArg);
-          } else {
-            await api.followUp(agentId, item.text, imagesArg, filesArg);
-          }
-        } catch (cause) {
-          const failedIndex = pending.indexOf(item);
-          setQueue((current) => [...pending.slice(failedIndex), ...current]);
-          setComposerError(friendlyApiError(cause, "Agent command failed"));
-          if (cause instanceof WorkspaceApiError && cause.code === "invalid-input") void onRefresh();
-          break;
-        }
-      }
-      setBusy(false);
-      dispatchingRef.current = false;
-    })();
-  }, [idle, stopping, busy, queue, agentId, api, onOptimisticMessage, onRefresh, setBusy]);
 
   useEffect(() => {
     if (!attachFilesRef) return;
