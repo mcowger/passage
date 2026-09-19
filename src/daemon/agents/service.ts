@@ -21,6 +21,14 @@ import { AgentTitleSuggester, DEFAULT_AGENT_TITLE } from "./title-suggester.ts";
 import { normalizeAvailableModels } from "../models/catalog.ts";
 import { parsePiExtensionUiDialog } from "./ui.ts";
 import { errorFields, logger } from "../logging.ts";
+import {
+  collectTitleSources,
+  compactRefusalReason,
+  isGitCommitToolEvent,
+} from "./serviceHelpers.ts";
+// Re-exported for existing importers (tests); new code should import from
+// ./serviceHelpers.ts directly.
+export { collectTitleSources, isGitCommitToolEvent } from "./serviceHelpers.ts";
 
 const MAX_LIST = 100;
 const MAX_LISTENERS = 64;
@@ -41,9 +49,6 @@ const BLOCKER_PROBE_TIMEOUT_MS = 5_000;
  *  minutes; the default 10s RPC admission timeout would false-fail it. */
 const COMPACT_TIMEOUT_MS = 300_000;
 /** Matches Pi's "session too small" compact refusal. */
-const COMPACTION_TOO_SHORT_PATTERN = /nothing to compact/i;
-/** Matches Pi's "already compacted" compact refusal. */
-const COMPACTION_ALREADY_DONE_PATTERN = /already compacted/i;
 /** Matches Pi's documented rejection of a bare `prompt` sent while it is
  *  already streaming (see rpc.md "During streaming"): benign and
  *  recoverable via steer/follow-up, not a crash. A race between the client
@@ -51,12 +56,6 @@ const COMPACTION_ALREADY_DONE_PATTERN = /already compacted/i;
  *  still running can reach this even past Passage's own busy guard. */
 const PI_ALREADY_STREAMING_PATTERN = /already (processing|streaming)/i;
 /** Upper bound on the tool payload text scanned for a `git commit` invocation. */
-const MAX_GIT_SCAN_BYTES = 8192;
-/** Matches a `git commit` invocation inside a shell command (allowing global
- *  flags such as `git -C <dir> commit`). Command separators are excluded so
- *  `echo git foo; commit` does not match. A miss only delays the refresh
- *  until run settlement; a false positive only costs one quiet refetch. */
-const GIT_COMMIT_PATTERN = /\bgit(?:\.exe)?\b[^|;&\n]*\bcommit\b/;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const encoder = new TextEncoder();
 
@@ -64,22 +63,6 @@ const encoder = new TextEncoder();
  *  from the first agent response (rows after the first user message but
  *  before the second user message). Returns [] when no usable first user
  *  message exists yet. A text-less first response yields just [user]. */
-export function collectTitleSources(timeline: TimelineItem[]): string[] {
-  const firstUserIndex = timeline.findIndex(
-    (row) => row.kind === "user" && row.text.trim() !== "",
-  );
-  if (firstUserIndex === -1) return [];
-  const firstUserText = (timeline[firstUserIndex] as { text: string }).text.trim();
-  const sources = [firstUserText];
-  for (let index = firstUserIndex + 1; index < timeline.length; index += 1) {
-    const row = timeline[index];
-    if (row.kind === "user") break;
-    if (row.kind !== "thinking" && row.kind !== "assistant") continue;
-    const text = (row as { text: string }).text.trim();
-    if (text) sources.push(text);
-  }
-  return sources;
-}
 
 type RuntimeSubscription = {
   generation: number;
@@ -132,12 +115,6 @@ export type CompactResult =
 
 /** Maps Pi's benign compact refusals to stable reasons. Anything else
  *  (genuine failures, aborts of the compaction itself) stays an error. */
-function compactRefusalReason(cause: unknown): "session-too-short" | "already-compacted" | undefined {
-  const message = cause instanceof Error ? cause.message : String(cause);
-  if (COMPACTION_ALREADY_DONE_PATTERN.test(message)) return "already-compacted";
-  if (COMPACTION_TOO_SHORT_PATTERN.test(message)) return "session-too-short";
-  return undefined;
-}
 
 export type AgentHistoryResult = HistoryPage | { unpersisted: true; history: null };
 
@@ -154,18 +131,6 @@ export class AgentError extends Error {
  *  calls mutated nothing. The check is tool-agnostic (Pi tool names and arg
  *  shapes are version-sensitive); a false positive only costs one quiet
  *  client refetch. */
-export function isGitCommitToolEvent(type: string, payload: Record<string, unknown>): boolean {
-  if (type !== "tool_execution_end" || payload.isError) return false;
-  const candidates = [payload.args, payload.input, payload.result, payload.partialResult];
-  let haystack = "";
-  for (const candidate of candidates) {
-    if (candidate === undefined) continue;
-    haystack += (typeof candidate === "string" ? candidate : JSON.stringify(candidate) ?? "") + "\n";
-    if (haystack.length >= MAX_GIT_SCAN_BYTES) break;
-  }
-  if (haystack.length > MAX_GIT_SCAN_BYTES) haystack = haystack.slice(0, MAX_GIT_SCAN_BYTES);
-  return GIT_COMMIT_PATTERN.test(haystack);
-}
 
 export class AgentService {
   private readonly listeners = new Set<(event: AgentServiceEvent) => void>();
