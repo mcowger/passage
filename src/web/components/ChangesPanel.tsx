@@ -63,6 +63,20 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
   const [mergedBranch, setMergedBranch] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  // The merged-workspace AlertDialog is modal: Radix disables pointer events
+  // outside it, so a toast fired at the same time is visible but dead.
+  // Queue it and fire once the prompt closes instead.
+  const pendingToastRef = useRef<(() => void) | null>(null);
+  const flushPendingToast = () => {
+    const run = pendingToastRef.current;
+    pendingToastRef.current = null;
+    if (run) setTimeout(run, 100);
+  };
+  const dismissMergedPrompt = () => {
+    if (deleting) return;
+    setMergedBranch(null);
+    flushPendingToast();
+  };
   const [commitMessage, setCommitMessage] = useState(() => loadDraft(workspaceId));
 
   const refreshStatus = useCallback(async (quiet = false) => {
@@ -231,7 +245,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
         setError("");
         setDeleteError("");
         setMergedBranch(s.branchRef ?? status?.branchRef ?? "branch");
-        toast.success(`Merged ${s.branchRef ?? status?.branchRef ?? "branch"} into main`);
+        pendingToastRef.current = () => toast.success(`Merged ${s.branchRef ?? status?.branchRef ?? "branch"} into main`);
       },
       (err: unknown) => {
         const message = friendlyApiError(err, "Could not merge into main. Resolve any conflicts and try again.");
@@ -249,6 +263,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
       async () => {
         setDeleting(false);
         setMergedBranch(null);
+        flushPendingToast();
         toast.success("Workspace deleted");
         await onWorkspaceDeleted?.();
       },
@@ -499,7 +514,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={mergedBranch !== null} onOpenChange={(open) => { if (!open && !deleting) setMergedBranch(null); }}>
+      <AlertDialog open={mergedBranch !== null} onOpenChange={(open) => { if (!open) dismissMergedPrompt(); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Merged into main</AlertDialogTitle>

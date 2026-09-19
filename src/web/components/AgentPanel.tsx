@@ -6,7 +6,7 @@ import { DEFAULT_TIMELINE_EXPANSION } from "../../shared/domain/settings.ts";
 import { MAX_AGENT_FILES, MAX_AGENT_FILE_DATA_BYTES, MAX_AGENT_IMAGES, MAX_AGENT_IMAGE_DATA_BYTES, type AgentFile, type AgentImage } from "../../shared/protocol/agents.ts";
 import { WorkspaceApiError, friendlyApiError, type WorkspaceApi } from "../api.ts";
 import { toast } from "sonner";
-import { commitToast } from "./ui/sonner.tsx";
+import { commitToast, CommitToastDescription } from "./ui/sonner.tsx";
 import { subscribeWorkspace } from "../workspaceSocket.ts";
 import type { GitStatus } from "../../shared/domain/git.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
@@ -360,8 +360,9 @@ export function isWorkspaceDeletable(status: GitStatus | null | undefined): bool
   return status.checkoutRoot !== status.mainCheckoutRoot;
 }
 
-/** Pending "delete this workspace?" prompt after a merge or a Send It. */
-export type DeleteWorkspacePrompt = { branch: string; merged: boolean };
+/** Pending "delete this workspace?" prompt after a merge or a Send It.
+ * commitMessage lets the user review what was committed before deciding. */
+export type DeleteWorkspacePrompt = { branch: string; merged: boolean; commitMessage?: string };
 
 export type ComposerGitOption = "commit" | "merge" | "rebase" | "push";
 
@@ -524,6 +525,24 @@ export function ComposerMergeButton({
   const [deletePrompt, setDeletePrompt] = useState<DeleteWorkspacePrompt | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  // The delete-workspace AlertDialog is modal: Radix disables pointer events
+  // outside it, so a Sonner toast fired at the same time is visible but
+  // dead (Show more / close X can't receive taps). The commit message lives
+  // inside the prompt itself (review-before-decide), so no commit toast is
+  // fired alongside it. The plain-Merge path has no message to review, so
+  // its simple "Merged" toast is queued and fired after the prompt closes.
+  const pendingToastRef = useRef<(() => void) | null>(null);
+  const flushPendingToast = () => {
+    const run = pendingToastRef.current;
+    pendingToastRef.current = null;
+    // Let the Radix modal teardown restore outside pointer events first.
+    if (run) setTimeout(run, 100);
+  };
+  const dismissDeletePrompt = () => {
+    if (deleting) return;
+    setDeletePrompt(null);
+    flushPendingToast();
+  };
 
   // Git-status fetches from several triggers (mount, history-load refresh,
   // settle re-check, WS invalidations) overlap freely. Without sequencing,
@@ -553,6 +572,7 @@ export function ComposerMergeButton({
     setMenuOpen(false);
     setDeletePrompt(null);
     setDeleteError("");
+    pendingToastRef.current = null;
     void refresh();
   }, [refresh]);
 
@@ -615,7 +635,7 @@ export function ComposerMergeButton({
         setStatus(next);
         setDeleteError("");
         setDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true });
-        toast.success(`Merged ${next.branchRef ?? branchRef} into main`);
+        pendingToastRef.current = () => toast.success(`Merged ${next.branchRef ?? branchRef} into main`);
       },
       (err: unknown) => {
         const message = friendlyApiError(err, "Could not merge into main. Resolve any conflicts and try again.");
@@ -691,22 +711,22 @@ export function ComposerMergeButton({
         const commit = await api.gitCommitAuto(workspaceId);
         setStatus(commit.status);
         if (!mergeable) {
-          commitToast("Committed changes", commit.message);
           // A commit-only Send It (main branch or detached HEAD) still
           // leaves a disposable worktree behind, so offer the same delete
           // workspace prompt -- except on the main checkout, which the
           // daemon refuses to remove.
           if (isWorkspaceDeletable(commit.status)) {
             setDeleteError("");
-            setDeletePrompt({ branch: commit.status.branchRef ?? branchRef, merged: false });
+            setDeletePrompt({ branch: commit.status.branchRef ?? branchRef, merged: false, commitMessage: commit.message });
+          } else {
+            commitToast("Committed changes", commit.message);
           }
           return;
         }
         const next = await api.gitMergeIntoMain(workspaceId);
         setStatus(next);
         setDeleteError("");
-        setDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true });
-        commitToast(`Sent ${next.branchRef ?? branchRef} to main`, commit.message);
+        setDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true, commitMessage: commit.message });
       } catch (err: unknown) {
         const message = friendlyApiError(err, "Could not send changes. Resolve any conflicts and try again.");
         toast.error("Send It failed", { description: message });
@@ -729,6 +749,7 @@ export function ComposerMergeButton({
       async () => {
         setDeleting(false);
         setDeletePrompt(null);
+        flushPendingToast();
         toast.success("Workspace deleted");
         await onWorkspaceDeleted?.();
       },
@@ -902,7 +923,7 @@ export function ComposerMergeButton({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <AlertDialog open={deletePrompt !== null} onOpenChange={(open) => { if (!open && !deleting) setDeletePrompt(null); }}>
+      <AlertDialog open={deletePrompt !== null} onOpenChange={(open) => { if (!open) dismissDeletePrompt(); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{deletePrompt?.merged === false ? "Changes sent" : "Merged into main"}</AlertDialogTitle>
@@ -920,6 +941,15 @@ export function ComposerMergeButton({
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deletePrompt?.commitMessage?.trim() ? (
+            <div className="rounded-md border bg-muted/50 px-3 py-2 text-sm" data-testid="delete-prompt-commit">
+              <div className="mb-0.5 text-xs font-medium text-muted-foreground">Commit</div>
+              <CommitToastDescription
+                key={deletePrompt.commitMessage}
+                message={deletePrompt.commitMessage}
+              />
+            </div>
+          ) : null}
           {deleteError && <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Keep workspace</AlertDialogCancel>
