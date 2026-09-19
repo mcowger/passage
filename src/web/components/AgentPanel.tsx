@@ -941,13 +941,17 @@ export function ComposerMergeButton({
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {deletePrompt?.commitMessage?.trim() ? (
+          {deletePrompt?.commitMessage !== undefined ? (
             <div className="rounded-md border bg-muted/50 px-3 py-2 text-sm" data-testid="delete-prompt-commit">
               <div className="mb-0.5 text-xs font-medium text-muted-foreground">Commit</div>
-              <CommitToastDescription
-                key={deletePrompt.commitMessage}
-                message={deletePrompt.commitMessage}
-              />
+              {deletePrompt.commitMessage.trim() ? (
+                <CommitToastDescription
+                  key={deletePrompt.commitMessage}
+                  message={deletePrompt.commitMessage}
+                />
+              ) : (
+                <span className="text-muted-foreground">Commit message unavailable.</span>
+              )}
             </div>
           ) : null}
           {deleteError && <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>}
