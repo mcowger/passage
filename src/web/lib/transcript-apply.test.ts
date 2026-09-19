@@ -88,6 +88,18 @@ describe("applyUsageEvent", () => {
     expect(next?.contextUsage?.tokens).toBe(150);
   });
 
+  test("reads finalized per-turn usage nested in message (message_end/turn_end)", () => {
+    const next = applyUsageEvent(base, { message: { role: "assistant", usage: { input: 100, output: 50, totalTokens: 150, cost: { total: 0.01 } } } });
+    expect(next?.usage.totalTokens).toBe(150);
+    expect(next?.contextUsage?.tokens).toBe(150);
+    expect(next?.usage.cost).toBe(0.01);
+  });
+
+  test("a zero top-level placeholder does not hide nested finalized usage", () => {
+    const next = applyUsageEvent(base, { usage: { input: 0, output: 0, totalTokens: 0 }, message: { role: "assistant", usage: { input: 100, output: 50, totalTokens: 150 } } });
+    expect(next?.contextUsage?.tokens).toBe(150);
+  });
+
   test("a zero or missing in-flight cost never clobbers the last known cost", () => {
     const withCost = { ...base, usage: { ...base.usage, cost: 0.01 } };
     expect(applyUsageEvent(withCost, { usage: { input: 1, output: 1, totalTokens: 2, cost: { total: 0 } } })?.usage.cost).toBe(0.01);

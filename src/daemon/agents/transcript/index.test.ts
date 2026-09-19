@@ -305,6 +305,17 @@ describe("TranscriptState", () => {
     expect(state.snapshot().contextUsage.tokens).toBe(150);
   });
 
+  test("message_end and turn_end update context from nested message.usage", () => {
+    const state = new TranscriptState();
+    state.applyEvent("message_end", { message: { role: "assistant", content: "done", usage: { input: 100, output: 50, totalTokens: 150, cost: { total: 0.01 } } } });
+    expect(state.snapshot().contextUsage.tokens).toBe(150);
+    expect(state.snapshot().usage.cost).toBe(0.01);
+    // turn_end repeats the finalized message: occupancy advances, cost stays monotonic.
+    state.applyEvent("turn_end", { message: { role: "assistant", content: "done", usage: { input: 200, output: 100, totalTokens: 300, cost: { total: 0.02 } } } });
+    expect(state.snapshot().contextUsage.tokens).toBe(300);
+    expect(state.snapshot().usage.cost).toBe(0.02);
+  });
+
   test("a zero or missing in-flight cost never clobbers the last known cost", () => {
     const state = new TranscriptState();
     state.applyEvent("message_end", { usage: { input: 100, output: 50, totalTokens: 150, cost: { total: 0.01 } } });

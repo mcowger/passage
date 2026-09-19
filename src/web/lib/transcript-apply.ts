@@ -1,5 +1,26 @@
 import type { AgentHistory, TimelineItem, UserFileRef, UserImageRef } from "../../shared/domain/agents.ts";
 
+type UsageRecord = {
+  input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number; cost?: { total?: number };
+};
+
+function liveUsageTokens(usage: UsageRecord | undefined): number {
+  if (!usage || typeof usage !== "object") return 0;
+  if (typeof usage.totalTokens === "number" && usage.totalTokens > 0) return usage.totalTokens;
+  let total = 0;
+  for (const key of ["input", "output", "cacheRead", "cacheWrite"] as const) {
+    if (typeof usage[key] === "number" && (usage[key] as number) > 0) total += usage[key] as number;
+  }
+  return total;
+}
+
+/** Prefers the top-level record when it carries a positive count, otherwise
+ *  falls back to the finalized per-turn usage nested in `message.usage`. */
+function pickLiveUsage(top: UsageRecord | undefined, nested: UsageRecord | undefined): UsageRecord | undefined {
+  if (top && liveUsageTokens(top) > 0) return top;
+  return nested ?? top;
+}
+
 const emptyHistory = (): AgentHistory => ({
   sessionId: "",
   revision: { mtimeMs: Date.now(), size: 0, contentHash: "" },
@@ -44,15 +65,19 @@ export function applyRowUpsert(history: AgentHistory | undefined, row: TimelineI
   return { ...base, timeline: next };
 }
 
-/** Applies the usage/context-window fields carried by non-`row_upsert`
- *  passthrough events (e.g. raw message_update events also used for the live
- *  token/sec readout). Never touches `timeline` -- that is `applyRowUpsert`'s
- *  job alone, so there remains exactly one path that can mutate it. */
+/** Applies the usage/context-window fields carried by live Pi events.
+ *  `message_update` carries the latest cumulative usage top-level (often
+ *  zero until the provider finalizes it); `message_end`/`turn_end` carry the
+ *  finalized per-turn usage nested in `message.usage` with no top-level
+ *  copy. Both must feed the pill or it only moves when the run settles.
+ *  Never touches `timeline` -- that is `applyRowUpsert`'s job alone, so
+ *  there remains exactly one path that can mutate it. */
 export function applyUsageEvent(history: AgentHistory | undefined, payload: Record<string, unknown> | undefined): AgentHistory | undefined {
   if (!history || !payload) return history;
-  const usage = payload.usage as
-    | { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number; cost?: { total?: number } }
-    | undefined;
+  const top = payload.usage as UsageRecord | undefined;
+  const message = payload.message as Record<string, unknown> | undefined;
+  const nested = (message !== null && typeof message === "object" && !Array.isArray(message) ? message.usage : undefined) as UsageRecord | undefined;
+  const usage = pickLiveUsage(top, nested);
   if (!usage) return history;
   // Session cost is cumulative and never decreases: some providers report
   // zero (or no) cost while a turn is in flight and only finalize it on
