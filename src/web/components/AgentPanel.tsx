@@ -431,6 +431,7 @@ function ComposerMergeButton({
   disabled,
   settled = true,
   onWorkspaceDeleted,
+  hideIcons,
 }: {
   workspaceId: string;
   api: WorkspaceApi;
@@ -438,6 +439,8 @@ function ComposerMergeButton({
   /** True once the owning agent is settled. Drives a status re-check (see below); not a commit gate. */
   settled?: boolean;
   onWorkspaceDeleted?: () => void | Promise<void>;
+  /** Mobile mode: omit the decorative leading icon to save horizontal space. */
+  hideIcons?: boolean;
 }) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [busyOp, setBusyOp] = useState<ComposerGitOption | null>(null);
@@ -648,7 +651,7 @@ function ComposerMergeButton({
             title={meta.title}
             aria-label={meta.title}
           >
-            {busy ? <Spinner className="size-3" /> : <MetaIcon size={14} aria-hidden="true" />}
+            {busy ? <Spinner className="size-3" /> : hideIcons ? null : <MetaIcon size={14} aria-hidden="true" />}
             {meta.label}
           </Button>
         );
@@ -2038,7 +2041,7 @@ function AgentComposerInner({
             )}
           </div>
           <div className="composer-toolbar-right">
-            <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} settled={!running && !stopping} onWorkspaceDeleted={onWorkspaceDeleted} />
+            <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} settled={!running && !stopping} onWorkspaceDeleted={onWorkspaceDeleted} hideIcons={isMobileComposer} />
             <DisplayOptionsPopover
               expansion={sessionExpansion}
               onExpansionChange={onSessionExpansionChange}
