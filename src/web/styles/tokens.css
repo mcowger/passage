@@ -112,6 +112,13 @@
 
 * { box-sizing: border-box; }
 html { height: 100vh; height: 100dvh; overscroll-behavior: none; }
+/* Page-level horizontal scroll is never wanted (mobile PWA deep-link cold
+   starts briefly misreport the viewport and flashed the desktop tree on a
+   phone). Belt-and-suspenders: clip here so no transient wide content can
+   pan the page; inner panes keep their own vertical scroll. `hidden` first
+   for engines without `clip` support. */
+html, body { overflow-x: hidden; overflow-x: clip; }
+#root { overflow-x: hidden; overflow-x: clip; max-width: 100vw; }
 body { margin: 0; min-width: 320px; background: var(--background); color: var(--foreground); font-size: 14px; -webkit-font-smoothing: antialiased; overscroll-behavior: none; touch-action: manipulation; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }

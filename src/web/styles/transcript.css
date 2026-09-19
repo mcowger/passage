@@ -4,7 +4,10 @@
 .timeline {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overflow-x: clip;
   overflow-anchor: none;
   padding: 16px 18px 20px;
   display: flex;
@@ -36,7 +39,7 @@
   line-height: 1.5;
   font-size: 14px;
 }
-.user-message-card p { margin: 0; white-space: pre-wrap; }
+.user-message-card p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Uploaded image thumbnails and file chips inside a user message */
 .user-file-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -51,9 +54,34 @@
 .user-image-expired { font-size: 11.5px; color: var(--muted); font-style: italic; }
 
 /* Assistant Prose Message (Clean Document) */
-.assistant-message-row { margin: 4px 0; }
-.assistant-prose { font-size: 14.5px; line-height: 1.62; color: var(--foreground); }
-.assistant-prose p { margin: 0 0 8px; white-space: pre-wrap; }
+.assistant-message-row { margin: 4px 0; min-width: 0; max-width: 100%; }
+.assistant-prose {
+  font-size: 14.5px;
+  line-height: 1.62;
+  color: var(--foreground);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.assistant-prose p { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Long tokens (file paths, identifiers) must wrap instead of widening the
+   timeline past the viewport. Fenced blocks keep their own internal
+   horizontal scroll; everything else wraps. */
+.assistant-prose code { overflow-wrap: anywhere; word-break: break-word; }
+.assistant-prose pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.assistant-prose table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.assistant-prose img, .assistant-prose video { max-width: 100%; height: auto; }
+.assistant-prose [data-streamdown="code-block"] { min-width: 0; max-width: 100%; }
 .assistant-prose p:last-child { margin-bottom: 0; }
 
 /* Assistant fenced code blocks (Streamdown): keep the header actions quiet so
@@ -715,7 +743,7 @@ button.tool-row-summary {
 .thinking-label { font-weight: 500; color: var(--foreground); }
 .thinking-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--muted); font-style: italic; }
 .thinking-row[open] .thinking-preview { display: none; }
-.thinking-body { padding: 4px 10px 4px 22px; color: var(--muted); font-size: 12.5px; line-height: 1.48; font-style: italic; border-left: 2px solid var(--border); margin: 2px 0 3px 6px; }
+.thinking-body { padding: 4px 10px 4px 22px; color: var(--muted); font-size: 12.5px; line-height: 1.48; font-style: italic; border-left: 2px solid var(--border); margin: 2px 0 3px 6px; min-width: 0; overflow-wrap: anywhere; }
 
 
 /* File-ref chip: display-time rendering of backticked @`path` refs in user

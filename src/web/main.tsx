@@ -184,6 +184,21 @@ function setupToastId(runId: string): string {
   return `workspace-setup-${runId}`;
 }
 
+const MOBILE_BREAKPOINT_PX = 768;
+
+function computeIsMobile(): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.innerWidth < MOBILE_BREAKPOINT_PX) return true;
+  // Narrow-viewport cold-start misreport (PWA deep link): a touch device
+  // reporting a wide viewport is far more likely a phone whose viewport
+  // hasn't settled than a touch desktop. Assume mobile until proven wide.
+  try {
+    return window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  } catch {
+    return false;
+  }
+}
+
 function App() {
   const api = useMemo(() => createWorkspaceApi(), []);
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
@@ -227,7 +242,12 @@ function App() {
   const [worktreeModalTab, setWorktreeModalTab] = useState<"create" | "discover">("create");
   const [worktreeModalProjectId, setWorktreeModalProjectId] = useState<string>();
   const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
-  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
+  // Mobile-first initial: a PWA cold start (esp. via deep link) can briefly
+  // misreport a narrow viewport as wide before the viewport settles. Touch
+  // devices are overwhelmingly handsets, so assume mobile until a reliable
+  // measurement says desktop — the reverse flash (desktop tree on a 390px
+  // phone) is what produced page-level horizontal scrolling.
+  const [isMobile, setIsMobile] = useState(() => computeIsMobile());
   const [dirtyEditors, setDirtyEditors] = useState<Record<string, string>>({});
   const [pendingDirtyClose, setPendingDirtyClose] = useState<{ tabId: string; path: string } | null>(null);
   const [dirtySaveBusy, setDirtySaveBusy] = useState(false);
@@ -244,11 +264,14 @@ function App() {
     if (typeof window !== "undefined") {
       const handleOnline = () => setIsOffline(false);
       const handleOffline = () => setIsOffline(true);
-      const handleResize = () => setIsMobile(window.innerWidth < 768);
+      const handleResize = () => setIsMobile(computeIsMobile());
 
       window.addEventListener("online", handleOnline);
       window.addEventListener("offline", handleOffline);
       window.addEventListener("resize", handleResize);
+      const mobileQuery = window.matchMedia?.("(max-width: 767px)");
+      const handleQueryChange = () => setIsMobile(computeIsMobile());
+      mobileQuery?.addEventListener?.("change", handleQueryChange);
 
       if ("serviceWorker" in navigator && process.env.NODE_ENV === "production") {
         navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -258,6 +281,7 @@ function App() {
         window.removeEventListener("online", handleOnline);
         window.removeEventListener("offline", handleOffline);
         window.removeEventListener("resize", handleResize);
+        mobileQuery?.removeEventListener?.("change", handleQueryChange);
       };
     }
   }, []);
