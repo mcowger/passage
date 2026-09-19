@@ -85,7 +85,6 @@
   .terminal-actions .secondary.small, .terminal-actions .danger-button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
   .terminal-actions .icon-button { min-width: 32px; min-height: 32px; }
 }
-}
 
 @media (max-width: 480px) {
   .branch-pill { display: none; }
