@@ -38,6 +38,7 @@ import { CommandPalette } from "./components/CommandPalette.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { showAgentNotification } from "./notifications.ts";
 import { initKeyboardInset } from "./lib/keyboard-inset.ts";
+import { useEdgeSwipeDrawer } from "./components/useEdgeSwipeDrawer.ts";
 import { Button } from "./components/ui/button.tsx";
 import { Input } from "./components/ui/input.tsx";
 import { FileCode, Globe, MoreHorizontal, Plus, Terminal as TerminalIcon } from "lucide-react";
@@ -264,6 +265,16 @@ function App() {
   // iOS keyboard inset polyfill: pins the composer above the software
   // keyboard via --kb-inset and corrects --app-height (docs/IOS-PWA-NATIVE.md §4).
   useEffect(() => initKeyboardInset(), []);
+
+  // Mobile edge gesture: swipe right from the left edge toward the middle
+  // opens the sidebar drawer; swipe left inside it closes it again.
+  // Placed after the isMobile state above so the enabled flag is readable.
+  useEdgeSwipeDrawer({
+    enabled: isMobile,
+    drawerOpen,
+    onOpen: () => setDrawerOpen(true),
+    onClose: () => setDrawerOpen(false),
+  });
 
   // Offline transcript preview for rendering verification (?transcriptPreview=1
   // with PASSAGE_TRANSCRIPT_PREVIEW=1 on the daemon). Never live agent state.
