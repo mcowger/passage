@@ -1,15 +1,11 @@
-import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentHistory, AgentSummary } from "../shared/domain/agents.ts";
 import type { Workspace } from "../shared/domain/workspaces.ts";
 import type { TerminalSummary } from "../shared/domain/terminals.ts";
-import type { WebPreview } from "../shared/domain/previews.ts";
 import type { PaneTab, LayoutNode } from "../shared/domain/layout.ts";
 import { addTabToGroup, countTabsOfKind, createDefaultLayout, findFirstDeadTerminalTab, getFirstTabGroup, removeTabFromTree, updateTabInTree } from "../shared/domain/layout.ts";
 import { resolveFontFamilies } from "../shared/domain/customization.ts";
 import { createWorkspaceApi, friendlyApiError } from "./api.ts";
-import { subscribeWorkspace } from "./workspaceSocket.ts";
-import type { WorkspaceActionRun } from "../shared/domain/workspace-actions.ts";
 import { AgentSessionPanel } from "./components/AgentSessionPanel.tsx";
 import { MobileContextBar, MobileSessionSheet, type MobileDestinationKind, type MobileReturn } from "./components/MobileNav.tsx";
 import { AGENT_STATUS_LABEL, getAgentStatusKind, getWorkspaceStatusKind } from "./components/agentStatus.ts";
@@ -20,7 +16,6 @@ import { ExplorerPanel } from "./components/ExplorerPanel.tsx";
 import { ChangesPanel } from "./components/ChangesPanel.tsx";
 import { EditorPanel } from "./components/EditorPanel.tsx";
 import { DiffPanel } from "./components/DiffPanel.tsx";
-import { TerminalPanel } from "./components/TerminalPanel.tsx";
 import { TerminalTabPane } from "./components/TerminalTabPane.tsx";
 import { PreviewPanel } from "./components/PreviewPanel.tsx";
 import { WorkspaceOverview } from "./components/WorkspaceOverview.tsx";
@@ -29,12 +24,11 @@ import { DirectoryPicker } from "./components/DirectoryPicker.tsx";
 import { SplitCanvas } from "./components/SplitCanvas.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
-import { showAgentNotification } from "./notifications.ts";
 import { initKeyboardInset } from "./lib/keyboard-inset.ts";
 import { useEdgeSwipeDrawer } from "./components/useEdgeSwipeDrawer.ts";
 import { Button } from "./components/ui/button.tsx";
 import { Input } from "./components/ui/input.tsx";
-import { FileCode, Globe, MoreHorizontal, Plus, Terminal as TerminalIcon } from "lucide-react";
+import { FileCode, Globe, MoreHorizontal, Plus } from "lucide-react";
 import {
   Empty,
   EmptyContent,
@@ -78,6 +72,7 @@ import {
 import { useDaemon } from "./app/useDaemon.ts";
 import { useWorkspaceList } from "./app/useWorkspaceList.ts";
 import { useWorkspaceLayout } from "./app/useWorkspaceLayout.ts";
+import { useWorkspaceResources } from "./app/useWorkspaceResources.ts";
 
 function App() {
   const api = useMemo(() => createWorkspaceApi(), []);
@@ -101,23 +96,46 @@ function App() {
     handleLayoutChange,
     handleSaveSettings,
   } = useWorkspaceLayout(api, selectedWorkspaceId);
+  const handleWorkspaceSwitched = useCallback(() => {
+    setOpenEditorPath(undefined);
+    setOpenDiffPath(undefined);
+    setActiveTab("agent");
+  }, []);
+  const {
+    agents,
+    setAgents,
+    agentsLoaded,
+    agentError,
+    setAgentError,
+    selectedAgentId,
+    setSelectedAgentId,
+    autoAgentPending,
+    setAutoAgentPending,
+    autoAgentAttempted,
+    terminals,
+    setTerminals,
+    terminalsLoaded,
+    selectedTerminalId,
+    setSelectedTerminalId,
+    previews,
+    setPreviews,
+    selectedPreviewId,
+    setSelectedPreviewId,
+    previewHistory,
+    loadAgents,
+    loadTerminals,
+    loadPreviews,
+    pendingSetupRuns,
+  } = useWorkspaceResources(api, selectedWorkspaceId, {
+    loadLayout: loadLayoutAndSettings,
+    onWorkspaceSwitched: handleWorkspaceSwitched,
+  });
   const [formError, setFormError] = useState("");
-  const [selectedAgentId, setSelectedAgentId] = useState<string>();
-  const [selectedTerminalId, setSelectedTerminalId] = useState<string>();
   const [activeTab, setActiveTab] = useState<TabKind>("agent");
   const [mobileReturnTo, setMobileReturnTo] = useState<MobileReturn | null>(null);
   const [mobileSessionOpen, setMobileSessionOpen] = useState(false);
   const [openEditorPath, setOpenEditorPath] = useState<string>();
   const [openDiffPath, setOpenDiffPath] = useState<string>();
-  const [agents, setAgents] = useState<AgentSummary[]>([]);
-  const [agentsLoaded, setAgentsLoaded] = useState(false);
-  const [autoAgentPending, setAutoAgentPending] = useState(false);
-  const [terminals, setTerminals] = useState<TerminalSummary[]>([]);
-  const [terminalsLoaded, setTerminalsLoaded] = useState(false);
-  const [previews, setPreviews] = useState<WebPreview[]>([]);
-  const [selectedPreviewId, setSelectedPreviewId] = useState<string>();
-  const [previewHistory, setPreviewHistory] = useState<AgentHistory | null>(null);
-  const [agentError, setAgentError] = useState("");
   const [form, setForm] = useState<FormKind>();
   const [dirSuggestOpen, setDirSuggestOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -137,12 +155,7 @@ function App() {
   const [pendingDirtyClose, setPendingDirtyClose] = useState<{ tabId: string; path: string } | null>(null);
   const [dirtySaveBusy, setDirtySaveBusy] = useState(false);
   const editorSaveHandlers = useRef(new Map<string, () => Promise<boolean>>());
-  const pendingSetupRuns = useRef(new Map<string, string>());
-  const autoAgentAttempted = useRef(new Set<string>());
-  const announcedSetupRuns = useRef(new Set<string>());
 
-  const agentsLoadGeneration = useRef(0);
-  const terminalsLoadGeneration = useRef(0);
 
   // Register service worker and offline listeners
   useEffect(() => {
@@ -185,17 +198,6 @@ function App() {
     onClose: () => setDrawerOpen(false),
   });
 
-  // Offline transcript preview for rendering verification (?transcriptPreview=1
-  // with PASSAGE_TRANSCRIPT_PREVIEW=1 on the daemon). Never live agent state.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (new URLSearchParams(window.location.search).get("transcriptPreview") !== "1") return;
-    let cancelled = false;
-    void api.transcriptPreview()
-      .then((preview) => { if (!cancelled) setPreviewHistory(preview); })
-      .catch(() => { if (!cancelled) setPreviewHistory(null); });
-    return () => { cancelled = true; };
-  }, [api]);
 
   // Global keyboard shortcuts (Command Palette, Layout reset)
   useEffect(() => {
@@ -221,145 +223,13 @@ function App() {
     );
   }, [agents, selectedWorkspaceId]);
 
-  const loadAgents = useCallback(async (workspaceId: string, selectFirst = true) => {
-    const generation = ++agentsLoadGeneration.current;
-    try {
-      const next = await api.listAgents(workspaceId);
-      if (generation !== agentsLoadGeneration.current) return;
-      setAgentError("");
-      setAgents(next);
-      setSelectedAgentId((current) => {
-        // Push deep-link (?agentId=) wins once when the agent list lands.
-        try {
-          const linked = new URLSearchParams(window.location.search).get("agentId");
-          if (linked && next.some((agent) => agent.id === linked)) return linked;
-        } catch {}
-        if (current && next.some((agent) => agent.id === current)) return current;
-        return selectFirst ? next[0]?.id : undefined;
-      });
-      setAgentsLoaded(true);
-    } catch (cause) {
-      if (generation !== agentsLoadGeneration.current) return;
-      setAgentError(cause instanceof Error ? cause.message : "Unable to load agents");
-      setAgentsLoaded(true);
-    }
-  }, [api]);
-
-  const loadTerminals = useCallback(async (workspaceId: string, selectFirst = true) => {
-    const generation = ++terminalsLoadGeneration.current;
-    try {
-      const next = await api.listTerminals(workspaceId);
-      if (generation !== terminalsLoadGeneration.current) return;
-      setTerminals(next);
-      setSelectedTerminalId((current) => {
-        if (current && next.some((t) => t.id === current)) return current;
-        return selectFirst ? next[0]?.id : undefined;
-      });
-      setTerminalsLoaded(true);
-    } catch {
-      if (generation !== terminalsLoadGeneration.current) return;
-      setTerminals([]);
-      setTerminalsLoaded(true);
-    }
-  }, [api]);
-
-  const loadPreviews = useCallback(async (workspaceId: string, selectFirst = true) => {
-    try {
-      const next = await api.listPreviews(workspaceId);
-      setPreviews(next);
-      setSelectedPreviewId((current) => {
-        if (current && next.some((p) => p.id === current)) return current;
-        return selectFirst ? next[0]?.id : undefined;
-      });
-    } catch {}
-  }, [api]);
 
 
 
   const { build, daemonLifecycle, drainBusy, wsHealth, handleBeginDrain, handleCancelDrain } = useDaemon(api);
 
 
-  useEffect(() => {
-    agentsLoadGeneration.current += 1;
-    terminalsLoadGeneration.current += 1;
-    setAgents([]);
-    setAgentsLoaded(false);
-    setAutoAgentPending(false);
-    setTerminals([]);
-    setTerminalsLoaded(false);
-    setPreviews([]);
-    setSelectedAgentId(undefined);
-    setSelectedTerminalId(undefined);
-    setSelectedPreviewId(undefined);
-    setOpenEditorPath(undefined);
-    setOpenDiffPath(undefined);
-    setActiveTab("agent");
-    if (selectedWorkspaceId) {
-      void loadAgents(selectedWorkspaceId);
-      void loadTerminals(selectedWorkspaceId);
-      void loadPreviews(selectedWorkspaceId);
-      void loadLayoutAndSettings(selectedWorkspaceId);
-    }
-  }, [loadAgents, loadTerminals, loadPreviews, loadLayoutAndSettings, selectedWorkspaceId]);
 
-  useEffect(() => {
-    if (!selectedWorkspaceId) return;
-    const workspaceId = selectedWorkspaceId;
-    const settleSetupRun = (run: WorkspaceActionRun) => {
-      if (run.status === "running" || announcedSetupRuns.current.has(run.id)) return;
-      announcedSetupRuns.current.add(run.id);
-      pendingSetupRuns.current.delete(run.workspaceId);
-      const id = setupToastId(run.id);
-      if (run.status === "succeeded") {
-        toast.success("Workspace setup complete", {
-          id,
-          description: `Finished ${run.results.length} setup command${run.results.length === 1 ? "" : "s"}.`,
-          duration: 5000,
-        });
-        return;
-      }
-      const failed = run.results.find((result) => result.exitCode !== 0);
-      toast.error("Workspace setup failed", {
-        id,
-        description: failed
-          ? `${failed.command}${failed.exitCode === null ? " was cancelled or timed out." : ` exited with code ${failed.exitCode}.`}`
-          : run.error ?? "The setup action did not complete.",
-        duration: 8000,
-      });
-    };
-    const ensureSetupToast = () => {
-      const runId = pendingSetupRuns.current.get(workspaceId);
-      if (!runId || announcedSetupRuns.current.has(runId)) return;
-      // Re-assert the loading state so the progression toast stays visible
-      // across reloads or workspace switches, and so a run that finished
-      // before we subscribed still resolves into the same toast.
-      toast.loading("Setting up workspace", {
-        id: setupToastId(runId),
-        description: "Running the worktree setup action in the background.",
-        duration: Infinity,
-      });
-      void api.getWorkspaceActionRun(workspaceId, runId).then(settleSetupRun).catch(() => undefined);
-    };
-    ensureSetupToast();
-    const sub = subscribeWorkspace(
-      selectedWorkspaceId,
-      (event) => {
-        if (event.type !== "actions-changed") return;
-        const payload = event.payload as { runId?: unknown };
-        const runId = typeof payload.runId === "string" ? payload.runId : undefined;
-        if (!runId || pendingSetupRuns.current.get(selectedWorkspaceId) !== runId || announcedSetupRuns.current.has(runId)) return;
-        void api.getWorkspaceActionRun(selectedWorkspaceId, runId).then(settleSetupRun).catch(() => undefined);
-      },
-      async () => {
-        await Promise.all([
-          loadAgents(selectedWorkspaceId, false),
-          loadTerminals(selectedWorkspaceId, false),
-          loadPreviews(selectedWorkspaceId, false),
-        ]);
-      }
-    );
-    return () => sub.close();
-  }, [selectedWorkspaceId, loadAgents, loadTerminals, loadPreviews]);
 
   const workspace = snapshot?.workspaces.find((item) => item.id === selectedWorkspaceId);
   const project = snapshot?.projects.find((item) => item.id === workspace?.projectId);
