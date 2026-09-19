@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { createQueuedFollowUp, extractLatestThinkingSummary, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, resolveComposerGitOptions, resolvePinned, REPIN_SLACK_PX, UNPIN_SLACK_PX, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, shouldSuppressComposerClickAfterTouch, COMPOSER_TOUCH_SEND_SUPPRESS_MS, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
+import { createQueuedFollowUp, extractLatestThinkingSummary, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, isComposerSendItEnabled, isComposerSendItMergeable, resolveComposerGitOptions, resolvePinned, REPIN_SLACK_PX, UNPIN_SLACK_PX, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, shouldSuppressComposerClickAfterTouch, COMPOSER_TOUCH_SEND_SUPPRESS_MS, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 
@@ -191,6 +191,74 @@ describe("resolveComposerGitOptions", () => {
     expect(resolveComposerGitOptions({ ...base, aheadOfMain: 2, branchRef: null, detached: true })).toEqual([]);
     expect(resolveComposerGitOptions(null)).toEqual([]);
     expect(resolveComposerGitOptions(undefined)).toEqual([]);
+  });
+});
+
+describe("isComposerSendItEnabled", () => {
+  const base: import("../../shared/domain/git.ts").GitStatus = {
+    checkoutRoot: "/wt/feature",
+    mainCheckoutRoot: "/repo",
+    repositoryRoot: "/repo",
+    branchRef: "feature",
+    detached: false,
+    ahead: 0,
+    behind: 0,
+    aheadOfMain: 0,
+    behindMain: 0,
+    hasUpstream: false,
+    dirty: false,
+    conflicted: false,
+    truncated: false,
+    files: [],
+  };
+  const dirtyFile = { path: "a.ts", kind: "modified" as const, staged: false, workingTree: true, binary: false, submodule: false };
+
+  test("enables only when the workspace is dirty", () => {
+    expect(isComposerSendItEnabled({ ...base, dirty: true, files: [dirtyFile] })).toBe(true);
+    // Files present without the dirty flag still count as dirty.
+    expect(isComposerSendItEnabled({ ...base, dirty: false, files: [dirtyFile] })).toBe(true);
+    expect(isComposerSendItEnabled({ ...base, dirty: false, files: [] })).toBe(false);
+  });
+
+  test("stays disabled when conflicted, even with changes", () => {
+    expect(isComposerSendItEnabled({ ...base, dirty: true, files: [dirtyFile], conflicted: true })).toBe(false);
+  });
+
+  test("enables on main too (merge step is skipped there)", () => {
+    expect(isComposerSendItEnabled({ ...base, dirty: true, files: [dirtyFile], branchRef: "main" })).toBe(true);
+  });
+
+  test("disables without a status", () => {
+    expect(isComposerSendItEnabled(null)).toBe(false);
+    expect(isComposerSendItEnabled(undefined)).toBe(false);
+  });
+});
+
+describe("isComposerSendItMergeable", () => {
+  const base: import("../../shared/domain/git.ts").GitStatus = {
+    checkoutRoot: "/wt/feature",
+    mainCheckoutRoot: "/repo",
+    repositoryRoot: "/repo",
+    branchRef: "feature",
+    detached: false,
+    ahead: 0,
+    behind: 0,
+    aheadOfMain: 0,
+    behindMain: 0,
+    hasUpstream: false,
+    dirty: true,
+    conflicted: false,
+    truncated: false,
+    files: [],
+  };
+
+  test("merges on feature branches, not on main or detached HEADs", () => {
+    expect(isComposerSendItMergeable({ ...base })).toBe(true);
+    expect(isComposerSendItMergeable({ ...base, branchRef: "main" })).toBe(false);
+    expect(isComposerSendItMergeable({ ...base, checkoutRoot: "/repo", mainCheckoutRoot: "/repo" })).toBe(false);
+    expect(isComposerSendItMergeable({ ...base, branchRef: null, detached: true })).toBe(false);
+    expect(isComposerSendItMergeable(null)).toBe(false);
+    expect(isComposerSendItMergeable(undefined)).toBe(false);
   });
 });
 

@@ -61,6 +61,7 @@ import {
   GraduationCap,
   GitCommitHorizontal,
   GitMerge,
+  Rocket,
   RotateCwFadingClock,
   X,
 } from "lucide-react";
@@ -320,6 +321,29 @@ export function isComposerMergeRelevant(status: GitStatus | null | undefined): b
   return !isMainWorktree && status.aheadOfMain > 0;
 }
 
+/**
+ * Send-it gate: true only when the workspace is dirty (uncommitted changes
+ * present) and committable (not conflicted). This is the sole enablement
+ * rule for the composer's Send-it button.
+ */
+export function isComposerSendItEnabled(status: GitStatus | null | undefined): boolean {
+  if (!status) return false;
+  if (status.conflicted) return false;
+  return status.dirty || status.files.length > 0;
+}
+
+/**
+ * True when a send-it run should attempt the merge step after committing:
+ * a non-main branch with a branchRef (the same branches the standalone
+ * merge/rebase options serve). On main or a detached HEAD, send-it stops
+ * after the auto-commit.
+ */
+export function isComposerSendItMergeable(status: GitStatus | null | undefined): boolean {
+  if (!status?.branchRef) return false;
+  const isMainWorktree = status.checkoutRoot === status.mainCheckoutRoot || status.branchRef === "main";
+  return !isMainWorktree;
+}
+
 export type ComposerGitOption = "commit" | "merge" | "rebase" | "push";
 
 /**
@@ -444,11 +468,14 @@ export function QueuedFollowUpList({
 /**
  * Smart Git shortcut for the bottom composer bar. Fetches its own Git status and
  * only renders when at least one action is relevant: commit (dirty tree),
- * merge (ahead of main), rebase (main has diverged), or push (remote branch
- * exists and is behind).
+ * merge (ahead of main), rebase (main has diverged), push (remote branch
+ * exists and is behind), or send-it (dirty tree: auto-commit, then rebase +
+ * merge into main in one go).
  * A single option renders as a direct action button; multiple options collapse
  * into a FolderGit2 icon button with a thinking-selector-style popup menu.
- * Merge still runs only after explicit confirmation.
+ * The Send-it button always renders for Git workspaces once status loads and
+ * stays disabled unless the tree is dirty. Merge still runs only after
+ * explicit confirmation; send-it runs its merge step without a second prompt.
  */
 function ComposerMergeButton({
   workspaceId,
@@ -468,7 +495,7 @@ function ComposerMergeButton({
   hideIcons?: boolean;
 }) {
   const [status, setStatus] = useState<GitStatus | null>(null);
-  const [busyOp, setBusyOp] = useState<ComposerGitOption | null>(null);
+  const [busyOp, setBusyOp] = useState<ComposerGitOption | "send-it" | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [mergedBranch, setMergedBranch] = useState<string | null>(null);
@@ -600,6 +627,45 @@ function ComposerMergeButton({
     ).finally(() => setBusyOp(null));
   };
 
+  /**
+   * Send it: auto-commit (stage all + generated message), then merge into
+   * main (which itself rebases the branch onto main before fast-forwarding).
+   * Commit runs first because a rebase refuses a dirty tree; on main or a
+   * detached HEAD there is nothing to merge, so it stops after the commit.
+   */
+  const handleSendIt = () => {
+    if (busy || !isComposerSendItEnabled(status)) return;
+    const branchRef = status?.branchRef ?? "branch";
+    const mergeable = isComposerSendItMergeable(status);
+    setMenuOpen(false);
+    setBusyOp("send-it");
+    void (async () => {
+      try {
+        const commit = await api.gitCommitAuto(workspaceId);
+        setStatus(commit.status);
+        if (!mergeable) {
+          toast.success("Committed changes", { description: commit.message });
+          return;
+        }
+        const next = await api.gitMergeIntoMain(workspaceId);
+        setStatus(next);
+        setDeleteError("");
+        setMergedBranch(next.branchRef ?? branchRef);
+        toast.success(`Sent ${next.branchRef ?? branchRef} to main`, { description: commit.message });
+      } catch (err: unknown) {
+        const message = friendlyApiError(err, "Could not send changes. Resolve any conflicts and try again.");
+        toast.error("Send It failed", { description: message });
+        try {
+          setStatus(await api.gitStatus(workspaceId));
+        } catch {
+          // Keep the last known status; the toast already surfaced the failure.
+        }
+      } finally {
+        setBusyOp(null);
+      }
+    })();
+  };
+
   const handleDeleteWorkspace = () => {
     if (mergedBranch === null || deleting) return;
     setDeleting(true);
@@ -619,7 +685,21 @@ function ComposerMergeButton({
   };
 
   const options = resolveComposerGitOptions(status);
-  if (options.length === 0 && mergedBranch === null) return null;
+  // Send-it owns its own dirty-gated enablement (disabled, not hidden, when
+  // clean), so the component stays mounted once Git status loads even when
+  // no standalone commit/merge/rebase/push option applies. Only non-Git
+  // workspaces (no status) render nothing.
+  if (status === null && mergedBranch === null) return null;
+  const sendItEnabled = isComposerSendItEnabled(status);
+  const sendItBusy = busyOp === "send-it";
+  const dirtyCount = status?.files.length ?? 0;
+  const sendItTitle = status?.conflicted
+    ? "Resolve merge conflicts before sending"
+    : !sendItEnabled
+      ? "No changes to send"
+      : isComposerSendItMergeable(status)
+        ? `Auto-commit ${dirtyCount} changed file${dirtyCount === 1 ? "" : "s"}, rebase onto main, and merge into main`
+        : `Auto-commit ${dirtyCount} changed file${dirtyCount === 1 ? "" : "s"} (stage all + generate message)`;
   const branchRef = status?.branchRef ?? mergedBranch ?? "branch";
   const ahead = status?.aheadOfMain ?? 0;
   const behindMain = status?.behindMain ?? 0;
@@ -632,7 +712,6 @@ function ComposerMergeButton({
     else handlePush();
   };
 
-  const dirtyCount = status?.files.length ?? 0;
   const optionMeta: Record<ComposerGitOption, { label: string; detail: string; title: string; Icon: typeof GitMerge }> = {
     commit: {
       label: "Commit",
@@ -662,6 +741,20 @@ function ComposerMergeButton({
 
   return (
     <>
+      {status !== null && (
+        <Button
+          variant="default"
+          size="xs"
+          className="composer-action-btn"
+          onClick={handleSendIt}
+          disabled={disabled || busy || !sendItEnabled}
+          title={sendItTitle}
+          aria-label={sendItTitle}
+        >
+          {sendItBusy ? <Spinner className="size-3" /> : hideIcons ? null : <Rocket size={14} aria-hidden="true" />}
+          Send It
+        </Button>
+      )}
       {options.length === 1 && options[0] !== undefined ? (() => {
         const only = options[0];
         const meta = optionMeta[only];
