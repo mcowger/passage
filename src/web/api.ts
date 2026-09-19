@@ -267,6 +267,21 @@ export function createWorkspaceApi(
     async listAgents(workspaceId: string): Promise<AgentSummary[]> {
       return agentSummarySchema.array().parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`));
     },
+    /** At-a-glance agent activity per workspace for the sidebar dots.
+     *  Missing entries mean empty/gray. Tolerates older daemons without
+     *  the endpoint by returning {} so the sidebar falls back to
+     *  per-workspace agents (selected workspace only). */
+    async workspaceAgentStatuses(): Promise<Record<string, "empty" | "idle" | "active" | "attention">> {
+      const schema = z.object({
+        statuses: z.record(z.string(), z.enum(["empty", "idle", "active", "attention"])),
+      });
+      try {
+        const body = schema.parse(await request("/api/agents/status-by-workspace"));
+        return body.statuses;
+      } catch {
+        return {};
+      }
+    },
     async createAgent(workspaceId: string, title?: string): Promise<AgentSummary> {
       return agentSummarySchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`, { method: "POST", body: JSON.stringify(title ? { title } : {}) }));
     },

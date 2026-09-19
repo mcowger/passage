@@ -20,7 +20,7 @@ import { formatBuildDetail, formatBuildLabel } from "../../shared/build-info.ts"
 import type { DaemonLifecycleSnapshot } from "../api.ts";
 import type { ConnectionHealth } from "../socketLifecycle.ts";
 import { WsHealthIndicator } from "./WsHealthIndicator.tsx";
-import { AGENT_STATUS_LABEL, getWorkspaceStatusKind } from "./agentStatus.ts";
+import { AGENT_STATUS_LABEL, getWorkspaceStatusKind, type AgentStatusKind } from "./agentStatus.ts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
 import {
   AlertDialog,
@@ -43,6 +43,11 @@ export type SidebarProps = {
   onNewProject: () => void;
   onNewWorktree?: (projectId: string) => void;
   agents: AgentSummary[];
+  /** At-a-glance activity per workspace from `GET /api/agents/status-by-workspace`.
+   *  Covers ALL workspaces; `agents` only carries the selected workspace's
+   *  agents, which is why every non-selected dot used to render grey until
+   *  clicked. Absent entries (or an absent map) fall back to `agents`. */
+  workspaceStatuses?: Record<string, AgentStatusKind>;
   onManageWorkspace?: (workspace: Workspace) => void;
   onDiscoverWorktrees?: (projectId?: string) => void;
   onArchiveProject?: (id: string) => void;
@@ -122,6 +127,7 @@ export function Sidebar({
   onNewProject,
   onNewWorktree,
   agents,
+  workspaceStatuses,
   onManageWorkspace,
   onDiscoverWorktrees,
   onArchiveProject,
@@ -155,6 +161,7 @@ export function Sidebar({
             onNewWorktree={onNewWorktree}
             onDiscoverWorktrees={onDiscoverWorktrees}
             onRequestRemoveProject={onArchiveProject ? setPendingRemove : undefined}
+            workspaceStatuses={workspaceStatuses}
           />
         ))}
       </div>
@@ -210,6 +217,7 @@ function ProjectRow({
   workspaces,
   selected,
   agents,
+  workspaceStatuses,
   onSelect,
   onManageWorkspace,
   onNewWorktree,
@@ -220,6 +228,7 @@ function ProjectRow({
   workspaces: Workspace[];
   selected?: string;
   agents: AgentSummary[];
+  workspaceStatuses?: Record<string, AgentStatusKind>;
   onSelect: (id: string) => void;
   onManageWorkspace?: (workspace: Workspace) => void;
   onNewWorktree?: (projectId: string) => void;
@@ -327,10 +336,17 @@ function ProjectRow({
         <div className="workspace-list">
           {rows.map((workspace) => {
             const isWorkspaceSelected = workspace.id === selected;
+            // The selected workspace's agents are loaded live and are the
+            // freshest signal; every other workspace has no agents loaded
+            // (only the selected workspace is fetched), so it MUST use the
+            // aggregated map -- otherwise it renders grey until clicked.
             const workspaceAgents = agents.filter(
               (agent) => agent.workspaceId === workspace.id
             );
-            const statusKind = getWorkspaceStatusKind(workspaceAgents);
+            const liveKind = workspaceAgents.length > 0 ? getWorkspaceStatusKind(workspaceAgents) : undefined;
+            const statusKind = isWorkspaceSelected
+              ? (liveKind ?? workspaceStatuses?.[workspace.id] ?? "empty")
+              : (workspaceStatuses?.[workspace.id] ?? liveKind ?? "empty");
             const statusLabel = workspace.archivedAt ? "Archived" : AGENT_STATUS_LABEL[statusKind];
 
             return (

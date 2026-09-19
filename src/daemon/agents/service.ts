@@ -348,6 +348,56 @@ export class AgentService {
     return status === "running" || status === "stopping" || status === "initializing" || status === "needs-attention";
   }
 
+  /** At-a-glance agent activity per workspace for the sidebar dots.
+   *  Single bounded query (no per-workspace fan-out), aggregated with the
+   *  same attention > active > idle > empty priority as the web
+   *  `getWorkspaceStatusKind`. Workspaces with no (non-archived) agents are
+   *  absent from the map -- the client renders a missing entry as empty/gray.
+   *  Applies the same stale-status correction as list()/snapshot() so a
+   *  daemon restart never leaves a stuck orange dot, and treats a pending
+   *  UI request as attention (red) even though list() rows omit it. */
+  statusByWorkspace(limit = 5000): Record<string, "attention" | "active" | "idle" | "empty"> {
+    let rows: Array<{ id: string; workspaceId: string; lastKnownStatus: string }>;
+    try {
+      rows = this.repositories.agents.listNonArchivedStatus(limit);
+    } catch {
+      return {};
+    }
+    const seen: Record<string, { attention: boolean; active: boolean; idle: boolean }> = {};
+    for (const row of rows) {
+      let status = row.lastKnownStatus;
+      // Pending UI request forces attention even when the persisted status lags.
+      if (this.pendingUiRequests.has(row.id)) {
+        status = "needs-attention";
+      } else {
+        const process = this.manager.get(row.id);
+        if (process) {
+          try {
+            if (process.getPendingUiRequest?.()) status = "needs-attention";
+          } catch {}
+        } else if (!this.pendingStarts.has(row.id) && this.isStaleActiveStatus(status)) {
+          try {
+            this.markInterrupted(row.id, status);
+          } catch {}
+          status = "interrupted";
+        }
+      }
+      const bucket = (seen[row.workspaceId] ??= { attention: false, active: false, idle: false });
+      if (status === "needs-attention" || status === "error" || status === "interrupted") bucket.attention = true;
+      else if (status === "running" || status === "stopping") bucket.active = true;
+      else if (status === "initializing") { /* empty -- no bucket flag */ }
+      else bucket.idle = true;
+    }
+    const out: Record<string, "attention" | "active" | "idle" | "empty"> = {};
+    for (const [workspaceId, bucket] of Object.entries(seen)) {
+      if (bucket.attention) out[workspaceId] = "attention";
+      else if (bucket.active) out[workspaceId] = "active";
+      else if (bucket.idle) out[workspaceId] = "idle";
+      else out[workspaceId] = "empty";
+    }
+    return out;
+  }
+
   /** Persists `interrupted` -- distinct from `error`: Pi reported nothing
    *  wrong, Passage simply lost track of in-flight work (no live process,
    *  no boot in flight), most commonly because of a daemon restart. Records

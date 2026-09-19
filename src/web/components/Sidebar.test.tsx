@@ -354,4 +354,66 @@ describe("Sidebar", () => {
 
     expect(html).toContain("status-dot shrink-0 idle");
   });
+
+  test("non-selected workspace renders its map color without being clicked", () => {
+    // Regression: only the selected workspace's agents are loaded, so every
+    // other dot rendered grey until clicked. The aggregated map must drive
+    // non-selected dots at a glance.
+    const twoWorkspaces: WorkspaceSnapshot = {
+      ...snapshot,
+      workspaces: [
+        ...snapshot.workspaces,
+        {
+          ...snapshot.workspaces[0],
+          id: "wsp-2",
+          displayLabel: "Other",
+        },
+      ],
+    };
+    const html = ReactDOMServer.renderToString(
+      React.createElement(Sidebar, {
+        data: twoWorkspaces,
+        selected: "wsp-1",
+        open: false,
+        onClose: () => {},
+        onSelect: () => {},
+        onNewProject: () => {},
+        agents: [],
+        workspaceStatuses: { "wsp-1": "idle", "wsp-2": "active" },
+      })
+    );
+
+    expect(html).toContain("status-dot shrink-0 idle");
+    expect(html).toContain("status-dot shrink-0 active");
+  });
+
+  test("selected workspace prefers live agents over a stale map entry", () => {
+    const agents = [
+      {
+        id: "agt-1",
+        workspaceId: "wsp-1",
+        title: "Running agent",
+        status: "running" as const,
+        modelPreference: null,
+        thinkingPreference: null,
+        live: true,
+        persisted: true,
+      },
+    ];
+    const html = ReactDOMServer.renderToString(
+      React.createElement(Sidebar, {
+        data: snapshot,
+        selected: "wsp-1",
+        open: false,
+        onClose: () => {},
+        onSelect: () => {},
+        onNewProject: () => {},
+        agents,
+        workspaceStatuses: { "wsp-1": "idle" },
+      })
+    );
+
+    // Live running agents win over the last poll tick.
+    expect(html).toContain("status-dot shrink-0 active");
+  });
 });

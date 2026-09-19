@@ -57,6 +57,12 @@ export class AgentRepository {
   save(value: Agent): void { this.db.query("INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET workspace_id=excluded.workspace_id, pi_session_id=excluded.pi_session_id, pi_session_path=excluded.pi_session_path, title=excluded.title, title_overridden=excluded.title_overridden, model_preference=excluded.model_preference, thinking_preference=excluded.thinking_preference, last_known_status=excluded.last_known_status, archived_at=excluded.archived_at").run(value.id, value.workspaceId, value.piSessionId, value.piSessionPath, value.title, integer(value.titleOverridden), value.modelPreference, value.thinkingPreference, value.lastKnownStatus, value.archivedAt); }
   get(id: string): Agent | undefined { return agentFromRow(this.db.query<AgentRow, [string]>("SELECT * FROM agents WHERE id=?").get(id)); }
   listForWorkspace(workspaceId: string, limit: number, archived = false): Agent[] { return this.db.query<AgentRow, [string, number]>(`SELECT * FROM agents WHERE workspace_id=? AND archived_at IS ${archived ? "NOT NULL" : "NULL"} ORDER BY id LIMIT ?`).all(workspaceId, limit).map((row) => agentFromRow(row)!); }
+  /** Lightweight (workspaceId, status) pairs for every non-archived agent,
+   *  backing the sidebar's at-a-glance status map. Bounded so one request
+   *  can cover all workspaces without per-workspace fan-out. */
+  listNonArchivedStatus(limit: number): Array<{ id: string; workspaceId: string; lastKnownStatus: string }> {
+    return this.db.query<AgentRow, [number]>("SELECT * FROM agents WHERE archived_at IS NULL ORDER BY workspace_id, id LIMIT ?").all(limit).map((row) => ({ id: row.id, workspaceId: row.workspace_id, lastKnownStatus: row.last_known_status }));
+  }
   /** Non-archived agents whose persisted status implies live work (used once
    * at daemon boot to find runtime state a restart could not have settled
    * honestly -- see reconcileAfterRestart). */

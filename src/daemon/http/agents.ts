@@ -87,6 +87,15 @@ export function createAgentRoutes(service: AgentService): Hono {
   const app = new Hono();
   app.use("*", async (context, next) => { context.header("Cache-Control", "no-store"); return next(); });
 
+  // At-a-glance sidebar statuses for ALL workspaces in one bounded request.
+  // The sidebar previously only knew the selected workspace's agents (grey
+  // everywhere else until clicked); this map lets every dot render its live
+  // color upfront. Must precede `/:agentId` routes so Hono matches it first.
+  app.get("/api/agents/status-by-workspace", (context) => {
+    try {
+      return success({ statuses: service.statusByWorkspace() });
+    } catch (error) { return errorResponse(error); }
+  });
   app.get("/api/workspaces/:workspaceId/agents", (context) => {
     try {
       const limit = integer(context.req.query("limit"), 100, 100);

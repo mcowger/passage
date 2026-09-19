@@ -269,4 +269,36 @@ describe("agent HTTP API", () => {
     });
     expect(slashCommands).toContainEqual(expect.objectContaining({ name: "skill:gh-cli", kind: "prompt-text" }));
   });
+
+  test("status-by-workspace aggregates every workspace in one request", async () => {
+    const { app, repositories } = await fixture();
+    repositories.workspaces.save({
+      id: "workspace-2", projectId: "project-1", kind: "worktree", cwd: "/tmp/wt",
+      checkoutRoot: "/tmp/wt", mainRepositoryRoot: "/tmp", branchRef: null, displayLabel: "WT",
+      locationId: null, ownershipState: "not-owned", archivedAt: null,
+    });
+    const seed = (id: string, workspaceId: string, lastKnownStatus: string, archivedAt: string | null = null) =>
+      repositories.agents.save({
+        id, workspaceId, piSessionId: `pi-${id}`, piSessionPath: null, title: id,
+        titleOverridden: false, modelPreference: null, thinkingPreference: null,
+        lastKnownStatus, archivedAt,
+      });
+    // workspace-1: idle -> idle/blue. (Initializing with no live process is
+    // stale by design -- daemon restart normalizes it to interrupted -- so it
+    // is not seeded here; the empty/gray priority is covered by Sidebar tests.)
+    seed("agent-idle", "workspace-1", "idle");
+    // Archived agents never count.
+    seed("agent-archived", "workspace-1", "running", "2026-01-01T00:00:00Z");
+    // workspace-2: error -> attention/red.
+    seed("agent-error", "workspace-2", "error");
+    // workspace-3 does not exist / has no agents -> absent (client renders empty/gray).
+
+    const response = await app.fetch(request("/api/agents/status-by-workspace"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json() as { statuses: Record<string, string> };
+    expect(body.statuses["workspace-1"]).toBe("idle");
+    expect(body.statuses["workspace-2"]).toBe("attention");
+    expect(body.statuses["workspace-3"]).toBeUndefined();
+  });
 });
