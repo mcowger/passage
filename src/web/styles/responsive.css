@@ -75,6 +75,16 @@
   .composer-toolbar-left { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
   .composer-toolbar-right { min-width: 0; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
   .composer-card textarea, .composer-editor { min-width: 0; }
+  /* Terminal top bar: single compact row on mobile. Secondary metadata
+     (dimensions, cwd) is hidden so the title, lease state, and actions
+     never wrap or collide. Touch targets match the rest of the app. */
+  .terminal-top-bar { gap: 6px; padding: 4px 8px; }
+  .terminal-title { max-width: 96px; }
+  .terminal-info .dim-tag, .terminal-info .cwd-tag { display: none; }
+  .terminal-actions { gap: 4px; }
+  .terminal-actions .secondary.small, .terminal-actions .danger-button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
+  .terminal-actions .icon-button { min-width: 32px; min-height: 32px; }
+}
 }
 
 @media (max-width: 480px) {

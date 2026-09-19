@@ -228,14 +228,18 @@
 
 /* Terminal Panel */
 .terminal-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; background: #141618; color: #ecebe8; }
-.terminal-top-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 10px; background: #191c1e; border-bottom: 1px solid #282c30; flex: none; }
-.terminal-info { display: flex; align-items: center; gap: 5px; font-size: 11px; min-width: 0; }
-.terminal-status-dot { font-size: 8px; color: #10b981; }
-.terminal-title { color: #ecebe8; font-weight: 600; font-size: 12px; }
+.terminal-top-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 10px; background: #191c1e; border-bottom: 1px solid #282c30; flex: none; flex-wrap: nowrap; overflow: hidden; }
+.terminal-info { display: flex; align-items: center; gap: 6px; font-size: 11px; flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+.terminal-status-dot { font-size: 8px; color: #10b981; flex: none; line-height: 1; }
+.terminal-status-dot[data-status="exited"] { color: #f87171; }
+.terminal-title { color: #ecebe8; font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; max-width: 140px; }
 .dim-tag, .cwd-tag { padding: 1px 4px; background: #24282c; border-radius: 3px; font-family: var(--font-mono); font-size: 10px; }
-.cwd-tag { color: #9aa0a6; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lease-tag { padding: 1px 4px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+.dim-tag { flex: none; white-space: nowrap; }
+.cwd-tag { color: #9aa0a6; flex: 0 1 auto; min-width: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lease-tag { padding: 1px 4px; border-radius: 3px; font-size: 10px; font-weight: 600; flex: none; white-space: nowrap; }
 .lease-tag.active { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+.lease-tag.passive { background: #24282c; color: #9aa0a6; }
+.terminal-actions { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: nowrap; white-space: nowrap; }
 .terminal-container { flex: 1; min-height: 0; height: 100%; padding: 4px 8px; overflow: hidden; position: relative; background: #141618; box-sizing: border-box; }
 .terminal-container .xterm { height: 100%; width: 100%; }
 .terminal-container .xterm-screen { height: 100% !important; }
