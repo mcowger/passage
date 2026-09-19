@@ -121,6 +121,10 @@ export type AgentPanelProps = {
   /** Live activity holder written by the socket owner; sampled on the pill's interval. */
   streamActivityRef?: { current: StreamActivity };
   onWorkspaceDeleted?: () => void | Promise<void>;
+  /** Bumped by the owning session on every history load so the composer's git
+   *  buttons re-check status even when live WS invalidations were missed
+   *  (e.g. after a browser refresh). */
+  gitStatusRefreshKey?: number;
 };
 
 export function resolveActiveQuestionRequest(agent: AgentSummary): QuestionRequest | null {
@@ -482,6 +486,7 @@ function ComposerMergeButton({
   api,
   disabled,
   settled = true,
+  refreshKey,
   onWorkspaceDeleted,
   hideIcons,
 }: {
@@ -490,6 +495,8 @@ function ComposerMergeButton({
   disabled?: boolean;
   /** True once the owning agent is settled. Drives a status re-check (see below); not a commit gate. */
   settled?: boolean;
+  /** Bumped by the owning session on every history load; drives a status re-check (see below). */
+  refreshKey?: number;
   onWorkspaceDeleted?: () => void | Promise<void>;
   /** Mobile mode: omit the decorative leading icon to save horizontal space. */
   hideIcons?: boolean;
@@ -533,6 +540,17 @@ function ComposerMergeButton({
     wasSettledRef.current = settled;
     if (settled && !wasSettled) void refreshRef.current();
   }, [settled]);
+  // History loads also refresh: after a browser refresh the live
+  // `git-status-changed` WS invalidations that normally keep this fresh were
+  // never received, so the buttons sit hidden on a stale snapshot until the
+  // next invalidation. The owning session bumps `refreshKey` on every history
+  // load. Skips the initial mount value, which the fetch above already covers.
+  const refreshKeyRef = useRef(refreshKey);
+  useEffect(() => {
+    if (refreshKeyRef.current === refreshKey) return;
+    refreshKeyRef.current = refreshKey;
+    void refreshRef.current();
+  }, [refreshKey]);
   useEffect(() => {
     let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
     const subscription = subscribeWorkspace(
@@ -887,6 +905,7 @@ export function AgentPanel({
   onLoadMoreHistory,
   streamActivityRef,
   onWorkspaceDeleted,
+  gitStatusRefreshKey,
 }: AgentPanelProps) {
   const effectiveHistory = previewHistory ?? history;
   // Distinct from `error` (a failed agent/history fetch): this is the agent
@@ -1274,6 +1293,7 @@ export function AgentPanel({
         onResetSessionExpansion={handleResetSessionExpansion}
         isExpansionOverridden={sessionExpansionOverridden}
         onWorkspaceDeleted={onWorkspaceDeleted}
+        gitStatusRefreshKey={gitStatusRefreshKey}
         attachFilesRef={attachFilesRef}
       />
       {dropActive && (
@@ -1429,6 +1449,10 @@ type AgentComposerProps = {
   onResetSessionExpansion: () => void;
   isExpansionOverridden: boolean;
   onWorkspaceDeleted?: () => void | Promise<void>;
+  /** Bumped by the owning session on every history load so the composer's git
+   *  buttons re-check status even when live WS invalidations were missed
+   *  (e.g. after a browser refresh). */
+  gitStatusRefreshKey?: number;
   /** Receives the composer's file-attach function so panel-level drops can attach. */
   attachFilesRef?: { current: ((files: FileList | File[] | null) => void) | null };
 };
@@ -1522,6 +1546,7 @@ function AgentComposerInner({
   onResetSessionExpansion,
   isExpansionOverridden,
   onWorkspaceDeleted,
+  gitStatusRefreshKey,
   attachFilesRef,
 }: AgentComposerProps) {
   const draftKey = `passage:agent:${agentId}:draft`;
@@ -2203,7 +2228,7 @@ function AgentComposerInner({
             </label>
           </div>
           <div className="composer-toolbar-right">
-            <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} settled={!running && !stopping} onWorkspaceDeleted={onWorkspaceDeleted} hideIcons={isMobileComposer} />
+            <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} settled={!running && !stopping} refreshKey={gitStatusRefreshKey} onWorkspaceDeleted={onWorkspaceDeleted} hideIcons={isMobileComposer} />
             <DisplayOptionsPopover
               expansion={sessionExpansion}
               onExpansionChange={onSessionExpansionChange}

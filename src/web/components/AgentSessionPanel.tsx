@@ -165,6 +165,11 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   const [error, setError] = useState("");
   const [nextBefore, setNextBefore] = useState<number>();
   const [loadingOlder, setLoadingOlder] = useState(false);
+  // Bumped on every history load so the composer's git buttons re-check
+  // status even when the live `git-status-changed` WS invalidations that
+  // normally keep them fresh were never received (e.g. after a browser
+  // refresh, when they would otherwise sit hidden on a stale snapshot).
+  const [gitStatusRefreshKey, setGitStatusRefreshKey] = useState(0);
   const generation = useRef(0);
   const historyRef = useRef<AgentHistory | undefined>(undefined);
   historyRef.current = history;
@@ -194,7 +199,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   const load = useCallback(async (isInitial = false): Promise<AgentSessionLoadResult> => {
     const currentGeneration = ++generation.current;
     if (isInitial) setLoading(true);
-    return await loadAgentSession({
+    const result = await loadAgentSession({
       agentId: initialAgent.id,
       api,
       isCurrent: () => currentGeneration === generation.current,
@@ -207,6 +212,10 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       onError: setError,
       onSettled: () => setLoading(false),
     });
+    if (result !== "superseded" && currentGeneration === generation.current) {
+      setGitStatusRefreshKey((key) => key + 1);
+    }
+    return result;
   }, [api, initialAgent.id, updateAgent]);
 
   // Retry once on failure so a transient mobile suspend or dropped stream
@@ -244,6 +253,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
     setHistory(undefined);
     setCapabilities(undefined);
     setNextBefore(undefined);
+    setGitStatusRefreshKey(0);
     loadingOlderRef.current = false;
     setLoadingOlder(false);
     streamActivityRef.current = emptyStreamActivity();
@@ -332,6 +342,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
         setHistory((current) => addOptimisticUserMessage(current, message, images, files));
       }}
       previewHistory={previewHistory}
+      gitStatusRefreshKey={gitStatusRefreshKey}
       hasMoreHistory={nextBefore !== undefined}
       loadingMoreHistory={loadingOlder}
       onLoadMoreHistory={loadOlder}
