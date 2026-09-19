@@ -4,8 +4,8 @@ import { dirname, isAbsolute, join } from "node:path";
 import { readRecordedPort } from "./dev-port.ts";
 
 const DEFAULT_PID_FILE = join(import.meta.dir, "..", ".data", "dev.pid");
-/** No automatic kill deadline here mirrors the daemon itself (see
- *  docs/BACKTOSQUAREONE.md step 6): this is only how long the CLI blocks
+/** No automatic kill deadline here mirrors the daemon itself (safe drain
+ *  waits for an idle boundary; see AGENTS.md Pi process ownership): this is only how long the CLI blocks
  *  before reporting incomplete maintenance. It never escalates to a
  *  signal on its own -- that requires --force. */
 const SAFE_WAIT_MS = 30_000;
@@ -62,8 +62,8 @@ async function waitForExit(pid: number, pidFile: string, timeoutMs: number): Pro
 
 export type StopDevServerOptions = { force?: boolean; timeoutMs?: number };
 
-/** Default stop uses the daemon's own lifecycle API (docs/BACKTOSQUAREONE.md
- *  step 6): a safe request that waits for an idle boundary before actually
+/** Default stop uses the daemon's own lifecycle API (safe shutdown:
+ *  a safe request that waits for an idle boundary before actually
  *  exiting, with no automatic kill deadline on the daemon's side. `--force`
  *  is a separate, explicit decision -- it asks the lifecycle API for a
  *  forced/interrupting stop and, only if that is unreachable or does not

@@ -3,8 +3,7 @@ import type { DaemonPhase } from "../../shared/protocol/index.ts";
 
 export type SafeShutdownResult = { committed: true } | { committed: false; reason: "cancelled" | "timeout" };
 
-/** Drives a `DaemonLifecycle` through the safe-shutdown path
- *  (docs/BACKTOSQUAREONE.md step 6): begin (or join an already in-flight)
+/** Drives a `DaemonLifecycle` through the safe-shutdown path: begin (or join an already in-flight)
  *  drain, wait for `ready`, and commit.
  *
  *  If the drain is cancelled (phase returns to `running`) or superseded by

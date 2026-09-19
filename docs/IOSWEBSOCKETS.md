@@ -8,9 +8,9 @@ Treat browser suspension and lost connections as normal. A returning browser
 must be able to reconstruct its view without restarting Pi, resending a prompt,
 or requiring a page reload.
 
-This is independent of [BACKTOSQUAREONE.md](BACKTOSQUAREONE.md). Local `main` at
-`2234f10` already implements the holder rollback and drain/shutdown lifecycle.
-Those changes simplify daemon-to-Pi ownership; they do not repair
+This is independent of the daemon-owned Pi process lifecycle and drain/shutdown
+machinery (see AGENTS.md Pi process ownership). The holder rollback is already
+implemented: those changes simplify daemon-to-Pi ownership; they do not repair
 browser-to-daemon sockets or incomplete browser transcripts. Reuse the existing
 restart recovery and lifecycle identity rather than implementing them again.
 

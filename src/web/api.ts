@@ -159,8 +159,7 @@ export function createWorkspaceApi(
     async daemonSnapshot(): Promise<DaemonSnapshot> {
       return daemonSnapshotSchema.parse(await request("/api/daemon/snapshot"));
     },
-    /** docs/BACKTOSQUAREONE.md step 5: begin/cancel drain. Both return the
-     *  fresh lifecycle snapshot inline; other windows learn about the
+    /** Begin/cancel drain. Both return the fresh lifecycle snapshot inline; other windows learn about the
      *  change through the `daemon` WS channel invalidation and refetch
      *  `daemonSnapshot()` themselves. */
     async beginDrain(): Promise<DaemonLifecycleSnapshot> {

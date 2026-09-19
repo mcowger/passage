@@ -19,12 +19,12 @@ export type DaemonLifecycleOptions = {
 export type CommitIdentity = { instanceId?: string; drainId?: string | null; readinessRevision?: number };
 export type CommitResult = { committed: true } | { committed: false; reason: "not-ready" | "stale" };
 
-/** One daemon lifecycle controller (docs/BACKTOSQUAREONE.md steps 5-6):
- *  `running -> draining -> ready -> running` (cancel) or `ready -> draining`
- *  (new activity observed). `ready -> stopping` only through `commit()`;
+/** One daemon lifecycle controller (`running -> draining -> ready ->
+ *  `running` on cancel, back to `draining` on new activity; see AGENTS.md
+ *  Pi process ownership): `ready -> stopping` only through `commit()`;
  *  any phase can jump straight to `stopping` through `forceStop()`.
- *  `stopping` is terminal -- there is no cancel from it, matching the
- *  contract diagram in BACKTOSQUAREONE.md step 6. Phase is daemon memory
+ *  `stopping` is terminal -- there is no cancel from it. Phase is daemon
+ *  memory
  *  only -- it does not survive a crash or restart, and every readiness
  *  decision is recomputed from live agent state, never trusted from a
  *  prior snapshot. */
@@ -104,8 +104,7 @@ export class DaemonLifecycle {
     return { committed: true };
   }
 
-  /** Explicit, clearly-labeled interruption (docs/BACKTOSQUAREONE.md step
-   *  6): jumps straight to `stopping` from any phase, seals admission, and
+  /** Explicit, clearly-labeled interruption: jumps straight to `stopping` from any phase, seals admission, and
    *  cancels active work -- the caller still owns actually stopping
    *  processes/escalating the process tree; this only flips the phase.
    *  Idempotent. */

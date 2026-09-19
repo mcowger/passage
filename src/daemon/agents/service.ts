@@ -198,8 +198,7 @@ export class AgentService {
   private readonly attachmentCache: AttachmentCache;
   private readonly abortTimeoutMs: number;
   private readonly onWorkspaceGitChanged?: (workspaceId: string) => void;
-  /** Daemon lifecycle admission gate (docs/BACKTOSQUAREONE.md step 5).
-   *  Defaults to always-open so tests/tools that never wire a
+  /** Daemon lifecycle admission gate. Defaults to always-open so tests/tools that never wire a
    *  `DaemonLifecycle` see no behavior change. */
   private readonly admissionGate: () => boolean;
   /** Agents with an auto-title suggestion currently in flight. Guards the
@@ -476,8 +475,7 @@ export class AgentService {
     return undefined;
   }
 
-  /** Cheap, synchronous blocker pass (docs/BACKTOSQUAREONE.md step 5). Safe
-   *  to call on every event; `DaemonLifecycle` uses it only to revoke a
+  /** Cheap, synchronous blocker pass. Safe to call on every event; `DaemonLifecycle` uses it only to revoke a
    *  `ready` phase the instant new activity is observed, never to grant
    *  `ready` -- that requires the authoritative, get_state-verified
    *  `listBlockers()`. */

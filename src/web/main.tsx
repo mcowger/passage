@@ -466,7 +466,7 @@ function App() {
   useEffect(() => { void refreshWorkspaces(); }, [refreshWorkspaces]);
 
   // Daemon build identity for the sidebar footer + deploy verification,
-  // plus lifecycle phase/blockers (docs/BACKTOSQUAREONE.md step 5).
+  // plus lifecycle phase/blockers (DaemonLifecycle drain state).
   // Best-effort: the sidebar falls back to dev when unknown
   // and hides the drain control entirely when the phase is unknown.
   const refreshDaemon = useCallback(async () => {

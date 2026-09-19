@@ -139,7 +139,7 @@ describe("DaemonLifecycle", () => {
     expect(calls).toBe(0);
   });
 
-  describe("commit (docs/BACKTOSQUAREONE.md step 6)", () => {
+  describe("commit", () => {
     test("reports not-ready outside the ready phase, without sealing anything", async () => {
       const lifecycle = new DaemonLifecycle({ listQuickBlockers: () => [], listBlockers: async () => [] });
       expect(await lifecycle.commit()).toEqual({ committed: false, reason: "not-ready" });

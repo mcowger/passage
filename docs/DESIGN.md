@@ -7,7 +7,7 @@ architecture, domain model, protocol rules, and UX contracts that keep the
 tool consistent as it evolves. Follow it when adding or changing behavior.
 
 Authority: this document (architecture) > `docs/WS.md` (transport standard)
-> `docs/WEB.md` (preview transport) > `docs/GIT.md` (Git mutation plan) >
+> `docs/WEB.md` (preview transport) >
 `PI.md` (Pi RPC boundary). If code and this document disagree, change the
 code or amend the document — do not leave them divergent.
 
@@ -329,8 +329,8 @@ question card, process failure, unaddressed error) and `error` (Pi/the
 process actually failed). `interrupted` is distinct from `error`: Passage
 lost track of in-flight work with no fault reported by Pi itself -- normally
 a daemon restart landing on an agent that was still
-initializing/running/stopping/needs-attention (see
-[BACKTOSQUAREONE.md](BACKTOSQUAREONE.md) step 4). Any non-archived state may
+initializing/running/stopping/needs-attention (daemon restart recovery normalizes
+them to `interrupted`, never a fabricated Pi transcript row). Any non-archived state may
 transition to `archived`. Summaries additionally carry `live`, `persisted`,
 `generation`, `runStartedAt`, and optional `pendingUiRequest`.
 

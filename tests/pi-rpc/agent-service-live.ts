@@ -142,7 +142,7 @@ export async function runAgentServiceAbortAcceptance(): Promise<void> {
   }
 }
 
-/** Backing docs/BACKTOSQUAREONE.md step 4: a daemon restart no longer
+/** Daemon restart recovery (see AGENTS.md Pi process ownership): a daemon
  *  leaves an agent's persisted status claiming still-active work a fresh
  *  process cannot see, and a follow-up prompt against the recovered agent
  *  starts clean rather than resending anything. */

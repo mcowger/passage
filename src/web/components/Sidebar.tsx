@@ -52,8 +52,7 @@ export type SidebarProps = {
   onDiscoverWorktrees?: (projectId?: string) => void;
   onArchiveProject?: (id: string) => void;
   build?: BuildInfo | null;
-  /** docs/BACKTOSQUAREONE.md step 5. Absent/null hides the drain control
-   *  entirely rather than showing a misleading default phase. */
+  /** Absent/null hides the drain control entirely rather than showing a misleading default phase. */
   daemon?: DaemonLifecycleSnapshot | null;
   daemonBusy?: boolean;
   onBeginDrain?: () => void;
@@ -71,7 +70,7 @@ const DAEMON_PHASE_LABEL: Record<DaemonLifecycleSnapshot["phase"], string> = {
   stopping: "Stopping\u2026",
 };
 
-/** Maintenance-mode control (docs/BACKTOSQUAREONE.md step 5): begin/cancel
+/** Maintenance-mode control: begin/cancel drain and a truthful, bounded
  *  drain and a truthful, bounded view of what is still blocking readiness.
  *  Draining itself stops nothing -- it only closes new-work admission --
  *  so this is deliberately understated next to the build/version footer,

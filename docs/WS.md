@@ -1,8 +1,7 @@
 # Passage WebSocket standard
 
 Authority: `docs/DESIGN.md` (architecture) > this document (WS review
-standard) > `docs/WEB.md` (preview transport) > `docs/GIT.md` (Git mutation
-plan) > `PI.md` (Pi RPC boundary).
+standard) > `docs/WEB.md` (preview transport) > `PI.md` (Pi RPC boundary).
 If this document conflicts with DESIGN.md, DESIGN.md wins and this document
 MUST be fixed.
 
@@ -21,7 +20,7 @@ The event catalog lives in code (`src/shared/protocol/`, emitters in
 2. **Three sockets, no more.** `GET /ws` (JSON text) for `pi` + `workspace` +
    `daemon` (`ping`, and `subscribe`/`unsubscribe` to lifecycle
    invalidations -- one well-known subject, `DAEMON_SNAPSHOT_SUBJECT`,
-   docs/BACKTOSQUAREONE.md step 5); `GET /api/terminals/:id/ws` (binary
+   see `src/daemon/lifecycle/`); `GET /api/terminals/:id/ws` (binary
    frames + JSON control) for PTY bytes; `GET /api/previews/:previewId/ws`
    (bounded frame/input relay) for web-preview streams. A PR MUST NOT add a
    fourth socket, SSE (`EventSource`), polling loops, or a new envelope

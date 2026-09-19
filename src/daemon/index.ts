@@ -74,7 +74,7 @@ const MAX_AGENT_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_WORKSPACE_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_INFLIGHT_COMMANDS = 256;
 const UNKNOWN_REQUEST_ID = "unknown";
-/** docs/BACKTOSQUAREONE.md step 6: `POST /api/daemon/shutdown` body. Bare
+/** `POST /api/daemon/shutdown` body. Bare
  *  `{}`/empty body is the plain safe path; `force: true` is a separate,
  *  clearly-labeled interruption; the identity fields are for a validated
  *  commit against a drain the caller already observed reach `ready`. */
@@ -84,8 +84,8 @@ const shutdownInputSchema = z.object({
   drainId: z.string().min(1).max(64).nullable().optional(),
   readinessRevision: z.number().int().nonnegative().safe().optional(),
 }).strict();
-/** docs/BACKTOSQUAREONE.md step 6 originally specified no automatic kill
- *  deadline for safe drain; overridden by explicit product decision to
+/** Safe drain has no automatic kill deadline by design; overridden by
+ *  explicit product decision (see AGENTS.md Pi process ownership) to
  *  bound how long a safe shutdown request waits for an idle boundary
  *  before escalating to a forced stop. Does not bound a manually held
  *  drain (`POST /api/daemon/drain` without a shutdown request behind it)
@@ -160,8 +160,7 @@ const agentService = new AgentService(repositories, {
   onWorkspaceGitChanged: (workspaceId) => {
     workspaceEvents.emitGitStatus({ workspaceId, reason: "commit" });
   },
-  // docs/BACKTOSQUAREONE.md step 5: closed synchronously the instant a
-  // drain begins. Defaults to open before the lifecycle below exists
+  // Drain lifecycle: closed synchronously the instant a drain begins. Defaults to open before the lifecycle below exists
   // (construction order), never after.
   admissionGate: () => lifecycleRef?.isAdmissionOpen() ?? true,
   // Auto-titles use the workspace's configured suggestion model + thinking
@@ -178,8 +177,8 @@ const agentService = new AgentService(repositories, {
 });
 // Boot-time restart recovery, before serving agent commands: any agent
 // still persisted as running/stopping/initializing/needs-attention belonged
-// to a Pi process this fresh daemon does not own (see
-// docs/BACKTOSQUAREONE.md step 4). Normalize it to `interrupted` (not
+// to a Pi process this fresh daemon does not own (see AGENTS.md Pi
+// process ownership). Normalize it to `interrupted` (not
 // `error`: Pi reported nothing wrong) instead of a stale spinner or an
 // unanswerable pending question.
 try {
@@ -189,8 +188,7 @@ try {
   }
 } catch {}
 const agentEvents = new AgentEventHub(agentService);
-// docs/BACKTOSQUAREONE.md step 5: one lifecycle controller, admission
-// closed synchronously on beginDrain(); readiness is recomputed from live
+// One lifecycle controller: admission closed synchronously on beginDrain(); readiness is recomputed from live
 // agent state only -- see AgentService.listQuickBlockers/listBlockers.
 // Only agents block drain readiness; terminals, previews, and workspace
 // Git/file/worktree operations do not (explicit product decision).
@@ -249,12 +247,12 @@ app.get("/api/daemon/snapshot", async (context) => context.json({
   build: getBuildInfo(),
   ...await lifecycle.snapshot(),
 }));
-// docs/BACKTOSQUAREONE.md step 5: begin/cancel drain. Both return the fresh
-// snapshot inline (HTTP = snapshots) and the phase-change callback above
-// publishes a `daemon-changed` WS invalidation for every other window
-// (WS = invalidations only). Draining itself stops nothing and closes no
-// agent tabs; it only closes new-work admission (step 6 adds the actual
-// stop/commit path).
+// Begin/cancel drain. Both return the fresh snapshot inline (HTTP =
+// snapshots) and the phase-change callback above publishes a
+// `daemon-changed` WS invalidation for every other window (WS =
+// invalidations only). Draining itself stops nothing and closes no
+// agent tabs; it only closes new-work admission (the shutdown route adds
+// the actual stop/commit path).
 app.post("/api/daemon/drain", async (context) => {
   lifecycle.beginDrain();
   return context.json(await lifecycle.snapshot());
@@ -263,8 +261,7 @@ app.delete("/api/daemon/drain", async (context) => {
   lifecycle.cancelDrain();
   return context.json(await lifecycle.snapshot());
 });
-// docs/BACKTOSQUAREONE.md step 6: `force: true` interrupts active work
-// immediately (a separate, clearly-labeled action). Without it, this is a
+// `force: true` interrupts active work immediately (a separate, clearly-labeled action). Without it, this is a
 // safe request: begin/join a drain, wait for `ready`, and commit -- no
 // overall kill deadline, so this can take a while or (if the drain gets
 // cancelled) never happen at all. Supplying `instanceId`/`drainId`/
@@ -829,7 +826,7 @@ if (portPath) {
 log.warn("Passage has no application authentication; expose it only on a trusted network or behind an authenticated proxy/VPN.", { event: "daemon.authentication_disabled" });
 log.info("Passage listening", { event: "daemon.started", port: server.port });
 
-// docs/BACKTOSQUAREONE.md step 6 teardown order: (1) admission is already
+// Teardown order: (1) admission is already
 // sealed by this point (lifecycle phase is draining/ready/stopping, which
 // closes AgentService.admissionGate); (2) stop Pi children while SQLite is
 // still open, so final diagnostics/status persist; (3) clean up remaining
@@ -885,8 +882,7 @@ async function teardown(options: { interrupted: boolean }): Promise<void> {
   log.info("Passage shutdown completed", { event: "daemon.shutdown_completed", interrupted: options.interrupted });
 }
 
-// The daemon's one shutdown path (docs/BACKTOSQUAREONE.md step 6), safe by
-// default. Duplicate calls (repeated HTTP requests, a signal arriving
+// The daemon's one shutdown path, safe by default. Duplicate calls (repeated HTTP requests, a signal arriving
 // while another is already in flight) share this same in-flight promise
 // instead of racing a second teardown. A safe (non-force,
 // non-already-committed) attempt that gets cancelled -- the drain was

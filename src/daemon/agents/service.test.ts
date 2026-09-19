@@ -653,7 +653,7 @@ describe("agent-side git invalidations (merge button freshness)", () => {
   });
 });
 
-describe("drain admission gate (docs/BACKTOSQUAREONE.md step 5)", () => {
+describe("drain admission gate", () => {
   test("closing admission refuses new agent work but keeps abort, question answers, and resource-close working", async () => {
     const root = await mkdtemp(join("/tmp", "passage-agent-"));
     roots.push(root);
