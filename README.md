@@ -1,99 +1,46 @@
 # Passage
 
-Passage is a single-user, LAN-accessible coding environment built around Pi.
-It gives you a browser workspace for running multiple Pi coding agents alongside
-the rest of the tools needed to work in a repository.
+Your coding agents keep working after you close the tab.
 
-The persistent Bun daemon owns the work. It manages projects, Git worktrees,
-files, diffs, interactive terminals, and one `pi --mode rpc` process per active
-agent. The React PWA is an attachable view, so closing a browser tab doesn't
-stop daemon-owned work.
+Passage is a browser workspace for running multiple Pi coding agents in
+isolated Git worktrees. The daemon owns the work, the browser is just a
+view. Shut your laptop, open your phone, pick up where you left off.
 
-## What it includes
+## Why
 
-- Multiple Pi agents per workspace, with live prompts, steering, follow-ups, and
-  model/thinking controls.
-- Pi JSONL sessions as the source of truth for agent messages, branches,
-  compaction, and usage.
-- Git-aware projects and worktrees with workspace-local changes and diffs.
-- Interactive PTY terminals, file browsing, CodeMirror editing, and a
-  persistent split-pane layout.
-- Desktop and mobile layouts served as a PWA over HTTP and WebSockets.
-- Local SQLite metadata for projects, workspaces, agent links, preferences, and
-  layouts. Passage does not copy agent transcripts into SQLite.
+- Many agents at once, each in its own worktree, each with its own Pi session.
+- Close the browser and work continues. Reconnect and reconcile, nothing lost.
+- Full workshop in every workspace: terminal, files, diffs, and a live web preview next to the agent.
+- Phone-friendly. Chat first on mobile, full-screen tools when you need them, push alerts when an agent needs you.
 
-## Push notifications (PWA Web Push)
+## Features
 
-Passage can push agent `needs-attention` + `done` alerts even with the PWA
-closed, via standards-based Web Push. No Apple Developer signup or paid
-account is needed — the daemon signs with self-generated VAPID keys and
-POSTs to Apple's push service.
+Run agents side by side. Prompt, steer mid-run, queue follow-ups, stop cleanly. Switch models and thinking levels from pickers probed from Pi itself. Compact sessions, answer extension questions inline, mention workspace files with @, attach images, and use slash commands. Skill-backed commands unlock with an explicit trust decision per workspace, never by just opening a folder.
 
-### 1. Daemon setup (once)
+Every run renders as readable prose plus a compact tool trace. Thinking collapses, tools show verb plus target plus outcome, stats ride along (tokens, cost, context use). Drafts autosave so a failed send never eats your prompt.
 
-```sh
-bunx web-push generate-vapid-keys
-```
+Work in real Git worktrees. Create them from a label with AI-suggested branch and folder names, import or discover existing checkouts, repair broken links. Setup scripts from `paseo.json` run automatically on creation. Stage, commit (or auto-draft the message), pull, fetch, merge, and push without leaving the workspace. File edits are conflict-aware and diffs open inline or in the inspector.
 
-Set the three env vars where the daemon runs (`.env`, systemd
-`EnvironmentFile`, etc. — never commit them) and restart:
+Terminals are real PTYs with a sane sharing rule: one client holds the size lease, everyone else watches. No accidental phone resizes.
 
-```sh
-VAPID_PUBLIC_KEY=BK...
-VAPID_PRIVATE_KEY=xyz...
-VAPID_SUBJECT=mailto:you@example.com
-```
+Previews run your dev server in server-side Chromium and stream it to the browser, so `localhost` on the host works from any device. Navigate, reload, change viewport, take control. Second clients stay view-only until they ask.
 
-`VAPID_SUBJECT` must be a `mailto:` or `https:` URL (Apple rejects bare
-emails). Without these keys `/api/push/*` returns `push-not-configured`
-and no pushes are sent.
+Take it anywhere. Installable PWA, offline shell with honest retry, drawer navigation and full-screen tools on small screens, browser notifications plus Web Push (with deep links back to the agent) when work finishes or needs input.
 
-### 2. Serve over HTTPS
+Make it yours with four builtin themes, per-surface fonts, timeline density controls, prompt templates, and editor/terminal preferences. One setting, applied everywhere.
 
-Web Push needs a secure context + installed PWA. Serve the production
-build (`bun run build` / `bun run start`) behind your HTTPS reverse proxy.
-The daemon only needs outbound HTTPS to `web.push.apple.com` — the phone
-receives via Apple, not via LAN, so off-LAN delivery still works.
+Single user, trusted LAN, no login screen. Run it behind your own auth or VPN.
 
-### 3. iPhone setup (iOS 16.4+, non-EU)
+## Run it
 
-1. Open the site in Safari → Share → Add to Home Screen.
-2. Open the Home Screen app (not the Safari tab — Push APIs only exist
-   in the installed app).
-3. Settings → turn on Agent Notifications → Enable push on this device
-   (tap directly; iOS ignores non-gesture prompts).
-4. Send test to verify, then kill the PWA — pushes still arrive.
-
-If permission was denied, remove/re-add the Home Screen app to get
-prompted again. Android/desktop use the same toggle with no install step.
-
-Tapping a notification deep-links to that workspace/agent
-(`?workspaceId=&agentId=`). Every push shows a visible notification
-(Apple forbids silent push); expired endpoints are pruned on 404/410.
-
-## Development
-
-Passage uses Bun end to end. Install Bun 1.4.0 and the pinned Pi CLI, then:
+Needs Bun 1.4.0 and the pinned Pi CLI.
 
 ```sh
 bun install --frozen-lockfile
 bun run dev
 ```
 
-The daemon binds a stable per-worktree port in `3000`–`3999` via
-`scripts/dev-port.ts` (hashed from the worktree path) and records the
-actual port in `.data/dev.port` next to `.data/dev.pid`.
-Generic `PORT` is ignored so an inherited value cannot leak another
-worktree's port; the hash is authoritative (Paseo sets `PASEO_PORT` when it
-routes traffic). Always resolve the port with `bun scripts/dev-port.ts` —
-never reuse a port seen in another checkout, since every worktree has its
-own dedicated port.
+Resolve the per-worktree port with `bun scripts/dev-port.ts`, then open it.
+Checks are `bun run typecheck`, `bun test`, `bun run test:gate`.
 
-Useful checks:
-
-```sh
-bun run typecheck
-bun test
-```
-
-Passage is currently intended for single-user, trusted-LAN use on Linux x64.
+Details live in `docs/` (`DESIGN.md` for architecture, `UI.md` for interface, `PI.md` for the Pi boundary, `WS.md` for protocol). Code wins when they disagree.
