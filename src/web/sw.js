@@ -66,7 +66,11 @@ self.addEventListener("message", (event) => {
 });
 
 // Web Push: every push must surface a visible notification (Apple enforces
-// userVisibleOnly). Payload is { title, body, tag, url, workspaceId, agentId }.
+// userVisibleOnly), unless the PWA is already open and visible — the live
+// WebSocket state already covers that case, so an OS banner would be noise.
+// Suppression is per-device (each device's SW checks its own windows), so a
+// desktop PWA left open never silences a phone sitting in a pocket.
+// Payload is { title, body, tag, url, workspaceId, agentId }.
 self.addEventListener("push", (event) => {
   let data = {};
   try {
@@ -79,13 +83,23 @@ self.addEventListener("push", (event) => {
   const tag = typeof data.tag === "string" ? data.tag : "passage-push";
   const url = typeof data.url === "string" ? data.url : "/?source=push";
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
-      tag,
-      data: { url, workspaceId: data.workspaceId, agentId: data.agentId },
-      icon: "/icon.svg",
-      badge: "/icon.svg",
-    })
+    (async () => {
+      try {
+        const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        if (windows.some((client) => client.visibilityState === "visible" || client.focused === true)) {
+          return;
+        }
+      } catch {
+        // Fail open: if the client list is unavailable, still notify.
+      }
+      return self.registration.showNotification(title, {
+        body,
+        tag,
+        data: { url, workspaceId: data.workspaceId, agentId: data.agentId },
+        icon: "/icon.svg",
+        badge: "/icon.svg",
+      });
+    })()
   );
 });
 
