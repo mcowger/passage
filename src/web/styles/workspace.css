@@ -248,8 +248,14 @@
 /* Mobile key bar: partial keyboard for touch (Esc/Tab/sticky Ctrl/Alt/Shift,
    arrows, ^C/^D core row + expandable nav/Ctrl-combo/symbol rows). It is a
    flex sibling of .terminal-container, so the existing ResizeObserver refit
-   picks up the reduced height automatically. */
-.terminal-keybar { flex: none; background: #191c1e; border-top: 1px solid #282c30; padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px)); }
+   picks up the reduced height automatically.
+   Keyboard contract (same as .composer-container / .commit-composer): iOS
+   never resizes layout/dvh for the software keyboard, so without a lift the
+   bar sits behind the keys and reads as missing. margin-bottom rides the
+   --kb-inset polyfill above the keyboard; bottom padding collapses so no
+   blank band appears between bar and keyboard. On Android
+   (resizes-content) the polyfill reports 0, so no double-lift. */
+.terminal-keybar { flex: none; position: sticky; bottom: 0; z-index: 5; background: #191c1e; border-top: 1px solid #282c30; padding: 6px 8px max(6px, calc(env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px))); margin-bottom: var(--kb-inset, 0px); }
 .terminal-keybar-row { display: flex; gap: 6px; overflow-x: auto; align-items: stretch; scrollbar-width: none; }
 .terminal-keybar-row::-webkit-scrollbar { display: none; }
 .terminal-keybar-row + .terminal-keybar-row { margin-top: 6px; }
@@ -262,5 +268,15 @@
 .term-key-expand[aria-expanded="true"] { border-color: #0891b2; color: #22d3ee; }
 @media (pointer: coarse) {
   .term-key { min-height: 44px; }
+}
+/* Narrow phones (iPhone ~390px): the 12-key core row (Ctrl Alt Shift ESC
+   TAB ^C ^D arrows ⋯) overflows at the 44px touch size, hiding the arrows
+   off-screen. Compact the keys so the row scrolls minimally — the row
+   stays overflow-x:auto as a fallback, but most keys fit without scrolling. */
+@media (max-width: 480px) {
+  .terminal-keybar { padding-left: 6px; padding-right: 6px; }
+  .terminal-keybar-row { gap: 4px; }
+  .terminal-keybar-row + .terminal-keybar-row { margin-top: 4px; }
+  .term-key { min-width: 34px; min-height: 40px; padding: 5px 6px; font-size: 11px; border-radius: 5px; }
 }
 
