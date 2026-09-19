@@ -331,6 +331,36 @@ describe("TranscriptState", () => {
     });
     expect(state.snapshot().usage.cost).toBe(0.01);
   });
+
+  test("refreshFromJournal never lets a lagging journal hide live context occupancy", () => {
+    const state = new TranscriptState();
+    state.applyEvent("message_update", { usage: { input: 100, output: 50, totalTokens: 150 } });
+    // Nothing flushed yet: the journal carries null while the live stream
+    // already knows the in-flight turn's occupancy.
+    state.refreshFromJournal({
+      timeline: [],
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
+      contextUsage: { tokens: null },
+      agentErrorCount: 0,
+    });
+    expect(state.snapshot().contextUsage.tokens).toBe(150);
+    // A previous turn's smaller flushed total must not step it back either.
+    state.refreshFromJournal({
+      timeline: [],
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
+      contextUsage: { tokens: 100 },
+      agentErrorCount: 0,
+    });
+    expect(state.snapshot().contextUsage.tokens).toBe(150);
+    // A genuinely higher flushed total (the turn finalized) still advances it.
+    state.refreshFromJournal({
+      timeline: [],
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
+      contextUsage: { tokens: 200 },
+      agentErrorCount: 0,
+    });
+    expect(state.snapshot().contextUsage.tokens).toBe(200);
+  });
 });
 
 describe("truncateRowForWire", () => {

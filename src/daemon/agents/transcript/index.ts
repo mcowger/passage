@@ -443,7 +443,16 @@ export class TranscriptState {
     // journaled until Pi flushes the message), so never let a stale journal
     // read clobber a higher cost already seen live -- see applyUsage above.
     this.usage = { ...history.usage, cost: Math.max(this.usage.cost, history.usage.cost) };
-    if (history.contextUsage?.tokens != null) this.contextTokens = history.contextUsage.tokens;
+    // Same lag applies to context occupancy: the journal holds the last
+    // flushed turn while the live stream already knows the in-flight one.
+    // A stale or missing journal value must never step the live occupancy
+    // backward -- that would hide the composer's context pill mid-run
+    // until the next live event re-asserts it.
+    if (history.contextUsage?.tokens != null) {
+      this.contextTokens = this.contextTokens != null
+        ? Math.max(this.contextTokens, history.contextUsage.tokens)
+        : history.contextUsage.tokens;
+    }
     if (history.currentModel) this.currentModel = history.currentModel;
     if (history.currentThinkingLevel) this.currentThinkingLevel = history.currentThinkingLevel;
     if (history.sessionName) this.sessionName = history.sessionName;

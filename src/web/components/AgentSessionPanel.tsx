@@ -120,10 +120,19 @@ export function mergeLoadedHistory(current: AgentHistory | undefined, loaded: Ag
   // applied (the journal lags the stream while a turn is in flight), so
   // keep the higher cost instead of letting a stale zero blink the
   // composer's cost pill out until the next live event re-asserts it.
+  // Context occupancy gets the same treatment: a lagging fetch carrying
+  // null (nothing flushed yet) or a previous turn's smaller total must
+  // never hide the composer's context pill mid-run.
+  const currentTokens = current.contextUsage?.tokens ?? null;
+  const loadedTokens = loaded.contextUsage?.tokens ?? null;
+  const tokens = currentTokens != null && (loadedTokens == null || currentTokens > loadedTokens)
+    ? currentTokens
+    : loadedTokens;
   return {
     ...loaded,
     timeline: current.timeline,
     usage: { ...loaded.usage, cost: Math.max(current.usage.cost, loaded.usage.cost) },
+    contextUsage: { tokens },
   };
 }
 

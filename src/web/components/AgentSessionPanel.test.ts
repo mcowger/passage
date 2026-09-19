@@ -173,6 +173,20 @@ describe("mergeLoadedHistory", () => {
     const richer = baseline({ transcriptEpoch: 7, usage: usage(0.02) });
     expect(mergeLoadedHistory(current, richer)?.usage.cost).toBe(0.02);
   });
+
+  test("same epoch: a lagging fetch never hides the live context pill", () => {
+    const current = baseline({ transcriptEpoch: 7, contextUsage: { tokens: 150 } });
+    // Nothing flushed yet: the fetch carries null while the live stream
+    // already knows the in-flight turn's occupancy.
+    const unflushed = baseline({ transcriptEpoch: 7, contextUsage: { tokens: null } });
+    expect(mergeLoadedHistory(current, unflushed)?.contextUsage?.tokens).toBe(150);
+    // A previous turn's smaller flushed total must not step the live value back either.
+    const stale = baseline({ transcriptEpoch: 7, contextUsage: { tokens: 100 } });
+    expect(mergeLoadedHistory(current, stale)?.contextUsage?.tokens).toBe(150);
+    // A genuinely higher fetched total (the turn finalized) still advances it.
+    const richer = baseline({ transcriptEpoch: 7, contextUsage: { tokens: 200 } });
+    expect(mergeLoadedHistory(current, richer)?.contextUsage?.tokens).toBe(200);
+  });
 });
 
 describe("historyReplaced", () => {
