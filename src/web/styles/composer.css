@@ -27,13 +27,19 @@
   color: var(--muted);
   font-family: var(--font-mono);
 }
-.composer-status-pill {
+.composer-meta-right {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 22px;
   margin-left: auto;
-  padding: 2px 8px;
+  min-width: 0;
+}
+.composer-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 2px 6px;
   background: var(--surface-subtle);
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -42,7 +48,6 @@
 }
 .composer-status-duration {
   display: inline-block;
-  min-width: 6ch;
   font-weight: 600;
   color: var(--foreground);
   font-variant-numeric: tabular-nums;
@@ -56,19 +61,17 @@
 }
 .composer-status-bytes {
   display: inline-block;
-  min-width: 7ch;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 .composer-status-idle-text {
   display: inline-block;
-  min-width: 5ch;
   font-variant-numeric: tabular-nums;
 }
 .composer-status-traffic {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -77,7 +80,7 @@
 .composer-status-idle {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   font-variant-numeric: tabular-nums;
 }
 .agent-change-summary { display: flex; align-items: center; gap: 7px; padding: 0; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }

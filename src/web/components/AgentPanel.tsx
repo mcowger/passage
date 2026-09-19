@@ -1791,7 +1791,7 @@ function AgentComposerInner({
 
   return (
     <footer className="composer-container">
-      {(changeSummary || streamActive) && (
+      {(changeSummary || streamActive || (contextTokens !== null && contextTokens > 0)) && (
         <div className="composer-meta-line">
           {changeSummary ? (
             <div
@@ -1808,18 +1808,80 @@ function AgentComposerInner({
           ) : (
             <div />
           )}
-          {streamActive && (
-            <div
-              className="composer-status-pill"
-              role="status"
-              aria-live="polite"
-            >
-              <span className="pulse-dot" />
-              <span className="composer-status-duration">{formatDuration(elapsedSeconds)}</span>
-              <LiveStreamPhase phase={streamPhase} receiving={receiving} />
-              <LiveStreamTraffic bytes={streamBytes} idleSeconds={streamIdleSeconds} />
-            </div>
-          )}
+          <div className="composer-meta-right">
+            {streamActive && (
+              <div
+                className="composer-status-pill"
+                role="status"
+                aria-live="polite"
+              >
+                <span className="pulse-dot" />
+                <span className="composer-status-duration">{formatDuration(elapsedSeconds)}</span>
+                <LiveStreamPhase phase={streamPhase} receiving={receiving} />
+                <LiveStreamTraffic bytes={streamBytes} idleSeconds={streamIdleSeconds} />
+              </div>
+            )}
+            {contextTokens !== null && contextTokens > 0 && (
+              <div className="composer-ctx-wrapper" ref={ctxDetailsRef}>
+                <button
+                  type="button"
+                  className="composer-ctx-pill"
+                  onClick={() => setCtxDetailsOpen((prev) => !prev)}
+                  title={`${formatCompactTokens(contextTokens)} / ${formatCompactTokens(maxTokens)} tokens · ${contextPct}% context · Click for details`}
+                  aria-label={`Context used: ${contextPct}%. Click for usage breakdown.`}
+                  aria-expanded={ctxDetailsOpen}
+                  aria-haspopup="dialog"
+                >
+                  <span
+                    className="context-pie"
+                    style={{
+                      background: `conic-gradient(${pieColor} ${contextPct}%, var(--chip-blue-track, rgba(3, 105, 161, 0.18)) 0)`,
+                    }}
+                    aria-hidden="true"
+                  />
+                  <span>{contextPct}%</span>
+                  {usage?.cost !== undefined && usage.cost > 0 && (
+                    <span className="composer-ctx-cost">
+                      <span className="composer-stat-sep">·</span>
+                      <span>${usage.cost.toFixed(2)}</span>
+                    </span>
+                  )}
+                </button>
+
+                {ctxDetailsOpen && (
+                  <div className="ctx-details-popover" role="dialog" aria-label="Context and usage breakdown">
+                    <div className="popover-header-title">Context &amp; Usage</div>
+                    <div className="ctx-details-grid">
+                      <div className="ctx-detail-row">
+                        <span>Context used</span>
+                        <b>
+                          {contextPct}% ({formatCompactTokens(contextTokens)} / {formatCompactTokens(maxTokens)})
+                        </b>
+                      </div>
+                      <div className="ctx-detail-row">
+                        <span>Input tokens</span>
+                        <span>{formatCompactTokens(usage?.input ?? 0)}</span>
+                      </div>
+                      <div className="ctx-detail-row">
+                        <span>Output tokens</span>
+                        <span>{formatCompactTokens(usage?.output ?? 0)}</span>
+                      </div>
+                      <div className="ctx-detail-row">
+                        <span>Cache read</span>
+                        <span>{formatCompactTokens(usage?.cacheRead ?? 0)}</span>
+                      </div>
+                      {usage?.cost !== undefined && usage.cost > 0 && (
+                        <div className="ctx-detail-row total">
+                          <span>Cost</span>
+                          <b>${usage.cost.toFixed(4)}</b>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
       <QueuedFollowUpList queue={queue} disabled={busy || stopping || loading} onRetract={retractQueued} onClear={clearQueued} />
@@ -1979,66 +2041,6 @@ function AgentComposerInner({
                 }}
               />
             </label>
-            {contextTokens !== null && contextTokens > 0 && (
-              <div className="composer-ctx-wrapper" ref={ctxDetailsRef}>
-                <button
-                  type="button"
-                  className="composer-ctx-pill"
-                  onClick={() => setCtxDetailsOpen((prev) => !prev)}
-                  title={`${formatCompactTokens(contextTokens)} / ${formatCompactTokens(maxTokens)} tokens · ${contextPct}% context · Click for details`}
-                  aria-label={`Context used: ${contextPct}%. Click for usage breakdown.`}
-                  aria-expanded={ctxDetailsOpen}
-                  aria-haspopup="dialog"
-                >
-                  <span
-                    className="context-pie"
-                    style={{
-                      background: `conic-gradient(${pieColor} ${contextPct}%, var(--chip-blue-track, rgba(3, 105, 161, 0.18)) 0)`,
-                    }}
-                    aria-hidden="true"
-                  />
-                  <span>{contextPct}%</span>
-                  {usage?.cost !== undefined && usage.cost > 0 && (
-                    <span className="composer-ctx-cost">
-                      <span className="composer-stat-sep">·</span>
-                      <span>${usage.cost.toFixed(2)}</span>
-                    </span>
-                  )}
-                </button>
-
-                {ctxDetailsOpen && (
-                  <div className="ctx-details-popover" role="dialog" aria-label="Context and usage breakdown">
-                    <div className="popover-header-title">Context &amp; Usage</div>
-                    <div className="ctx-details-grid">
-                      <div className="ctx-detail-row">
-                        <span>Context used</span>
-                        <b>
-                          {contextPct}% ({formatCompactTokens(contextTokens)} / {formatCompactTokens(maxTokens)})
-                        </b>
-                      </div>
-                      <div className="ctx-detail-row">
-                        <span>Input tokens</span>
-                        <span>{formatCompactTokens(usage?.input ?? 0)}</span>
-                      </div>
-                      <div className="ctx-detail-row">
-                        <span>Output tokens</span>
-                        <span>{formatCompactTokens(usage?.output ?? 0)}</span>
-                      </div>
-                      <div className="ctx-detail-row">
-                        <span>Cache read</span>
-                        <span>{formatCompactTokens(usage?.cacheRead ?? 0)}</span>
-                      </div>
-                      {usage?.cost !== undefined && usage.cost > 0 && (
-                        <div className="ctx-detail-row total">
-                          <span>Cost</span>
-                          <b>${usage.cost.toFixed(4)}</b>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
           <div className="composer-toolbar-right">
             <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} settled={!running && !stopping} onWorkspaceDeleted={onWorkspaceDeleted} hideIcons={isMobileComposer} />
