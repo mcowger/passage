@@ -79,10 +79,13 @@
   .mobile-sheet-select:hover { background: var(--surface-hover); }
   .mobile-sheet-close { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 44px; min-height: 44px; border: 0; border-radius: 8px; background: none; color: var(--muted); }
   .mobile-sheet-close:hover { background: var(--surface-hover); color: var(--foreground); }
-  /* Composer toolbar wraps so the Send button is never clipped off-screen. */
+  /* Composer toolbar: the attach (+) row may sit above the actions on narrow
+     screens, but the action row itself never wraps. The model chip is the
+     flexible item: it shrinks with an ellipsis so Send It / Commit / Send /
+     Stop stay on one line instead of spilling the stop button below. */
   .composer-toolbar { flex-wrap: wrap; row-gap: 8px; }
   .composer-toolbar-left { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
-  .composer-toolbar-right { min-width: 0; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+  .composer-toolbar-right { min-width: 0; flex-wrap: nowrap; justify-content: flex-end; margin-left: auto; gap: 4px; }
   .composer-card textarea, .composer-editor { min-width: 0; }
   /* Terminal top bar: single compact row on mobile. Secondary metadata
      (dimensions, cwd) is hidden so the title, lease state, and actions

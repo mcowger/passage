@@ -491,9 +491,9 @@ export function QueuedFollowUpList({
  * merge into main in one go).
  * A single option renders as a direct action button; multiple options collapse
  * into a FolderGit2 icon button with a thinking-selector-style popup menu.
- * The Send-it button always renders for Git workspaces once status loads and
- * stays disabled unless the tree is dirty. Merge still runs only after
- * explicit confirmation; send-it runs its merge step without a second prompt.
+ * The Send-it button only renders when its dirty-tree gate passes (hidden,
+ * not disabled, when the tree is clean or conflicted). Merge still runs only
+ * after explicit confirmation; send-it runs its merge step without a second prompt.
  */
 function ComposerMergeButton({
   workspaceId,
@@ -725,13 +725,16 @@ function ComposerMergeButton({
   };
 
   const options = resolveComposerGitOptions(status);
-  // Send-it owns its own dirty-gated enablement (disabled, not hidden, when
-  // clean), so the component stays mounted once Git status loads even when
-  // no standalone commit/merge/rebase/push option applies. Only non-Git
-  // workspaces (no status) render nothing.
-  if (status === null && deletePrompt === null) return null;
   const sendItEnabled = isComposerSendItEnabled(status);
   const sendItBusy = busyOp === "send-it";
+  // Send-it is hidden (not disabled) when its dirty-tree gate fails, so the
+  // component only stays mounted for send-it while it is enabled or running.
+  // Otherwise it mounts for standalone commit/merge/rebase/push options.
+  // Non-Git workspaces (no status) render nothing.
+  if (status === null && deletePrompt === null) return null;
+  // Keep the button mounted mid-run: committing cleans the tree, which
+  // would otherwise hide the spinner while the merge step is still going.
+  const showSendIt = status !== null && (sendItEnabled || sendItBusy);
   const dirtyCount = status?.files.length ?? 0;
   const sendItTitle = status?.conflicted
     ? "Resolve merge conflicts before sending"
@@ -781,13 +784,13 @@ function ComposerMergeButton({
 
   return (
     <>
-      {status !== null && (
+      {showSendIt && (
         <Button
           variant="default"
           size="xs"
           className="composer-action-btn"
           onClick={handleSendIt}
-          disabled={disabled || busy || !sendItEnabled}
+          disabled={disabled || busy}
           title={sendItTitle}
           aria-label={sendItTitle}
         >
