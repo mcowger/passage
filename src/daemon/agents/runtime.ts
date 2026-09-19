@@ -69,3 +69,6 @@ export class AgentRuntime {
    *  cannot spawn duplicate suggestion runs for the same agent. */
   readonly titleSuggestions = new Set<string>();
 }
+
+/** Cap on retained per-agent crash/interruption diagnostics. */
+export const MAX_RUNTIME_DIAGNOSTICS = 100;
