@@ -696,7 +696,7 @@ function ComposerMergeButton({
               {busy ? <Spinner className="size-3" /> : <FolderGit2 size={14} aria-hidden="true" />}
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="thinking-popover w-56 p-1" align="end" sideOffset={6}>
+          <PopoverContent className="thinking-popover w-56 max-w-[calc(100vw-2rem)] p-1" align="start" side="top" sideOffset={6}>
             <div className="popover-header-title px-2 py-1.5">Git options</div>
             <div role="menu" aria-label={`Git options for ${branchRef}`}>
               {options.map((option) => {
