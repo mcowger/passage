@@ -21,6 +21,10 @@ import { AgentTitleSuggester, DEFAULT_AGENT_TITLE } from "./title-suggester.ts";
 import { normalizeAvailableModels } from "../models/catalog.ts";
 import { parsePiExtensionUiDialog } from "./ui.ts";
 import { errorFields, logger } from "../logging.ts";
+import { AgentRuntime, type Cancellation } from "./runtime.ts";
+import type { AgentServiceEvent } from "./runtime.ts";
+// Re-exported for existing importers; new code should import from ./runtime.ts directly.
+export type { AgentServiceEvent } from "./runtime.ts";
 import {
   collectTitleSources,
   compactRefusalReason,
@@ -64,27 +68,8 @@ const encoder = new TextEncoder();
  *  before the second user message). Returns [] when no usable first user
  *  message exists yet. A text-less first response yields just [user]. */
 
-type RuntimeSubscription = {
-  generation: number;
-  unsubscribeEvents: () => boolean;
-  unsubscribeLifecycle: () => boolean;
-};
 
-type RuntimeDiagnostic = {
-  // Absent for `interrupted` (no real Pi process/generation ever existed for
-  // this record) -- present and positive for an actual observed process
-  // exit. Never a placeholder 0: the public AgentSummary schema requires
-  // `generation` to be a positive integer when present.
-  generation?: number;
-  exitStatus: string;
-  stderr: string[];
-  stderrTruncated: boolean;
-};
 
-type Cancellation = {
-  process: PiProcessHandle;
-  generation: number;
-};
 
 export type AgentCapabilities = ReturnType<typeof agentCapabilitiesSchema.parse>;
 
@@ -100,14 +85,6 @@ export type AgentSnapshot = Agent & {
   runStartedAt?: number;
 };
 
-export type AgentServiceEvent = {
-  agentId: string;
-  type: "status" | "settled" | "attention" | string;
-  status: AgentStatus;
-  generation?: number;
-  error?: string;
-  payload?: Record<string, unknown>;
-};
 
 export type CompactResult =
   | { compacted: true; tokensBefore?: number }
@@ -133,29 +110,7 @@ export class AgentError extends Error {
  *  client refetch. */
 
 export class AgentService {
-  private readonly listeners = new Set<(event: AgentServiceEvent) => void>();
-  private readonly subscriptions = new Map<string, RuntimeSubscription>();
-  private readonly previousRevisions = new Map<string, AgentHistory["revision"]>();
-  private readonly leaves = new Map<string, string>();
-  private readonly transcripts = new Map<string, TranscriptState>();
-  private readonly transcriptSeeds = new Map<string, Promise<TranscriptState>>();
-  private readonly transcriptEpochs = new Map<string, number>();
-  private epochCounter = Date.now();
-  private readonly diagnostics = new Map<string, RuntimeDiagnostic>();
-  private readonly pendingUiRequests = new Map<string, Record<string, unknown>>();
-  private readonly cancellations = new Map<string, Cancellation>();
-  private readonly runStartedAt = new Map<string, number>();
-  /** Agents with a compact RPC currently in flight. While set, reconcile
-   *  must not promote the killed run's abort tombstone to an error
-   *  status/row: the tombstone is expected, and the compaction entry
-   *  landing right after it supersedes it. */
-  private readonly compacting = new Set<string>();
-  private readonly eventChains = new Map<string, Promise<void>>();
-  /** Background boot kicked off by create(): lets the POST return (and the
-   *  New Agent pane open) without waiting for Pi spawn + reconcile, while
-   *  giving later per-agent operations something to wait on so they keep
-   *  the old start-then-operate ordering. Never rejects. */
-  private readonly pendingStarts = new Map<string, Promise<void>>();
+  private readonly runtime = new AgentRuntime();
   private readonly manager: PiRpcManager;
   private readonly listLimit: number;
   private readonly pi: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
@@ -166,10 +121,6 @@ export class AgentService {
   /** Daemon lifecycle admission gate. Defaults to always-open so tests/tools that never wire a
    *  `DaemonLifecycle` see no behavior change. */
   private readonly admissionGate: () => boolean;
-  /** Agents with an auto-title suggestion currently in flight. Guards the
-   *  fire-and-forget `maybeAutoTitle` so rapid consecutive user messages
-   *  cannot spawn duplicate suggestion runs for the same agent. */
-  private readonly titleSuggestions = new Set<string>();
   private readonly titleSuggester: Pick<AgentTitleSuggester, "suggestTitle">;
   /** Resolves the workspace's configured suggestion model + thinking level
    *  + prompt templates (Settings). Empty/undefined fields mean the
@@ -239,9 +190,9 @@ export class AgentService {
   }
 
   subscribe(listener: (event: AgentServiceEvent) => void): () => boolean {
-    if (this.listeners.size >= MAX_LISTENERS) throw new AgentError("limit", "maximum agent listeners reached");
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    if (this.runtime.listeners.size >= MAX_LISTENERS) throw new AgentError("limit", "maximum agent listeners reached");
+    this.runtime.listeners.add(listener);
+    return () => this.runtime.listeners.delete(listener);
   }
 
   snapshot(agentId: string): AgentSnapshot {
@@ -257,17 +208,17 @@ export class AgentService {
     // inventing an idle, still-active, or genuinely-erroring state. While a
     // boot is pending the status is genuinely unknown, so leave it alone.
     let baseStatus = agent.lastKnownStatus;
-    if (!process && !this.pendingStarts.has(agentId) && this.isStaleActiveStatus(baseStatus)) {
+    if (!process && !this.runtime.pendingStarts.has(agentId) && this.isStaleActiveStatus(baseStatus)) {
       this.markInterrupted(agentId, baseStatus);
       baseStatus = "interrupted";
     }
-    const diagnostic = this.diagnostics.get(agentId);
+    const diagnostic = this.runtime.diagnostics.get(agentId);
     const pendingUiRequest = baseStatus === "stopping"
       ? undefined
       : (() => {
           const pending = process?.getPendingUiRequest();
           return pending ? parsePiExtensionUiDialog(pending) : undefined;
-        })() ?? this.pendingUiRequests.get(agentId);
+        })() ?? this.runtime.pendingUiRequests.get(agentId);
     const lastKnownStatus = pendingUiRequest ? "needs-attention" : baseStatus;
     return {
       ...agent,
@@ -275,7 +226,7 @@ export class AgentService {
       live: process !== undefined,
       persisted: agent.piSessionPath !== null,
       ...(pendingUiRequest ? { pendingUiRequest } : {}),
-      ...(this.runStartedAt.has(agentId) ? { runStartedAt: this.runStartedAt.get(agentId)! } : {}),
+      ...(this.runtime.runStartedAt.has(agentId) ? { runStartedAt: this.runtime.runStartedAt.get(agentId)! } : {}),
       ...(process ? {
         generation: process.generation,
         stderr: [...process.stderr],
@@ -291,7 +242,7 @@ export class AgentService {
       // Same stale-status correction as snapshot().
       let lastKnownStatus = agent.lastKnownStatus;
       const process = this.manager.get(agent.id);
-      if (!process && !this.pendingStarts.has(agent.id) && this.isStaleActiveStatus(lastKnownStatus)) {
+      if (!process && !this.runtime.pendingStarts.has(agent.id) && this.isStaleActiveStatus(lastKnownStatus)) {
         this.markInterrupted(agent.id, lastKnownStatus);
         lastKnownStatus = "interrupted";
       }
@@ -300,7 +251,7 @@ export class AgentService {
         lastKnownStatus,
         live: process !== undefined,
         persisted: agent.piSessionPath !== null,
-        ...(this.runStartedAt.has(agent.id) ? { runStartedAt: this.runStartedAt.get(agent.id)! } : {}),
+        ...(this.runtime.runStartedAt.has(agent.id) ? { runStartedAt: this.runtime.runStartedAt.get(agent.id)! } : {}),
       };
     });
   }
@@ -331,7 +282,7 @@ export class AgentService {
     for (const row of rows) {
       let status = row.lastKnownStatus;
       // Pending UI request forces attention even when the persisted status lags.
-      if (this.pendingUiRequests.has(row.id)) {
+      if (this.runtime.pendingUiRequests.has(row.id)) {
         status = "needs-attention";
       } else {
         const process = this.manager.get(row.id);
@@ -339,7 +290,7 @@ export class AgentService {
           try {
             if (process.getPendingUiRequest?.()) status = "needs-attention";
           } catch {}
-        } else if (!this.pendingStarts.has(row.id) && this.isStaleActiveStatus(status)) {
+        } else if (!this.runtime.pendingStarts.has(row.id) && this.isStaleActiveStatus(status)) {
           try {
             this.markInterrupted(row.id, status);
           } catch {}
@@ -370,11 +321,11 @@ export class AgentService {
    *  diagnostic (e.g. a real crash reported by onLifecycle earlier in this
    *  daemon's life). */
   private markInterrupted(agentId: string, previousStatus: string): void {
-    if (!this.diagnostics.has(agentId)) {
-      this.diagnostics.set(agentId, { exitStatus: `interrupted (${previousStatus})`, stderr: [], stderrTruncated: false });
-      while (this.diagnostics.size > MAX_RUNTIME_DIAGNOSTICS) this.diagnostics.delete(this.diagnostics.keys().next().value!);
+    if (!this.runtime.diagnostics.has(agentId)) {
+      this.runtime.diagnostics.set(agentId, { exitStatus: `interrupted (${previousStatus})`, stderr: [], stderrTruncated: false });
+      while (this.runtime.diagnostics.size > MAX_RUNTIME_DIAGNOSTICS) this.runtime.diagnostics.delete(this.runtime.diagnostics.keys().next().value!);
     }
-    this.runStartedAt.delete(agentId);
+    this.runtime.runStartedAt.delete(agentId);
     try { this.repositories.agents.updateStatus(agentId, "interrupted"); } catch {}
   }
 
@@ -416,13 +367,13 @@ export class AgentService {
    *  is trivially idle. */
   private candidateBlockerAgentIds(): Set<string> {
     return new Set<string>([
-      ...this.pendingStarts.keys(),
-      ...this.cancellations.keys(),
-      ...this.compacting,
-      ...this.runStartedAt.keys(),
-      ...this.eventChains.keys(),
-      ...this.pendingUiRequests.keys(),
-      ...this.subscriptions.keys(),
+      ...this.runtime.pendingStarts.keys(),
+      ...this.runtime.cancellations.keys(),
+      ...this.runtime.compacting,
+      ...this.runtime.runStartedAt.keys(),
+      ...this.runtime.eventChains.keys(),
+      ...this.runtime.pendingUiRequests.keys(),
+      ...this.runtime.subscriptions.keys(),
     ]);
   }
 
@@ -430,13 +381,13 @@ export class AgentService {
    *  undefined if nothing tracked says otherwise (which does not by itself
    *  mean idle -- see listBlockers()). Never performs I/O. */
   private quickBlockerReason(agentId: string): DaemonBlocker["reason"] | undefined {
-    if (this.pendingStarts.has(agentId)) return "starting";
-    if (this.cancellations.has(agentId)) return "cancelling";
-    if (this.compacting.has(agentId)) return "compacting";
-    if (this.eventChains.has(agentId)) return "reconciling";
-    if (this.pendingUiRequests.has(agentId)) return "needs-attention";
+    if (this.runtime.pendingStarts.has(agentId)) return "starting";
+    if (this.runtime.cancellations.has(agentId)) return "cancelling";
+    if (this.runtime.compacting.has(agentId)) return "compacting";
+    if (this.runtime.eventChains.has(agentId)) return "reconciling";
+    if (this.runtime.pendingUiRequests.has(agentId)) return "needs-attention";
     if (this.manager.get(agentId)?.getPendingUiRequest()) return "needs-attention";
-    if (this.runStartedAt.has(agentId)) return "running";
+    if (this.runtime.runStartedAt.has(agentId)) return "running";
     return undefined;
   }
 
@@ -506,15 +457,15 @@ export class AgentService {
     // Tracked in pendingStarts so prompt/steer/history/etc. still run
     // after boot (preserving the old ordering) and shutdown waits for it.
     const tracked: Promise<void> = this.start(agent.id, { admitted: true }).catch(() => undefined).finally(() => {
-      if (this.pendingStarts.get(agent.id) === tracked) this.pendingStarts.delete(agent.id);
+      if (this.runtime.pendingStarts.get(agent.id) === tracked) this.runtime.pendingStarts.delete(agent.id);
     });
-    this.pendingStarts.set(agent.id, tracked);
+    this.runtime.pendingStarts.set(agent.id, tracked);
     return this.snapshot(agent.id);
   }
 
   /** Wait for create()'s background boot for this agent, if still in flight. */
   private awaitPendingStart(agentId: string): Promise<void> {
-    const pending = this.pendingStarts.get(agentId);
+    const pending = this.runtime.pendingStarts.get(agentId);
     if (!pending) return Promise.resolve();
     return pending;
   }
@@ -532,7 +483,7 @@ export class AgentService {
     await this.awaitPendingStart(agentId);
     const agent = this.requireAgent(agentId);
     if (agent.lastKnownStatus === "stopping") {
-      if (this.cancellations.has(agentId)) throw new AgentError("invalid-input", "agent cancellation is in progress");
+      if (this.runtime.cancellations.has(agentId)) throw new AgentError("invalid-input", "agent cancellation is in progress");
       this.updateStatus(agentId, "initializing", "status");
     }
     const workspace = this.requireWorkspace(agent.workspaceId);
@@ -552,7 +503,7 @@ export class AgentService {
         await this.manager.stop(agentId).catch(() => undefined);
         return;
       }
-      this.diagnostics.delete(agent.id);
+      this.runtime.diagnostics.delete(agent.id);
       this.attach(agent.id, process);
       await this.reconcile(agent.id);
     } catch (cause) {
@@ -571,7 +522,7 @@ export class AgentService {
     // DB can still say `running` with no Pi process behind it; blocking
     // `prompt` then forces the client onto `steer`, which is a silent no-op
     // when idle and strands the user's message with no response.
-    if (agent.lastKnownStatus === "running" && (this.manager.get(agentId) !== undefined || this.pendingStarts.has(agentId))) {
+    if (agent.lastKnownStatus === "running" && (this.manager.get(agentId) !== undefined || this.runtime.pendingStarts.has(agentId))) {
       throw new AgentError("invalid-input", "agent is active; use steer or follow-up, or wait for cancellation");
     }
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
@@ -627,7 +578,7 @@ export class AgentService {
   }
 
   async abort(agentId: string): Promise<void> {
-    this.pendingUiRequests.delete(agentId);
+    this.runtime.pendingUiRequests.delete(agentId);
     // Don't report "no process" for a create() whose boot is still in
     // flight; wait for it so an immediate New-Agent-then-abort still
     // reaches the stopping state instead of silently staying initializing.
@@ -640,9 +591,9 @@ export class AgentService {
       }
       return;
     }
-    if (agent.lastKnownStatus === "stopping" && this.cancellations.has(agentId)) return;
+    if (agent.lastKnownStatus === "stopping" && this.runtime.cancellations.has(agentId)) return;
     const cancellation = { process, generation: process.generation };
-    this.cancellations.set(agentId, cancellation);
+    this.runtime.cancellations.set(agentId, cancellation);
     this.updateStatus(agentId, "stopping", "status", process.generation);
     void this.completeAbort(agentId, cancellation);
   }
@@ -654,7 +605,7 @@ export class AgentService {
     this.rejectWhileStopping(this.requireAgent(agentId));
     const process = this.requireProcess(agentId);
     process.respondExtensionUi(response);
-    this.pendingUiRequests.delete(agentId);
+    this.runtime.pendingUiRequests.delete(agentId);
     this.updateStatus(agentId, "running", "status", process.generation);
   }
 
@@ -722,7 +673,7 @@ export class AgentService {
     // Pi aborts any in-flight run before summarizing; a too-short session
     // is a benign refusal, not an error, so map it to a reason instead of
     // throwing (the UI shows an info notice for it).
-    this.compacting.add(agentId);
+    this.runtime.compacting.add(agentId);
     let tokensBefore: number | undefined;
     try {
       const response = await process.request(
@@ -738,7 +689,7 @@ export class AgentService {
       if (reason === undefined) throw cause;
       return { compacted: false, reason };
     } finally {
-      this.compacting.delete(agentId);
+      this.runtime.compacting.delete(agentId);
     }
     // Compaction rewrites which journal entries are active, which invalidates
     // every row identity the current TranscriptState was built from -- unlike
@@ -793,14 +744,14 @@ export class AgentService {
         await this.ensureProcess(agentId).catch(() => undefined);
         agent = this.requireAgent(agentId);
       } else {
-        await this.reconcile(agentId, !this.cancellations.has(agentId));
+        await this.reconcile(agentId, !this.runtime.cancellations.has(agentId));
         agent = this.requireAgent(agentId);
       }
     }
-    if (!agent.piSessionPath && !this.transcripts.has(agentId)) return { unpersisted: true, history: null };
+    if (!agent.piSessionPath && !this.runtime.transcripts.has(agentId)) return { unpersisted: true, history: null };
     const state = await this.getTranscript(agentId);
     const snapshot = state.snapshot();
-    const revision = this.previousRevisions.get(agentId) ?? { mtimeMs: 0, size: 0, contentHash: "" };
+    const revision = this.runtime.previousRevisions.get(agentId) ?? { mtimeMs: 0, size: 0, contentHash: "" };
     const history: AgentHistory = {
       sessionId: agentId,
       revision,
@@ -889,13 +840,13 @@ export class AgentService {
     const archivedAt = new Date().toISOString();
     this.repositories.agents.archive(agentId, archivedAt);
     this.repositories.agents.updateStatus(agentId, "archived");
-    this.previousRevisions.delete(agentId);
-    this.leaves.delete(agentId);
-    this.diagnostics.delete(agentId);
-    this.runStartedAt.delete(agentId);
-    this.transcripts.delete(agentId);
-    this.transcriptSeeds.delete(agentId);
-    this.transcriptEpochs.delete(agentId);
+    this.runtime.previousRevisions.delete(agentId);
+    this.runtime.leaves.delete(agentId);
+    this.runtime.diagnostics.delete(agentId);
+    this.runtime.runStartedAt.delete(agentId);
+    this.runtime.transcripts.delete(agentId);
+    this.runtime.transcriptSeeds.delete(agentId);
+    this.runtime.transcriptEpochs.delete(agentId);
     this.emit({ agentId, type: "status", status: "archived" });
   }
 
@@ -932,7 +883,7 @@ export class AgentService {
   async stop(agentId: string): Promise<void> {
     this.requireAgent(agentId);
     this.detach(agentId);
-    this.runStartedAt.delete(agentId);
+    this.runtime.runStartedAt.delete(agentId);
     await this.manager.stop(agentId);
   }
 
@@ -956,8 +907,8 @@ export class AgentService {
         // start can't leak a process around the teardown.
         await this.awaitPendingStart(agent.id);
         this.detach(agent.id);
-        this.cancellations.delete(agent.id);
-        this.runStartedAt.delete(agent.id);
+        this.runtime.cancellations.delete(agent.id);
+        this.runtime.runStartedAt.delete(agent.id);
         await this.manager.stop(agent.id);
         stopped.push(agent.id);
       } catch (error) {
@@ -986,34 +937,34 @@ export class AgentService {
   async shutdown(options?: { interrupted?: boolean }): Promise<void> {
     // Let create()'s background boots finish (they clean up their own map
     // entries) so they never write to a closed database after this returns.
-    await Promise.allSettled([...this.pendingStarts.values()]);
-    this.pendingStarts.clear();
+    await Promise.allSettled([...this.runtime.pendingStarts.values()]);
+    this.runtime.pendingStarts.clear();
     if (options?.interrupted) {
       await this.manager.shutdown();
-      await Promise.allSettled([...this.eventChains.values()]);
-      for (const agentId of this.subscriptions.keys()) this.detach(agentId);
+      await Promise.allSettled([...this.runtime.eventChains.values()]);
+      for (const agentId of this.runtime.subscriptions.keys()) this.detach(agentId);
     } else {
-      for (const agentId of this.subscriptions.keys()) this.detach(agentId);
+      for (const agentId of this.runtime.subscriptions.keys()) this.detach(agentId);
       await this.manager.shutdown();
     }
-    this.listeners.clear();
-    this.previousRevisions.clear();
-    this.leaves.clear();
-    this.diagnostics.clear();
-    this.compacting.clear();
-    this.titleSuggestions.clear();
-    this.runStartedAt.clear();
-    this.eventChains.clear();
-    this.transcripts.clear();
-    this.transcriptSeeds.clear();
-    this.transcriptEpochs.clear();
+    this.runtime.listeners.clear();
+    this.runtime.previousRevisions.clear();
+    this.runtime.leaves.clear();
+    this.runtime.diagnostics.clear();
+    this.runtime.compacting.clear();
+    this.runtime.titleSuggestions.clear();
+    this.runtime.runStartedAt.clear();
+    this.runtime.eventChains.clear();
+    this.runtime.transcripts.clear();
+    this.runtime.transcriptSeeds.clear();
+    this.runtime.transcriptEpochs.clear();
   }
 
   private attach(agentId: string, process: PiProcessHandle): void {
-    const current = this.subscriptions.get(agentId);
+    const current = this.runtime.subscriptions.get(agentId);
     if (current?.generation === process.generation) return;
     this.detach(agentId);
-    this.subscriptions.set(agentId, {
+    this.runtime.subscriptions.set(agentId, {
       generation: process.generation,
       unsubscribeEvents: process.subscribe((event) => this.enqueueEvent(agentId, event)),
       unsubscribeLifecycle: process.subscribeLifecycle((event) => this.enqueueLifecycle(agentId, event)),
@@ -1026,12 +977,12 @@ export class AgentService {
   }
 
   private detach(agentId: string): void {
-    this.pendingUiRequests.delete(agentId);
-    const subscription = this.subscriptions.get(agentId);
+    this.runtime.pendingUiRequests.delete(agentId);
+    const subscription = this.runtime.subscriptions.get(agentId);
     if (!subscription) return;
     subscription.unsubscribeEvents();
     subscription.unsubscribeLifecycle();
-    this.subscriptions.delete(agentId);
+    this.runtime.subscriptions.delete(agentId);
   }
 
   private enqueueEvent(agentId: string, event: PiEvent): void {
@@ -1043,15 +994,15 @@ export class AgentService {
   }
 
   private enqueue(agentId: string, operation: () => Promise<void>): Promise<void> {
-    const previous = this.eventChains.get(agentId) ?? Promise.resolve();
+    const previous = this.runtime.eventChains.get(agentId) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(operation);
-    this.eventChains.set(agentId, next);
-    while (this.eventChains.size > MAX_LIST) this.eventChains.delete(this.eventChains.keys().next().value!);
+    this.runtime.eventChains.set(agentId, next);
+    while (this.runtime.eventChains.size > MAX_LIST) this.runtime.eventChains.delete(this.runtime.eventChains.keys().next().value!);
     void next.catch(() => {
       const process = this.manager.get(agentId);
       this.updateStatus(agentId, "error", "attention", process?.generation, "Agent event reconciliation failed");
     }).finally(() => {
-      if (this.eventChains.get(agentId) === next) this.eventChains.delete(agentId);
+      if (this.runtime.eventChains.get(agentId) === next) this.runtime.eventChains.delete(agentId);
     });
     return next;
   }
@@ -1073,7 +1024,7 @@ export class AgentService {
   }
 
   private async onEvent(agentId: string, event: PiEvent): Promise<void> {
-    if (this.subscriptions.get(agentId)?.generation !== event.generation) return;
+    if (this.runtime.subscriptions.get(agentId)?.generation !== event.generation) return;
     const agent = this.repositories.agents.get(agentId);
     if (!agent) return;
 
@@ -1127,7 +1078,7 @@ export class AgentService {
       // commit heuristic misses (helper scripts, aliases, rebase/merge), so
       // reconcile Git views after every settlement.
       this.notifyWorkspaceGitChanged(agent.workspaceId);
-      this.pendingUiRequests.delete(agentId);
+      this.runtime.pendingUiRequests.delete(agentId);
       await this.reconcile(agentId);
       this.endRun(agentId);
       const status = this.requireAgent(agentId).lastKnownStatus as AgentStatus;
@@ -1140,7 +1091,7 @@ export class AgentService {
     } else {
       const dialog = parsePiExtensionUiDialog(event);
       if (dialog) {
-        this.pendingUiRequests.set(agentId, dialog);
+        this.runtime.pendingUiRequests.set(agentId, dialog);
         this.updateStatus(agentId, "needs-attention", "attention", event.generation, undefined, dialog);
       } else if (["error", "prompt_error", "extension_error"].includes(String(event.type))) {
         this.updateStatus(agentId, "error", "attention", event.generation, undefined, payload);
@@ -1154,14 +1105,14 @@ export class AgentService {
   }
 
   private async onLifecycle(agentId: string, event: PiLifecycleEvent): Promise<void> {
-    if (this.subscriptions.get(agentId)?.generation !== event.generation) return;
-    this.diagnostics.set(agentId, {
+    if (this.runtime.subscriptions.get(agentId)?.generation !== event.generation) return;
+    this.runtime.diagnostics.set(agentId, {
       generation: event.generation,
       exitStatus: `${event.lifecycle} (${event.exitCode})`,
       stderr: [...event.stderr],
       stderrTruncated: event.stderrTruncated,
     });
-    while (this.diagnostics.size > MAX_RUNTIME_DIAGNOSTICS) this.diagnostics.delete(this.diagnostics.keys().next().value!);
+    while (this.runtime.diagnostics.size > MAX_RUNTIME_DIAGNOSTICS) this.runtime.diagnostics.delete(this.runtime.diagnostics.keys().next().value!);
     logger("agent").error("Agent Pi process ended", { event: "agent.process_ended", agentId, generation: event.generation, exitStatus: `${event.lifecycle} (${event.exitCode})`, exitCode: event.exitCode, stderrBytes: event.stderr.reduce((total, part) => total + encoder.encode(part).byteLength, 0), stderrTruncated: event.stderrTruncated });
     this.detach(agentId);
     const message = `Pi process exited (${event.exitCode})`;
@@ -1197,7 +1148,7 @@ export class AgentService {
       await this.manager.stop(agentId).catch(() => undefined);
       this.updateStatus(agentId, "error", "attention", generation, `Unable to confirm agent cancellation: ${message}`);
     } finally {
-      if (this.cancellations.get(agentId) === cancellation) this.cancellations.delete(agentId);
+      if (this.runtime.cancellations.get(agentId) === cancellation) this.runtime.cancellations.delete(agentId);
     }
   }
 
@@ -1218,7 +1169,7 @@ export class AgentService {
     const data = (responseData<Record<string, unknown>>(stateRecord) ?? stateRecord) as Record<string, unknown>;
     const entries = responseData<{ leafId?: unknown }>(entriesRecord);
     if (typeof entries?.leafId === "string") {
-      this.remember(this.leaves, agentId, entries.leafId);
+      this.remember(this.runtime.leaves, agentId, entries.leafId);
     }
     const sessionPath = typeof data.sessionFile === "string"
       ? data.sessionFile
@@ -1272,8 +1223,8 @@ export class AgentService {
     }
     try {
       const history = await readPiHistory(persistedPath, {
-        previousRevision: this.previousRevisions.get(agentId),
-        leafId: this.leaves.get(agentId),
+        previousRevision: this.runtime.previousRevisions.get(agentId),
+        leafId: this.runtime.leaves.get(agentId),
       });
       this.rememberRevision(agentId, history.revision);
       // A rewrite (external edit/truncation of the session file) invalidates
@@ -1292,7 +1243,7 @@ export class AgentService {
       // `compacting`): its abort tombstone is expected, and the compaction
       // entry landing right after it supersedes it, so don't flash an
       // error status/row for intentional behavior.
-      const hasActiveError = !this.compacting.has(agentId) && latestItem && "error" in latestItem && Boolean(latestItem.error);
+      const hasActiveError = !this.runtime.compacting.has(agentId) && latestItem && "error" in latestItem && Boolean(latestItem.error);
       const currentStatus = this.requireAgent(agentId).lastKnownStatus as AgentStatus;
       if (currentStatus === "needs-attention") return;
       if (currentStatus === "stopping" && !allowStoppingToSettle) return;
@@ -1319,7 +1270,7 @@ export class AgentService {
   private updateStatus(agentId: string, status: AgentStatus, type: AgentServiceEvent["type"], generation?: number, error?: string, payload?: Record<string, unknown>): void {
     if (status === "idle" || status === "error" || status === "interrupted" || status === "archived") this.endRun(agentId);
     this.repositories.agents.updateStatus(agentId, status);
-    const runStartedAt = this.runStartedAt.get(agentId);
+    const runStartedAt = this.runtime.runStartedAt.get(agentId);
     const eventPayload = { ...(payload ?? {}), ...(runStartedAt !== undefined ? { runStartedAt } : {}) };
     this.emit({ agentId, type, status, ...(generation ? { generation } : {}), ...(error ? { error } : {}), ...(Object.keys(eventPayload).length > 0 ? { payload: eventPayload } : {}) });
   }
@@ -1327,11 +1278,11 @@ export class AgentService {
   /** Record the start of the current run. Idempotent per run so repeated
    *  `agent_start`/`turn_start` events do not move the anchor. */
   private beginRun(agentId: string): void {
-    if (!this.runStartedAt.has(agentId)) this.runStartedAt.set(agentId, Date.now());
+    if (!this.runtime.runStartedAt.has(agentId)) this.runtime.runStartedAt.set(agentId, Date.now());
   }
 
   private endRun(agentId: string): void {
-    this.runStartedAt.delete(agentId);
+    this.runtime.runStartedAt.delete(agentId);
   }
 
   /** Returns this agent's transcript projector, seeding it from the journal
@@ -1341,16 +1292,16 @@ export class AgentService {
    *  needing its own lock -- concurrent callers share the same in-flight
    *  seed promise instead of reading the file twice. */
   private async getTranscript(agentId: string): Promise<TranscriptState> {
-    const existing = this.transcripts.get(agentId);
+    const existing = this.runtime.transcripts.get(agentId);
     if (existing) return existing;
-    const inflight = this.transcriptSeeds.get(agentId);
+    const inflight = this.runtime.transcriptSeeds.get(agentId);
     if (inflight) return inflight;
     const seed = (async () => {
       const state = new TranscriptState();
       const agent = this.repositories.agents.get(agentId);
       if (agent?.piSessionPath) {
         try {
-          const history = await readPiHistory(agent.piSessionPath, { leafId: this.leaves.get(agentId) });
+          const history = await readPiHistory(agent.piSessionPath, { leafId: this.runtime.leaves.get(agentId) });
           state.seed(history);
           this.rememberRevision(agentId, history.revision);
         } catch {
@@ -1358,17 +1309,17 @@ export class AgentService {
           // reasonable view, and the next reconcile will retry the read.
         }
       }
-      this.transcripts.set(agentId, state);
-      while (this.transcripts.size > MAX_TRANSCRIPTS) {
-        const oldest = this.transcripts.keys().next().value!;
-        this.transcripts.delete(oldest);
-        this.transcriptEpochs.delete(oldest);
+      this.runtime.transcripts.set(agentId, state);
+      while (this.runtime.transcripts.size > MAX_TRANSCRIPTS) {
+        const oldest = this.runtime.transcripts.keys().next().value!;
+        this.runtime.transcripts.delete(oldest);
+        this.runtime.transcriptEpochs.delete(oldest);
       }
-      this.transcriptSeeds.delete(agentId);
+      this.runtime.transcriptSeeds.delete(agentId);
       this.bumpEpoch(agentId);
       return state;
     })();
-    this.transcriptSeeds.set(agentId, seed);
+    this.runtime.transcriptSeeds.set(agentId, seed);
     return seed;
   }
 
@@ -1420,8 +1371,8 @@ export class AgentService {
     const agent = this.repositories.agents.get(agentId);
     if (!agent || agent.archivedAt) return;
     if (agent.titleOverridden || agent.title !== DEFAULT_AGENT_TITLE) return;
-    if (this.titleSuggestions.has(agentId)) return;
-    this.titleSuggestions.add(agentId);
+    if (this.runtime.titleSuggestions.has(agentId)) return;
+    this.runtime.titleSuggestions.add(agentId);
     void (async () => {
       try {
         let model: string | undefined;
@@ -1443,7 +1394,7 @@ export class AgentService {
         const status = (this.repositories.agents.get(agentId)?.lastKnownStatus as AgentStatus) ?? "idle";
         this.emit({ agentId, type: "title", status, payload: { title } });
       } catch {} finally {
-        this.titleSuggestions.delete(agentId);
+        this.runtime.titleSuggestions.delete(agentId);
       }
     })();
   }
@@ -1481,24 +1432,24 @@ export class AgentService {
    *  daemon process is exceedingly unlikely to reuse a value a client
    *  remembers from before a restart. */
   private bumpEpoch(agentId: string): void {
-    this.epochCounter += 1;
-    this.transcriptEpochs.set(agentId, this.epochCounter);
+    this.runtime.epochCounter += 1;
+    this.runtime.transcriptEpochs.set(agentId, this.runtime.epochCounter);
   }
 
   private currentEpoch(agentId: string): number {
-    return this.transcriptEpochs.get(agentId) ?? 0;
+    return this.runtime.transcriptEpochs.get(agentId) ?? 0;
   }
 
   private resetTranscript(agentId: string): void {
-    this.transcripts.delete(agentId);
-    this.transcriptSeeds.delete(agentId);
+    this.runtime.transcripts.delete(agentId);
+    this.runtime.transcriptSeeds.delete(agentId);
     this.bumpEpoch(agentId);
     const status = (this.repositories.agents.get(agentId)?.lastKnownStatus as AgentStatus) ?? "idle";
     this.emit({ agentId, type: "transcript_reset", status, payload: {} });
   }
 
   private emit(event: AgentServiceEvent): void {
-    for (const listener of this.listeners) {
+    for (const listener of this.runtime.listeners) {
       try { listener(event); } catch {}
     }
   }
@@ -1551,7 +1502,7 @@ export class AgentService {
       process = this.manager.get(agentId);
     }
     if (!process) throw new AgentError("not-running", "agent process could not be started");
-    const subscription = this.subscriptions.get(agentId);
+    const subscription = this.runtime.subscriptions.get(agentId);
     if (subscription?.generation !== process.generation) {
       logger("agent").warn("Agent process has no event subscription", {
         event: "agent.process_unsubscribed",
@@ -1582,7 +1533,7 @@ export class AgentService {
   }
 
   private rememberRevision(agentId: string, revision: AgentHistory["revision"]): void {
-    this.remember(this.previousRevisions, agentId, revision);
+    this.remember(this.runtime.previousRevisions, agentId, revision);
   }
 
   private remember<T>(entries: Map<string, T>, key: string, value: T): void {
