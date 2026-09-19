@@ -245,3 +245,22 @@
 .terminal-container .xterm-screen { height: 100% !important; }
 .terminal-container .xterm-viewport { overflow-y: auto !important; }
 
+/* Mobile key bar: partial keyboard for touch (Esc/Tab/sticky Ctrl/Alt/Shift,
+   arrows, ^C/^D core row + expandable nav/Ctrl-combo/symbol rows). It is a
+   flex sibling of .terminal-container, so the existing ResizeObserver refit
+   picks up the reduced height automatically. */
+.terminal-keybar { flex: none; background: #191c1e; border-top: 1px solid #282c30; padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px)); }
+.terminal-keybar-row { display: flex; gap: 6px; overflow-x: auto; align-items: stretch; scrollbar-width: none; }
+.terminal-keybar-row::-webkit-scrollbar { display: none; }
+.terminal-keybar-row + .terminal-keybar-row { margin-top: 6px; }
+.term-key { flex: none; min-width: 44px; min-height: 40px; padding: 6px 10px; background: #24282c; color: #ecebe8; border: 1px solid #2f353a; border-radius: 6px; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+.term-key:active { background: #2e3439; }
+.term-key:focus-visible { outline: 2px solid #0891b2; outline-offset: 1px; }
+.term-key-mod[data-state="armed"] { border-color: #0891b2; color: #22d3ee; background: rgba(8, 145, 178, 0.15); }
+.term-key-mod[data-state="locked"] { border-color: #0891b2; color: #fff; background: rgba(8, 145, 178, 0.4); }
+.term-key-danger { color: #f87171; }
+.term-key-expand[aria-expanded="true"] { border-color: #0891b2; color: #22d3ee; }
+@media (pointer: coarse) {
+  .term-key { min-height: 44px; }
+}
+

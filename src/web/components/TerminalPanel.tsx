@@ -5,6 +5,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalSummary } from "../../shared/domain/terminals.ts";
 import { connectTerminalSocket, type TerminalSocket } from "../terminalSocket.ts";
+import { TerminalKeyBar, useStickyModifiers } from "./TerminalKeyBar.tsx";
 
 type TerminalProps = {
   terminal: TerminalSummary;
@@ -28,6 +29,7 @@ export function TerminalPanel({ terminal, onClose, fontFamily, fontSize }: Termi
   const [dimensions, setDimensions] = useState({ cols: terminal.columns, rows: terminal.rows });
   const [status, setStatus] = useState<"running" | "exited">(terminal.status);
   const [exitCode, setExitCode] = useState<number | null>(terminal.exitCode);
+  const sticky = useStickyModifiers();
 
   const handleResize = useCallback(() => {
     if (animationFrameRef.current !== null) {
@@ -149,7 +151,11 @@ export function TerminalPanel({ terminal, onClose, fontFamily, fontSize }: Termi
     socketRef.current = socket;
 
     term.onData((data) => {
-      socket.sendInput(data);
+      // Fold any armed sticky modifier from the key bar into soft-keyboard
+      // input as well (the bar alone can't intercept the OS keyboard), so
+      // Ctrl+C is reachable by tapping Ctrl then typing C. consume is
+      // ref-backed and stable, so this mount-once closure stays correct.
+      socket.sendInput(sticky.consume(data));
     });
 
     const resizeObserver = new ResizeObserver(() => {
@@ -212,6 +218,16 @@ export function TerminalPanel({ terminal, onClose, fontFamily, fontSize }: Termi
     termRef.current?.clear();
   };
 
+  // Key-bar presses bypass xterm: send the raw sequence through the same
+  // sticky fold as typed input, then refocus so the soft keyboard stays up.
+  const handleKeyBarInput = useCallback(
+    (raw: string) => {
+      socketRef.current?.sendInput(sticky.consume(raw));
+      termRef.current?.focus();
+    },
+    [sticky],
+  );
+
   // Closing the pane terminates the shell; closeTabNow owns the deletion so
   // the canvas tab and the terminal process end together.
   const handleTerminate = () => {
@@ -267,6 +283,11 @@ export function TerminalPanel({ terminal, onClose, fontFamily, fontSize }: Termi
       </div>
 
       <div className="terminal-container" ref={containerRef} />
+      <TerminalKeyBar
+        mods={sticky.mods}
+        onTapModifier={sticky.tapModifier}
+        onSendKey={handleKeyBarInput}
+      />
     </div>
   );
 }
