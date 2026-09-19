@@ -646,6 +646,7 @@ export const server = Bun.serve<SocketData>({
   development: process.env.NODE_ENV !== "production",
   routes: {
     "/": homepage,
+    "/index.html": homepage,
     "/manifest.webmanifest": new Response(manifest, {
       headers: { "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=86400" },
     }),

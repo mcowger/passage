@@ -419,8 +419,13 @@ export function SettingsModal({
     setPushError("");
     setPushInfo("");
     try {
-      // Must stay in the tap handler with no await before subscribePush:
-      // iOS ignores non-gesture permission prompts.
+      // iOS ignores non-gesture permission prompts, so request permission
+      // synchronously in the tap handler before any network await.
+      const granted = await requestNotificationPermission();
+      if (!granted) {
+        setPushError("Notifications are blocked. Allow notifications for this app, then try again.");
+        return;
+      }
       const { configured, publicKey } = await api.pushVapidKey();
       if (!configured || !publicKey) {
         setPushError("Daemon has no VAPID keys. Set VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT and restart.");
