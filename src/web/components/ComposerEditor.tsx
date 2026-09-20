@@ -10,6 +10,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { GraduationCap } from "lucide-react";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
 import { cleanSkillRefToken, countSkillRefs, isSkillRefBoundary, splitSkillRefs } from "./skillRefs.ts";
+import { extractPastedFiles } from "./composerAttachments.ts";
 
 const FILE_REF_PATTERN = /@`([^`\n]{1,4096})`/g;
 const BLOCK_ELEMENTS = new Set(["DIV", "P", "LI"]);
@@ -62,6 +63,9 @@ type ComposerEditorProps = {
   onChange: (value: string) => void;
   onCaretChange: (position: number) => void;
   onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  /** Files (images, documents) carried by a paste event: screenshots and
+   *  copied images arrive here instead of as text. */
+  onPasteFiles?: (files: File[]) => void;
 };
 
 function directoryHint(path: string): string {
@@ -511,6 +515,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
     onChange,
     onCaretChange,
     onKeyDown,
+    onPasteFiles,
   },
   ref,
 ) {
@@ -596,6 +601,18 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    const pastedFiles = extractPastedFiles(event.clipboardData);
+    if (pastedFiles.length > 0) {
+      // Screenshots/copied images must attach, not land in the editable DOM
+      // as opaque <img> nodes the draft reader cannot serialize. Any pasted
+      // text riding alongside (e.g. copied from a web page) still inserts
+      // at the caret so the paste loses nothing.
+      event.preventDefault();
+      onPasteFiles?.(pastedFiles);
+      const text = event.clipboardData.getData("text/plain");
+      if (text) replaceSelection(text);
+      return;
+    }
     replaceSelection(event.clipboardData.getData("text/plain"), event);
   };
 

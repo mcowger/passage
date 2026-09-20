@@ -7,7 +7,7 @@ import {
   type AgentFile,
   type AgentImage,
 } from "../../shared/protocol/agents.ts";
-import { isSupportedImage, readAsBase64 } from "./composerAttachments.ts";
+import { isSupportedImage, readAsBase64, withPastedFileNames } from "./composerAttachments.ts";
 
 type NamedImage = AgentImage & { name: string };
 
@@ -48,7 +48,10 @@ export function useComposerAttachments(agentId: string, onError: (message: strin
    *  attachment cache and are referenced by path in the same message. */
   const addAttachments = async (files: FileList | File[] | null) => {
     if (!files) return;
-    const selected = Array.from(files);
+    // Pasted screenshots/copied images often arrive nameless; give them a
+    // stable fallback before the image/file split so both paths satisfy
+    // the wire schema and the chips have something to display.
+    const selected = withPastedFileNames(Array.from(files));
     const imageCandidates = selected.filter((file) => {
       const normalized = file.type === "image/jpg" ? "image/jpeg" : file.type;
       return isSupportedImage(normalized) && file.size <= MAX_AGENT_IMAGE_DATA_BYTES;

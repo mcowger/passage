@@ -66,3 +66,61 @@ export function readAsBase64(file: File): Promise<string> {
 export function isSupportedImage(mimeType: string): boolean {
   return /^image\/(png|jpeg|gif|webp)$/.test(mimeType);
 }
+
+/** Extension fallback for a pasted clipboard file that carries no name
+ *  (screenshots and copied web images routinely arrive nameless). Matches
+ *  the image/file split in `useComposerAttachments.addAttachments` so the
+ *  payload name always satisfies the wire schema. */
+function pastedFallbackName(mimeType: string, index: number): string {
+  const normalized = mimeType === "image/jpg" ? "image/jpeg" : mimeType;
+  if (isSupportedImage(normalized)) {
+    const extension = normalized === "image/jpeg" ? "jpg" : normalized.slice("image/".length);
+    return `pasted-image-${index + 1}.${extension}`;
+  }
+  if (mimeType) {
+    const subtype = mimeType.split("/").at(-1)?.split(";")[0]?.trim();
+    if (subtype) return `pasted-file-${index + 1}.${subtype}`;
+  }
+  return `pasted-file-${index + 1}`;
+}
+
+/** Clipboard `File`s may carry an empty name; give each nameless file a
+ *  stable fallback so attachment chips, optimistic rows, and the wire
+ *  payload never see an empty name. Named files pass through untouched. */
+export function withPastedFileNames(files: File[]): File[] {
+  return files.map((file, index) => {
+    if (file.name?.trim()) return file;
+    try {
+      return new File([file], pastedFallbackName(file.type, index), {
+        type: file.type,
+        lastModified: file.lastModified,
+      });
+    } catch {
+      return file;
+    }
+  });
+}
+
+type ClipboardItemLike = { kind: string; getAsFile: () => File | null };
+type ClipboardDataLike = {
+  files?: FileList | File[] | null;
+  items?: ArrayLike<ClipboardItemLike> | null;
+};
+
+/** Files carried by a paste event. Prefers `clipboardData.files` (populated
+ *  for copied files/screenshots); falls back to `clipboardData.items` for
+ *  browsers that only expose the image as an item. Returns [] for text-only
+ *  pastes. */
+export function extractPastedFiles(clipboard: ClipboardDataLike | null | undefined): File[] {
+  if (!clipboard) return [];
+  const fromFiles = clipboard.files ? Array.from(clipboard.files) : [];
+  if (fromFiles.length > 0) return withPastedFileNames(fromFiles);
+  if (!clipboard.items) return [];
+  const fromItems: File[] = [];
+  for (const item of Array.from(clipboard.items)) {
+    if (item?.kind !== "file") continue;
+    const file = item.getAsFile();
+    if (file) fromItems.push(file);
+  }
+  return withPastedFileNames(fromItems);
+}

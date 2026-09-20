@@ -450,6 +450,7 @@ function AgentComposerInner({
           value={draft}
           onChange={updateDraft}
           onCaretChange={setCaret}
+          onPasteFiles={(files) => void addAttachments(files)}
           ariaExpanded={suggestionOpen}
           ariaControls={suggestionOpen ? COMPOSER_SUGGESTION_LIST_ID : undefined}
           ariaActivedescendant={suggestionOpen && activeValue ? `composer-option-${activeValue}` : undefined}
