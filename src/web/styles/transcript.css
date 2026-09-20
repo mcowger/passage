@@ -439,8 +439,22 @@ button.tool-row-summary {
   top: 4px;
   right: 4px;
   z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  padding-left: 28px;
+  border-top-right-radius: 5px;
+  /* Fade the scrolled text behind the button instead of letting it punch
+   * through. The container itself is click-through so horizontal scrolling,
+   * text selection, and scrollbar drags keep working; only the button
+   * re-enables pointer events. */
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--surface) 45%);
   opacity: 0.6;
   transition: opacity 120ms ease;
+}
+.tool-floating-copy .tool-copy-btn {
+  pointer-events: auto;
+  background: var(--surface);
 }
 .tool-command-block:hover .tool-floating-copy,
 .tool-output-wrap:hover .tool-floating-copy {
