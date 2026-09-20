@@ -409,10 +409,22 @@ button.tool-row-summary {
   overflow-y: auto;
   overflow-x: auto;
   max-height: min(65vh, 500px);
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
   overscroll-behavior: contain;
   scrollbar-width: thin;
+}
+.tool-command-code .line,
+.shell-output-block .line {
+  white-space: pre;
+}
+/* Shell output keeps long lines on one line with horizontal scroll
+ * instead of wrapping. */
+.shell-output-block .tool-output-pre {
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 .tool-floating-copy {
   position: absolute;
