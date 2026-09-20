@@ -180,27 +180,6 @@ describe("previews HTTP API", () => {
     expect(opened.status).toBe("error");
     f.store.close();
   });
-
-  test("input lease is only granted while ready", async () => {
-    const f = await fixture();
-    const createRes = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/previews`, {
-      method: "POST",
-      body: JSON.stringify({ targetUrl: "http://localhost:3000/" }),
-    }));
-    const created = await createRes.json() as { id: string };
-    const early = await f.app.fetch(request(`/api/previews/${created.id}/lease`, {
-      method: "POST",
-      body: JSON.stringify({ clientId: "phone" }),
-    }));
-    expect(early.status).toBe(409);
-    await f.app.fetch(request(`/api/previews/${created.id}/open`, { method: "POST" }));
-    const taken = await f.app.fetch(request(`/api/previews/${created.id}/lease`, {
-      method: "POST",
-      body: JSON.stringify({ clientId: "phone" }),
-    }));
-    expect(taken.status).toBe(200);
-    f.store.close();
-  });
 });
 
 describe("proc-net parsing", () => {

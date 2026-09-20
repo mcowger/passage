@@ -60,7 +60,7 @@ The first version includes:
 - a `preview` pane beside agents, terminals, editors, and diffs;
 - manual URLs such as `http://localhost:3000`;
 - detected loopback development-server candidates;
-- back, forward, reload, address, viewport, and take-control actions;
+- back, forward, reload, address, and viewport actions;
 - live mouse, keyboard, scroll, and touch input;
 - desktop split-pane and mobile full-screen presentation;
 - element selection and bounded composer context;
@@ -94,7 +94,7 @@ type WebPreview = {
 ```
 
 SQLite stores this Passage metadata. Runtime status, stream ports, PIDs, CDP
-targets, current frames, console messages, refs, and input leases stay in
+targets, current frames, console messages, and refs stay in
 daemon memory.
 
 The saved `targetUrl` is a convenience, not network authority. Every launch and
@@ -175,7 +175,7 @@ The panel has one compact toolbar:
 
 ```text
 [Back] [Forward] [Reload] [http://localhost:5173             ]
-[Viewport] [Pick element] [Take control] [More]
+[Viewport] [Pick element] [More]
 ```
 
 The body renders the newest JPEG frame to a canvas. The viewer preserves the
@@ -183,18 +183,17 @@ remote viewport's aspect ratio and maps pointer coordinates back to CSS-pixel
 coordinates using frame metadata. It must not stretch coordinates when the
 pane is resized.
 
-Required states are `starting`, `connecting`, `ready`, `view only`, `stopped`,
+Required states are `starting`, `connecting`, `ready`, `stopped`,
 `target unavailable`, `browser crashed`, and `reconnecting`. A stream freeze
 must not leave stale pixels looking live; show connection state over the last
 frame.
 
-Only one attached client holds the preview input and viewport lease. Other
-clients are view-only. Focus alone does not steal the lease from another
-client; `Take control` does. This prevents a phone from changing the viewport
-or typing into a preview being used on desktop.
+Every connected client can drive the preview: this is a single-user app, so
+there is no input lease and no view-only mode. Concurrent input from two of
+the user's own clients is last-writer-wins at page state.
 
 On viewports below 640px, preview opens as one full-screen workspace panel. The
-toolbar keeps Back, Reload, address/status, Pick element, and Take control
+toolbar keeps Back, Reload, address/status, and Pick element
 reachable with touch. Pointer input maps to touch where appropriate, and the
 software keyboard must not cover the active page input.
 
@@ -369,7 +368,7 @@ a hand-built browser automation stack.
 ### Phase 1: preview resource and panel
 
 - Add preview metadata, `WebPreviewManager`, typed HTTP routes, layout schema,
-  port candidates, canvas viewer, controls, lease, and runtime states.
+  port candidates, canvas viewer, controls, and runtime states.
 - Amend `docs/DESIGN.md`, `docs/UI.md`, and `docs/WS.md` with the accepted
   runtime and transport rules.
 
@@ -391,7 +390,8 @@ a hand-built browser automation stack.
   preview.
 - A slow or suspended client resumes at the newest frame without replaying a
   stale frame backlog.
-- A second client is view-only until it explicitly takes the input lease.
+- Every connected client can drive a ready preview; there is no view-only
+  mode or input lease.
 - Port suggestions include workspace development servers and exclude unrelated
   Passage services in the test fixtures.
 - Picking an element adds bounded URL, semantic, DOM, bounds, and optional image

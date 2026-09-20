@@ -432,7 +432,7 @@ async function attachPreviewUpstream(socket: Bun.ServerWebSocket<SocketData>, pr
   upstream.addEventListener("error", dropUpstream);
 }
 
-function handlePreviewSocketMessage(socket: Bun.ServerWebSocket<SocketData>, previewId: string, clientId: string, message: string | Uint8Array | ArrayBuffer): void {
+function handlePreviewSocketMessage(socket: Bun.ServerWebSocket<SocketData>, previewId: string, message: string | Uint8Array | ArrayBuffer): void {
   if (typeof message !== "string") {
     sendPreviewError(socket, "Preview messages must be JSON text");
     socket.close(1003, "preview messages must be JSON text");
@@ -453,12 +453,8 @@ function handlePreviewSocketMessage(socket: Bun.ServerWebSocket<SocketData>, pre
   const upstream = previewUpstreams.get(socket);
   if (!upstream || upstream.readyState !== WebSocket.OPEN) return;
   const data = parsed.data;
-  // Frame acks and pacing config always flow (they preserve latest-frame-wins
-  // behavior for every client, including view-only ones). Input needs the lease.
-  if (data.type !== "ack" && data.type !== "config") {
-    const snapshot = previewManager.get(previewId, clientId);
-    if (!snapshot || snapshot.status !== "ready" || snapshot.hasInputLease !== true) return;
-  }
+  // Every connected client may drive the preview (single-user app: no input
+  // lease). Frame acks and pacing config flow like any other message.
   try {
     upstream.send(JSON.stringify(data));
   } catch (error) {
@@ -721,7 +717,7 @@ export const server = Bun.serve<SocketData>({
     },
     async message(socket, message) {
       if (socket.data.kind === "preview") {
-        handlePreviewSocketMessage(socket, socket.data.previewId, socket.data.clientId, message as string | Uint8Array | ArrayBuffer);
+        handlePreviewSocketMessage(socket, socket.data.previewId, message as string | Uint8Array | ArrayBuffer);
         return;
       }
       if (socket.data.kind === "terminal") {
@@ -815,7 +811,6 @@ export const server = Bun.serve<SocketData>({
       } else if (socket.data.kind === "preview") {
         try { previewUpstreams.get(socket)?.close(); } catch {}
         previewUpstreams.delete(socket);
-        previewManager.releaseLease(socket.data.previewId, socket.data.clientId);
       } else {
         for (const unsubscribe of socket.data.subscriptions.values()) unsubscribe();
         socket.data.subscriptions.clear();

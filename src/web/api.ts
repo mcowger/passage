@@ -446,12 +446,6 @@ export function createWorkspaceApi(
         body: JSON.stringify(viewport),
       }));
     },
-    async takePreviewLease(previewId: string, clientId: string): Promise<WebPreview> {
-      return webPreviewSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}/lease`, {
-        method: "POST",
-        body: JSON.stringify({ clientId }),
-      }));
-    },
     async transcriptPreview(): Promise<AgentHistory> {
       const json = (await request("/api/dev/transcript-preview?mode=transcript")) as { history: unknown };
       return agentHistorySchema.parse(json.history);

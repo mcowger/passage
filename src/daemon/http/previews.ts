@@ -151,19 +151,5 @@ export const createPreviewRoutes = (previews: WebPreviewManager, _workspaceEvent
     }
   });
 
-  app.post("/api/previews/:previewId/lease", async (c) => {
-    try {
-      const id = previewId(c.req.param("previewId"));
-      const body = await readJsonBody(c.req.raw).catch(() => ({}));
-      const clientId = z.object({ clientId: z.string().min(1).max(256) }).strict().parse(body).clientId;
-      const taken = previews.takeLease(id, clientId);
-      if (!taken) return error("preview-not-running", 409);
-      const found = previews.get(id, clientId);
-      return ok(found);
-    } catch (e) {
-      return error(e instanceof Error ? e.message : "invalid-request");
-    }
-  });
-
   return app;
 };

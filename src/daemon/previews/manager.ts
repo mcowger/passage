@@ -28,7 +28,6 @@ export type PreviewRuntime = {
   currentUrl: string | null;
   streamPort: number | null;
   lastError: string | null;
-  leaseHolderId: string | null;
 };
 
 export type PortCandidate = {
@@ -144,14 +143,14 @@ export class WebPreviewManager {
       : DEFAULT_VIEWPORT;
     const record: PreviewRecord = {
       meta: { id: row.id, workspaceId: row.workspaceId, label: row.displayLabel, targetUrl: row.targetUrl, viewport, createdAt: row.createdAt, updatedAt: row.updatedAt },
-      runtime: { status: "stopped", currentUrl: null, streamPort: null, lastError: null, leaseHolderId: null },
+      runtime: { status: "stopped", currentUrl: null, streamPort: null, lastError: null },
       queue: Promise.resolve(),
     };
     this.previews.set(id, record);
     return record;
   }
 
-  private snapshot(record: PreviewRecord, leaseRequester?: string): WebPreview {
+  private snapshot(record: PreviewRecord): WebPreview {
     return webPreviewSchema.parse({
       id: record.meta.id,
       workspaceId: record.meta.workspaceId,
@@ -160,7 +159,6 @@ export class WebPreviewManager {
       viewport: record.meta.viewport,
       status: record.runtime.status,
       currentUrl: record.runtime.currentUrl,
-      hasInputLease: leaseRequester ? record.runtime.leaseHolderId === leaseRequester : record.runtime.leaseHolderId !== null,
       createdAt: record.meta.createdAt,
       updatedAt: record.meta.updatedAt,
     });
@@ -184,7 +182,7 @@ export class WebPreviewManager {
     return next;
   }
 
-  list(workspaceId: string, leaseRequester?: string): WebPreview[] {
+  list(workspaceId: string): WebPreview[] {
     const rows = this.repositories.webPreviews.listForWorkspace(workspaceId, 100);
     return rows.map((row) => {
       const record = this.recordFor(row.id);
@@ -193,16 +191,16 @@ export class WebPreviewManager {
           id: row.id, workspaceId: row.workspaceId, label: row.displayLabel,
           targetUrl: row.targetUrl, viewport: previewViewportSchema.parse(row.viewport),
           status: "stopped" as const, currentUrl: null,
-          hasInputLease: false, createdAt: row.createdAt, updatedAt: row.updatedAt,
+          createdAt: row.createdAt, updatedAt: row.updatedAt,
         });
       }
-      return this.snapshot(record, leaseRequester);
+      return this.snapshot(record);
     });
   }
 
-  get(previewId: string, leaseRequester?: string): WebPreview | null {
+  get(previewId: string): WebPreview | null {
     const record = this.recordFor(previewId);
-    return record ? this.snapshot(record, leaseRequester) : null;
+    return record ? this.snapshot(record) : null;
   }
 
   async create(workspaceId: string, input: CreatePreviewInput): Promise<WebPreview> {
@@ -222,7 +220,7 @@ export class WebPreviewManager {
         createdAt: timestamp,
         updatedAt: timestamp,
       },
-      runtime: { status: "stopped", currentUrl: null, streamPort: null, lastError: null, leaseHolderId: null },
+      runtime: { status: "stopped", currentUrl: null, streamPort: null, lastError: null },
       queue: Promise.resolve(),
     };
     this.persist(record);
@@ -284,7 +282,6 @@ export class WebPreviewManager {
       record.runtime.status = "stopped";
       record.runtime.streamPort = null;
       record.runtime.currentUrl = null;
-      record.runtime.leaseHolderId = null;
       logger("preview").info("Preview stopped", { event: "preview.stopped", previewId: record.meta.id });
       return this.snapshot(record);
     });
@@ -428,18 +425,6 @@ export class WebPreviewManager {
 
   previewStatus(id: string): PreviewStatus | null {
     return this.recordFor(id)?.runtime.status ?? null;
-  }
-
-  takeLease(id: string, clientId: string): boolean {
-    const record = this.recordFor(id);
-    if (!record || record.runtime.status !== "ready") return false;
-    record.runtime.leaseHolderId = clientId;
-    return true;
-  }
-
-  releaseLease(id: string, clientId: string): void {
-    const record = this.recordFor(id);
-    if (record?.runtime.leaseHolderId === clientId) record.runtime.leaseHolderId = null;
   }
 
   markDisconnected(id: string): void {

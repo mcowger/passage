@@ -188,7 +188,7 @@ Definitions:
   It is not persisted as a resumable shell across daemon restart.
 - **Preview** — a workspace-bound agent-browser session (`stopped →
   starting → ready ⇄ disconnected`, plus `stopping → stopped` and `error`),
-  with `targetUrl`, viewport, `currentUrl`, lease state, and timestamps.
+  with `targetUrl`, viewport, `currentUrl`, and timestamps.
 - **Panel** — a view of a workspace resource: `overview`, `agent`,
   `terminal`, `editor`, `diff`, `explorer`, `changes`, or `preview`
   (`PaneTabKind`; no generic `files` kind).
@@ -240,7 +240,7 @@ desktop Enter-to-send becomes newline-insert on mobile.
 | --- | --- | --- |
 | Agent messages, content blocks, session tree, compaction, Pi usage | Pi JSONL session | Read through a bounded, version-pinned Pi JSONL reader + transcript projection; do not mirror messages to SQLite. Multi-stage history load with scroll backfill. |
 | Checked-out files and Git state | Filesystem and Git | Git CLI calculates status, worktree state, and diffs. |
-| Live Pi RPC and PTY processes, preview sessions, action runs | Daemon memory | Process lifetime is independent of a browser connection and ends on daemon restart. Action runs and preview runtime (ports, PIDs, frames, leases) are never in SQLite. |
+| Live Pi RPC and PTY processes, preview sessions, action runs | Daemon memory | Process lifetime is independent of a browser connection and ends on daemon restart. Action runs and Preview runtime (ports, PIDs, frames) are never in SQLite. |
 | Passage object identity, workspace policy, layout, labels, settings, preview metadata | Local SQLite | Small, migration-versioned registry (schema version 2); no transcript duplication. |
 | Browser drafts and ephemeral view state | Browser local storage / memory | Per-agent drafts and timeline expansion overrides. Disposable. |
 
@@ -452,7 +452,7 @@ explicitly deferred.
   /ws` (JSON text for `pi` + `workspace` + `daemon/ping`); `GET
   /api/terminals/:id/ws` (binary PTY frames + JSON control); `GET
   /api/previews/:previewId/ws` (bounded agent-browser frame/input relay with
-  `?pacing=ack&maxFps=15`, latest-frame-wins, view-only until Take control).
+  `?pacing=ack&maxFps=15` and latest-frame-wins).
   Preview frames never enter `WorkspaceEventHub`, replay buffers, SQLite, or
   Pi history.
 - **Binary WebSocket frames** carry high-volume terminal bytes. Semantic agent
@@ -840,7 +840,7 @@ network or behind the operator's own authenticated reverse proxy/VPN.
 This is not a reason to omit baseline browser protections:
 
 - preview sockets validate `Host`/`Origin` (same-host or loopback) and verify
-  preview ownership, enforce a single input/viewport lease, cap frames/inputs,
+  preview ownership, cap frames/inputs,
   and close slow/malformed clients; agent-browser stream ports and CDP stay
   on loopback and are never exposed to the browser;
 - serve the SPA and API from the same origin;
@@ -866,7 +866,7 @@ proxy/operator.
 | Pi RPC | Fixture JSONL sessions plus live Bun integration tests (`test:pi-rpc`, `test:pi-live`) for start/resume/crash, LF framing, correlation, prompt/steer/follow-up/compact/model/thinking/ui_response, and restart reconciliation. |
 | Git/worktrees | Temporary Git repositories covering main checkout, linked worktree, directory workspace, dirty removal, rename, binary, submodule, path-with-spaces, failed registration → repair. |
 | PTY | Platform integration tests (`test:pty-websocket`, `test:pty-live`) for spawn/input/resize/lease/replay/exit and binary WebSocket ordering. |
-| Browser | `agent-browser` verification for browser-facing changes (separate session from any preview under test), desktop plus `<640px` where responsive code is touched; preview changes verify ack pacing, latest-frame-wins resume, view-only-until-take-control, and HTTP reconcile on reconnect. |
+| Browser | `agent-browser` verification for browser-facing changes (separate session from any preview under test), desktop plus `<640px` where responsive code is touched; preview changes verify ack pacing, latest-frame-wins resume, concurrent input from every connected client, and HTTP reconcile on reconnect. |
 | Mobile/PWA | Responsive tests plus manual install, keyboard, terminal, suspend/resume, safe-area, and viewport validation; shell-only service worker with offline screen. |
 | Security | Tests for traversal, symlink escape, malformed protocol input, oversized output, unknown preview IDs/origins, destructive worktree-operation confirmation. |
 | Gates | `bun install --frozen-lockfile`, `bun run typecheck`, `bun test`, `bun run test:gate`. |
@@ -881,9 +881,9 @@ user telemetry.
 | Risk | Mitigation |
 | --- | --- |
 | Pi RPC CLI or Bun native terminal API fails | The compatibility requirements above are a hard gate; defer the affected feature rather than adding a separate Node implementation layer. |
-| LAN daemon is exposed to an untrusted device | Document prominently, retain path/process/ownership safeguards and preview origin + lease checks, and recommend upstream TLS/auth/VPN. This is an accepted deployment risk. |
+| LAN daemon is exposed to an untrusted device | Document prominently, retain path/process/ownership safeguards and preview origin checks, and recommend upstream TLS/auth/VPN. This is an accepted deployment risk. |
 | Mobile browser suspends a live connection | Sequence/replay + `snapshot-required`, authoritative snapshots, visibility reconciliation, post-run history reload, preview newest-frame resume. |
-| One browser resizes another terminal/preview | Single active size/input lease with explicit takeover (`takeLease`/`Take control`); focus never steals. |
+| One browser resizes another terminal | Single active terminal size lease with explicit takeover (`takeLease`); focus never steals. |
 | Worktree cleanup deletes user work | Explicit ownership persisted, required for deletion, dirty removal force-gated, branches preserved, failures become `repair` records. |
 | Pi upgrades break rendering | Isolated RPC framing/normalization + JSONL parsing, pinned CLI, compatibility fixtures, `SLASH_COMMANDS_VERSION = pi-rpc-1`. |
 | Rich custom tools become a plugin-security problem | Safe read-only builtin renderer pack + generic fallback; no executable plugin API. |
@@ -904,8 +904,7 @@ When changing Passage, keep these invariants intact:
    raw Pi shapes never cross the browser boundary.
 4. Closing an `agent`/`terminal`/`preview` tab ends that resource; all other
    pane kinds only remove the view.
-5. Single lease holder for terminal size and preview input/viewport; explicit
-   takeover only, never focus-steal.
+5. Single size-lease holder for terminals; explicit takeover only, never focus-steal.
 6. Fixed Git argument arrays, `paseo.json` action IDs only, loopback-only
    preview URLs, bounded outputs everywhere.
 7. Per-workspace layout + global settings; per-session expansion;

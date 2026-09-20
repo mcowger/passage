@@ -32,7 +32,6 @@ export const webPreviewSchema = z.object({
   viewport: previewViewportSchema,
   status: previewStatusSchema,
   currentUrl: z.string().max(MAX_PREVIEW_URL_LENGTH).nullable(),
-  hasInputLease: z.boolean().optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 }).strict();

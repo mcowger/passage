@@ -23,7 +23,7 @@ Work in real Git worktrees. Type a goal and label, branch, and folder prefill li
 
 Terminals are real PTYs backed by persistent tmux sessions, so shells survive daemon restarts and reattach with live state. Sharing stays sane: one client holds the size lease, everyone else watches. No accidental phone resizes. On mobile a sticky key bar supplies Esc, Tab, arrows, Ctrl combos, and touch-hold repeat.
 
-Previews run your dev server in server-side Chromium and stream it to the browser, so `localhost` on the host works from any device. Navigate, reload, change viewport, take control. Second clients stay view-only until they ask.
+Previews run your dev server in server-side Chromium and stream it to the browser, so `localhost` on the host works from any device. Navigate, reload, and change viewport from any connected client.
 
 Take it anywhere. Installable PWA, offline shell with honest retry, drawer navigation and full-screen tools on small screens, browser notifications plus Web Push (with deep links back to the agent) when work finishes or needs input.
 

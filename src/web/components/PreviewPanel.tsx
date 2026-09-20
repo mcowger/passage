@@ -16,7 +16,6 @@ type StreamState =
   | "starting"
   | "connecting"
   | "ready"
-  | "view-only"
   | "stopped"
   | "target-unavailable"
   | "browser-crashed"
@@ -35,7 +34,6 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
   const [streamState, setStreamState] = useState<StreamState>(
     preview.status === "ready" ? "connecting" : preview.status === "error" ? "browser-crashed" : "stopped",
   );
-  const [hasLease, setHasLease] = useState(preview.hasInputLease ?? false);
   const [address, setAddress] = useState(preview.currentUrl ?? preview.targetUrl);
   const [notice, setNotice] = useState<string | null>(null);
   const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null);
@@ -74,7 +72,7 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
       onPreviewChanged(snapshot);
       setAddress(snapshot.currentUrl ?? snapshot.targetUrl);
       if (snapshot.status === "ready") {
-        setStreamState((current) => (current === "ready" || current === "view-only" ? current : "connecting"));
+        setStreamState((current) => (current === "ready" ? current : "connecting"));
       } else if (snapshot.status === "error") {
         setStreamState("browser-crashed");
       } else if (snapshot.status === "stopped") {
@@ -101,7 +99,7 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
           }
           frameRef.current = message;
           drawFrame(message);
-          setStreamState((current) => (current === "view-only" ? "view-only" : "ready"));
+          setStreamState("ready");
         } else if (message.type === "url") {
           void reconcile();
         }
@@ -189,7 +187,6 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
     frameRef.current = null;
     await mutate(() => api.stopPreview(preview.id), "Failed to stop preview");
     setStreamState("stopped");
-    setHasLease(false);
   }, [api, preview.id, mutate]);
 
   const handleNavigate = useCallback(async () => {
@@ -199,19 +196,6 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
     // surface as a notice and leave the previous page streaming.
     if (updated?.status === "ready" && !socketRef.current) connect();
   }, [api, preview.id, address, mutate, connect]);
-
-  const handleTakeControl = useCallback(async () => {
-    const socket = socketRef.current;
-    if (!socket) return;
-    try {
-      const updated = await api.takePreviewLease(preview.id, socket.clientId);
-      onPreviewChanged(updated);
-      setHasLease(updated.hasInputLease ?? true);
-      setStreamState("ready");
-    } catch (cause) {
-      setNotice(friendlyApiError(cause, "Could not take control"));
-    }
-  }, [api, preview.id, onPreviewChanged]);
 
   const toPageCoordinates = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -225,7 +209,7 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
     return { x: Math.round(x), y: Math.round(y) };
   }, []);
 
-  const canInteract = streamState === "ready" && hasLease;
+  const canInteract = streamState === "ready";
 
   const sendMouse = (eventType: string, event: React.PointerEvent<HTMLCanvasElement>, extra?: { button?: string; clickCount?: number }) => {
     if (!canInteract) return;
@@ -234,7 +218,7 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
     socketRef.current?.send({ type: "input_mouse", eventType, x: point.x, y: point.y, ...extra });
   };
 
-  const overlay = streamState !== "ready" && streamState !== "view-only";
+  const overlay = streamState !== "ready";
 
   return (
     <div className="flex h-full flex-col" data-testid="preview-panel">
@@ -274,11 +258,6 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
             <option value={`${preview.viewport.width}x${preview.viewport.height}`}>{`${preview.viewport.width}x${preview.viewport.height}`}</option>
           )}
         </select>
-        {hasLease ? (
-          <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700" title="This client holds the input lease">In control</span>
-        ) : (
-          <Button size="xs" variant="secondary" onClick={() => void handleTakeControl()} disabled={preview.status !== "ready"} title="Take the input and viewport lease">Take control</Button>
-        )}
         {preview.status === "ready" ? (
           <Button size="xs" variant="ghost" onClick={() => void handleStop()} title="Stop this preview">Stop</Button>
         ) : (
@@ -338,11 +317,6 @@ export function PreviewPanel({ preview, api, onPreviewChanged, onClose }: Previe
             {(streamState === "stopped" || streamState === "target-unavailable" || streamState === "browser-crashed") && (
               <Button size="xs" onClick={() => void handleOpen()}>Start preview</Button>
             )}
-          </div>
-        )}
-        {!overlay && !hasLease && (
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded bg-black/70 px-3 py-1 text-xs text-white" role="status">
-            View only — Take control to interact
           </div>
         )}
       </div>

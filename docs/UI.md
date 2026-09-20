@@ -312,11 +312,11 @@ is contextual, and the canvas remains generous when the user is reading or
 steering an agent.
 
 A web preview panel shows one workspace-bound live browser session: a compact
-toolbar (Back, Forward, Reload, address, viewport, Take control, Stop, close),
+toolbar (Back, Forward, Reload, address, viewport, Stop, close),
 a canvas rendering the newest JPEG frame at the remote viewport's aspect ratio,
 and explicit connection states over the last frame when the stream freezes.
-Only one attached client holds the input/viewport lease; other clients are
-view-only until they explicitly take control. Closing the pane stops and removes
+Every connected client can drive the preview; there is no input lease or
+view-only mode. Closing the pane stops and removes
 the preview, so no preview is left running without a tab. On viewports below
 640px the preview is a full-screen destination with touch-mapped pointer input.
 

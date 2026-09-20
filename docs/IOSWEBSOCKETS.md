@@ -346,8 +346,7 @@ agent view recovers.
   the existing ack pacing. Reset connection-scoped frame/ack state and ignore
   late image decodes from old connections. An old high frame sequence must
   not suppress all frames from a restarted stream.
-- Refresh preview ownership and remain view-only until the server grants
-  control. Do not replay clicks, keys, or navigation mutations. Use the same
+- Refresh preview ownership and resume at the newest frame. Do not replay clicks, keys, or navigation mutations. Use the same
   reconnect path on visibility return, not only a metadata refresh.
 - Neither view's unmount/suspension performs a resource-delete request.
 

@@ -28,8 +28,7 @@ The event catalog lives in code (`src/shared/protocol/`, emitters in
    The preview socket is a narrow exception: high-volume disposable frames
    and input only, never `/ws` invalidation envelopes, replay buffers,
    SQLite rows, or Pi history. It MUST validate `Host`/`Origin`, verify
-   preview ownership, cap frame/input sizes, enforce a single input/viewport
-   lease, and close slow or malformed clients. Upstream it connects only to
+   preview ownership, cap frame/input sizes, and close slow or malformed clients. Upstream it connects only to
    the loopback agent-browser stream port discovered by
    `WebPreviewManager`; CDP, daemon sockets, and stream ports MUST NOT be
 exposed beyond loopback.
@@ -171,5 +170,5 @@ Live-model tests require explicit per-turn permission (NullModel
 otherwise). `agent-browser` is required for browser-facing changes
 (AGENTS.md), desktop plus `<640px` where responsive code is touched.
 Preview-stream changes MUST verify ack pacing (`?pacing=ack&maxFps=15`),
-latest-frame-wins resume without backlog replay, view-only until
-`Take control`, and HTTP snapshot reconcile on reconnect.
+latest-frame-wins resume without backlog replay, input from every connected
+client, and HTTP snapshot reconcile on reconnect.
