@@ -16,7 +16,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "passage-layout-http-"));
   roots.push(root);
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(":memory:");
   const workspaceService = new WorkspaceService(new MetadataRepositories(store.db));
   const app = createWorkspaceRoutes(workspaceService);
   return { root, store, workspaceService, app };

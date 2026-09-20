@@ -33,7 +33,7 @@ const fixtures: Array<{ root: string; store: MetadataStore; service: AgentServic
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "passage-agent-http-"));
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(":memory:");
   const repositories = new MetadataRepositories(store.db);
   repositories.projects.save({ id: "project-1", configuredRootPath: root, canonicalRootPath: root, displayLabel: "Project", archivedAt: null });
   repositories.workspaces.save({

@@ -41,7 +41,7 @@ function fakeRunner(handlers?: Partial<AgentBrowserRunner>): AgentBrowserRunner 
 async function fixture(runner?: AgentBrowserRunner) {
   const root = await mkdtemp(join(tmpdir(), "passage-preview-"));
   roots.push(root);
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(":memory:");
   const repos = new MetadataRepositories(store.db);
   const workspaces = new WorkspaceService(repos);
   const project = await workspaces.registerProject(root, "Test Repo");
@@ -255,7 +255,7 @@ describe("preview candidates from workspace scripts", () => {
   async function scriptFixture(paseoJson: unknown) {
     const root = await mkdtemp(join(tmpdir(), "passage-preview-scripts-"));
     roots.push(root);
-    const store = new MetadataStore(join(root, "metadata.sqlite"));
+    const store = new MetadataStore(":memory:");
     const repos = new MetadataRepositories(store.db);
     const workspaces = new WorkspaceService(repos);
     const project = await workspaces.registerProject(root, "Test Repo");

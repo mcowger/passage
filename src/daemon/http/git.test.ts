@@ -32,7 +32,7 @@ async function fixture() {
   await runGit(root, ["add", "README.md"]);
   await runGit(root, ["commit", "-m", "Initial commit"]);
 
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(":memory:");
   const repos = new MetadataRepositories(store.db);
   const workspaces = new WorkspaceService(repos);
   const git = new GitService();
@@ -227,7 +227,7 @@ describe("git HTTP API", () => {
     await runGit(root, ["add", "README.md"]);
     await runGit(root, ["commit", "-m", "Initial commit"]);
 
-    const store = new MetadataStore(join(root, "metadata.sqlite"));
+    const store = new MetadataStore(":memory:");
     const repos = new MetadataRepositories(store.db);
     const workspaces = new WorkspaceService(repos);
     const git = new GitService();
@@ -295,7 +295,7 @@ describe("git HTTP API", () => {
     await runGit(root, ["add", "README.md"]);
     await runGit(root, ["commit", "-m", "Initial commit"]);
 
-    const store = new MetadataStore(join(root, "metadata.sqlite"));
+    const store = new MetadataStore(":memory:");
     const repos = new MetadataRepositories(store.db);
     const workspaces = new WorkspaceService(repos);
     const git = new GitService();
@@ -355,7 +355,7 @@ describe("git HTTP API", () => {
     await runGit(root, ["add", "README.md"]);
     await runGit(root, ["commit", "-m", "Initial commit"]);
 
-    const store = new MetadataStore(join(root, "metadata.sqlite"));
+    const store = new MetadataStore(":memory:");
     const repos = new MetadataRepositories(store.db);
     const workspaces = new WorkspaceService(repos);
     const git = new GitService();
@@ -481,7 +481,7 @@ describe("git GitHub HTTP API", () => {
     await writeFile(join(root, "README.md"), "# Init");
     await runGit(root, ["add", ".gitignore", "README.md"]);
     await runGit(root, ["commit", "-m", "Initial commit"]);
-    const store = new MetadataStore(join(root, "metadata.sqlite"));
+    const store = new MetadataStore(":memory:");
     const repos = new MetadataRepositories(store.db);
     const workspaces = new WorkspaceService(repos);
     const git = new GitService();

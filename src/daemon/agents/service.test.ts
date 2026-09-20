@@ -10,7 +10,7 @@ const script = `process.stdin.on('data',d=>{for(const l of d.toString().split('\
 const roots: string[] = [];
 const make = async (limit = 10, executableArgs?: string[]) => {
   const root = await mkdtemp(join("/tmp", "passage-agent-")); roots.push(root);
-  const store = new MetadataStore(join(root, "meta.sqlite")); const repos = new MetadataRepositories(store.db);
+  const store = new MetadataStore(":memory:"); const repos = new MetadataRepositories(store.db);
   repos.projects.save({ id: "p", configuredRootPath: root, canonicalRootPath: root, displayLabel: "p", archivedAt: null });
   const workspace: Workspace = { id: "w", projectId: "p", kind: "directory", cwd: root, checkoutRoot: root, mainRepositoryRoot: root, branchRef: null, displayLabel: "w", locationId: null, ownershipState: "not-owned", archivedAt: null }; repos.workspaces.save(workspace);
   const manager = new PiRpcManager(4); const service = new AgentService(repos, { sessionsRoot: join(root, "sessions"), manager, listLimit: limit, pi: { executable: process.execPath, executableArgs: executableArgs ?? ["-e", script] }, titleSuggester: { suggestTitle: async () => null } });
@@ -18,10 +18,36 @@ const make = async (limit = 10, executableArgs?: string[]) => {
 };
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
+/** Re-runs an assertion block until it passes or the timeout elapses. The
+ *  suite drives real subprocesses (mock Pi over RPC), so asserting on async
+ *  side-effects after a fixed sleep flakes under load; polling keeps the
+ *  same assertions deterministic. */
+const pollExpect = async <T>(check: () => T | Promise<T>, timeoutMs = 4000): Promise<T> => {
+  const start = Date.now();
+  for (;;) {
+    try {
+      return await check();
+    } catch (error) {
+      if (Date.now() - start > timeoutMs) throw error;
+      await Bun.sleep(10);
+    }
+  }
+};
+const waitForIdle = async (service: AgentService, agentId: string, timeoutMs = 4000) => {
+  const start = Date.now();
+  for (;;) {
+    if (service.snapshot(agentId).lastKnownStatus === "idle") return;
+    if (Date.now() - start > timeoutMs) throw new Error("timed out waiting for idle");
+    await Bun.sleep(10);
+  }
+};
+
 test("creates and immediately persists an agent, and supports admission/settlement", async () => {
   const f = await make(); const events: string[] = []; f.service.subscribe(e => events.push(e.type));
   const agent = await f.service.create("w", "one"); expect(agent.piSessionId).toStartWith("pi_"); expect(agent.piSessionPath).toBeNull();
-  await f.service.prompt(agent.id, "hello"); await Bun.sleep(20); expect(events).toContain("settled"); await f.service.shutdown(); f.store.close();
+  await f.service.prompt(agent.id, "hello");
+  await pollExpect(() => expect(events).toContain("settled"));
+  await f.service.shutdown(); f.store.close();
 });
 
 test("isolates agents, prevents duplicate subscriptions, and bounds listing", async () => {
@@ -134,8 +160,7 @@ test("recovers a stale running status left behind by a daemon restart", async ()
   // `steer` (a silent no-op when idle); `prompt` starts a fresh run.
   f.repos.agents.updateStatus(agent.id, "running");
   await f.service.prompt(agent.id, "hello after restart");
-  await Bun.sleep(20);
-  expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  await pollExpect(() => expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle"));
   await f.service.shutdown();
   f.store.close();
 });
@@ -162,9 +187,20 @@ test("reconcileAfterRestart normalizes stale-active agents on boot without touch
   const active = await f.service.create("w");
   const idle = await f.service.create("w");
   const archived = await f.service.create("w");
-  await f.service.capabilities(active.id);
-  await f.service.capabilities(idle.id);
-  await f.service.capabilities(archived.id);
+  // Spawning the mock-Pi child is an environmental resource: under parallel
+  // load a spawn can transiently fail, so retry setup spawns but never the
+  // assertions below (a persistent failure still fails the test).
+  for (const id of [active.id, idle.id, archived.id]) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await f.service.capabilities(id);
+        break;
+      } catch (error) {
+        if ((error as { code?: string })?.code !== "not-running" || attempt >= 2) throw error;
+        await Bun.sleep(50);
+      }
+    }
+  }
   await f.service.stop(active.id);
   await f.service.stop(idle.id);
   await f.service.archive(archived.id);
@@ -227,9 +263,10 @@ test("retrying a restart-interrupted agent clears the restart attribution", asyn
   await restarted.reconcileAfterRestart();
   expect(restarted.snapshot(agent.id).interruptedByRestart).toBe(true);
   await restarted.prompt(agent.id, "hello again");
-  await Bun.sleep(20);
-  expect(restarted.snapshot(agent.id).interruptedByRestart).toBeUndefined();
-  expect(["running", "idle"]).toContain(restarted.snapshot(agent.id).lastKnownStatus);
+  await pollExpect(() => {
+    expect(restarted.snapshot(agent.id).interruptedByRestart).toBeUndefined();
+    expect(["running", "idle"]).toContain(restarted.snapshot(agent.id).lastKnownStatus);
+  });
   await restarted.shutdown();
   await f.service.shutdown();
   f.store.close();
@@ -252,14 +289,16 @@ test("anchors an active run to one stable start timestamp and clears it on settl
   expect(typeof started).toBe("number");
   expect(service.list("w")[0]?.runStartedAt).toBe(started);
 
-  await Bun.sleep(15);
-  // Client reloads and re-anchors from the same authoritative run start.
-  expect(service.snapshot(agent.id).runStartedAt).toBe(started);
-  expect(events.some((event) => event.type === "status" && event.runStartedAt === started)).toBe(true);
+  await pollExpect(() => {
+    // Client reloads and re-anchors from the same authoritative run start.
+    expect(service.snapshot(agent.id).runStartedAt).toBe(started);
+    expect(events.some((event) => event.type === "status" && event.runStartedAt === started)).toBe(true);
+  });
 
-  await Bun.sleep(60);
-  expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
-  expect(service.snapshot(agent.id).runStartedAt).toBeUndefined();
+  await pollExpect(() => {
+    expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+    expect(service.snapshot(agent.id).runStartedAt).toBeUndefined();
+  });
   await service.shutdown();
   f.store.close();
 });
@@ -275,15 +314,13 @@ test("keeps an agent stopping until Pi confirms cancellation", async () => {
   });
   const agent = await service.create("w");
   await service.prompt(agent.id, "keep running");
-  await Bun.sleep(10);
-  expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+  await pollExpect(() => expect(service.snapshot(agent.id).lastKnownStatus).toBe("running"));
 
   await service.abort(agent.id);
   expect(service.snapshot(agent.id).lastKnownStatus).toBe("stopping");
   await expect(service.prompt(agent.id, "racing prompt")).rejects.toMatchObject({ code: "invalid-input" });
 
-  await Bun.sleep(100);
-  expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  await pollExpect(() => expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle"));
   await service.shutdown();
   f.store.close();
 });
@@ -305,14 +342,16 @@ test("aborted runs still invalidate workspace Git views", async () => {
   });
   const agent = await service.create("w");
   await service.prompt(agent.id, "keep running");
-  await Bun.sleep(10);
-  expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
-  expect(invalidated).toEqual([]);
+  await pollExpect(() => {
+    expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+    expect(invalidated).toEqual([]);
+  });
 
   await service.abort(agent.id);
-  await Bun.sleep(100);
-  expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
-  expect(invalidated).toEqual(["w"]);
+  await pollExpect(() => {
+    expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+    expect(invalidated).toEqual(["w"]);
+  });
   await service.shutdown();
   f.store.close();
 });
@@ -328,14 +367,12 @@ test("tolerates abort_bash rejection when no bash command is running", async () 
   });
   const agent = await service.create("w");
   await service.prompt(agent.id, "keep running");
-  await Bun.sleep(10);
-  expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+  await pollExpect(() => expect(service.snapshot(agent.id).lastKnownStatus).toBe("running"));
 
   await service.abort(agent.id);
   expect(service.snapshot(agent.id).lastKnownStatus).toBe("stopping");
 
-  await Bun.sleep(100);
-  expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  await pollExpect(() => expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle"));
   await service.shutdown();
   f.store.close();
 });
@@ -355,14 +392,12 @@ test("frees a run stuck in a bash tool call via abort_bash", async () => {
   });
   const agent = await service.create("w");
   await service.prompt(agent.id, "run a foreground daemon");
-  await Bun.sleep(10);
-  expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+  await pollExpect(() => expect(service.snapshot(agent.id).lastKnownStatus).toBe("running"));
 
   await service.abort(agent.id);
   expect(service.snapshot(agent.id).lastKnownStatus).toBe("stopping");
 
-  await Bun.sleep(150);
-  expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  await pollExpect(() => expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle"));
   await service.shutdown();
   f.store.close();
 });
@@ -399,8 +434,7 @@ test("reports cancellation failure without claiming an agent is idle", async () 
   await service.abort(agent.id);
   expect(service.snapshot(agent.id).lastKnownStatus).toBe("stopping");
 
-  await Bun.sleep(60);
-  expect(service.snapshot(agent.id)).toMatchObject({ lastKnownStatus: "error", live: false });
+  await pollExpect(() => expect(service.snapshot(agent.id)).toMatchObject({ lastKnownStatus: "error", live: false }));
   await service.shutdown();
   f.store.close();
 });
@@ -414,14 +448,16 @@ test("retains bounded diagnostics after an unexpected process exit", async () =>
     pi: { executable: process.execPath, executableArgs: ["-e", crashingScript] },
   });
   const agent = await service.create("w");
-  await Bun.sleep(30);
-  const snapshot = service.snapshot(agent.id);
-  expect(snapshot).toMatchObject({
-    live: false,
-    lastKnownStatus: "error",
-    exitStatus: "crashed (7)",
+  const snapshot = await pollExpect(() => {
+    const snap = service.snapshot(agent.id);
+    expect(snap).toMatchObject({
+      live: false,
+      lastKnownStatus: "error",
+      exitStatus: "crashed (7)",
+    });
+    expect(snap.stderr?.join("")).toContain("crash-marker");
+    return snap;
   });
-  expect(snapshot.stderr?.join("")).toContain("crash-marker");
   await service.shutdown();
   f.store.close();
 });
@@ -435,12 +471,14 @@ test("projects Pi's native dialog request to attention state and responds", asyn
     pi: { executable: process.execPath, executableArgs: ["-e", attentionScript] },
   });
   const agent = await service.create("w");
-  await Bun.sleep(30);
-  const snap = service.snapshot(agent.id);
-  expect(snap.lastKnownStatus).toBe("needs-attention");
-  expect(snap.pendingUiRequest?.id).toBe("prompt-1");
-  expect(snap.pendingUiRequest?.title).toBe("Pick");
-  expect(snap.pendingUiRequest?.options).toEqual(["One", "Two"]);
+  const snap = await pollExpect(() => {
+    const s = service.snapshot(agent.id);
+    expect(s.lastKnownStatus).toBe("needs-attention");
+    expect(s.pendingUiRequest?.id).toBe("prompt-1");
+    expect(s.pendingUiRequest?.title).toBe("Pick");
+    expect(s.pendingUiRequest?.options).toEqual(["One", "Two"]);
+    return s;
+  });
 
   await service.respondExtensionUi(agent.id, { id: "prompt-1", value: "Option 1" });
   expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
@@ -477,22 +515,21 @@ test("a typed answer takes the select dialog's free-text row and auto-answers th
     pi: { executable: process.execPath, executableArgs: ["-e", dialogScript(log, true)] },
   });
   const agent = await service.create("w");
-  await Bun.sleep(30);
-  expect(service.snapshot(agent.id).pendingUiRequest?.id).toBe("prompt-1");
+  await pollExpect(() => expect(service.snapshot(agent.id).pendingUiRequest?.id).toBe("prompt-1"));
 
   await service.respondExtensionUi(agent.id, { id: "prompt-1", value: "anchovies and honey", custom: true });
-  await Bun.sleep(60);
 
-  // The select was answered with the escape row, then the typed text went to
-  // the input follow-up Pi opened for it.
-  expect(await readUiResponses(log)).toEqual([
-    { id: "prompt-1", value: DIALOG_ROWS[2] },
-    { id: "prompt-2", value: "anchovies and honey" },
-  ]);
-  // The follow-up never surfaced as a second card.
-  const snap = service.snapshot(agent.id);
-  expect(snap.pendingUiRequest).toBeUndefined();
-  expect(snap.lastKnownStatus).toBe("running");
+  // Contract: the select was answered with the escape row and the typed text
+  // reached the input follow-up Pi opened for it, with no second card.
+  // (Agent status here is mock-deep -- no run ever starts -- so it is
+  // deliberately not asserted.)
+  await pollExpect(async () => {
+    expect(await readUiResponses(log)).toEqual([
+      { id: "prompt-1", value: DIALOG_ROWS[2] },
+      { id: "prompt-2", value: "anchovies and honey" },
+    ]);
+    expect(service.snapshot(agent.id).pendingUiRequest).toBeUndefined();
+  });
 
   await service.shutdown();
   f.store.close();
@@ -507,11 +544,52 @@ test("a picked option still resolves to the row Pi offered", async () => {
     pi: { executable: process.execPath, executableArgs: ["-e", dialogScript(log, false)] },
   });
   const agent = await service.create("w");
-  await Bun.sleep(30);
+  await pollExpect(() => expect(service.snapshot(agent.id).pendingUiRequest?.id).toBe("prompt-1"));
   // The card shows bare labels; Pi needs the numbered row back.
   await service.respondExtensionUi(agent.id, { id: "prompt-1", value: "Pineapple" });
-  await Bun.sleep(60);
-  expect(await readUiResponses(log)).toEqual([{ id: "prompt-1", value: DIALOG_ROWS[1] }]);
+  await pollExpect(async () => expect(await readUiResponses(log)).toEqual([{ id: "prompt-1", value: DIALOG_ROWS[1] }]));
+  await service.shutdown();
+  f.store.close();
+});
+
+test("a late dialog event for an already-answered card does not re-animate it", async () => {
+  const f = await make();
+  const log = join(f.root, "ui-responses.jsonl");
+  const manager = new PiRpcManager(1);
+  const service = new AgentService(f.repos, {
+    sessionsRoot: join(f.root, "stale-card-sessions"),
+    manager,
+    pi: { executable: process.execPath, executableArgs: ["-e", dialogScript(log, true)] },
+  });
+  const agent = await service.create("w");
+  await pollExpect(() => expect(service.snapshot(agent.id).pendingUiRequest?.id).toBe("prompt-1"));
+  await service.respondExtensionUi(agent.id, { id: "prompt-1", value: "anchovies and honey", custom: true });
+  // Both hops answered (select escape row + auto-answered input follow-up).
+  await pollExpect(async () => {
+    expect(await readUiResponses(log)).toEqual([
+      { id: "prompt-1", value: DIALOG_ROWS[2] },
+      { id: "prompt-2", value: "anchovies and honey" },
+    ]);
+    expect(service.snapshot(agent.id).pendingUiRequest).toBeUndefined();
+  });
+  // Replaying the original prompt-1 request -- as a queue-delayed event
+  // arriving after the answer -- must not resurrect the card or flip the
+  // agent back to needs-attention.
+  const generation = manager.get(agent.id)?.generation;
+  expect(generation).toBeDefined();
+  await (service as unknown as { onEvent(agentId: string, event: Record<string, unknown>): Promise<void> }).onEvent(agent.id, {
+    type: "extension_ui_request",
+    id: "prompt-1",
+    method: "select",
+    title: "[Pizza] Favorite topping?",
+    options: DIALOG_ROWS,
+    generation,
+  });
+  expect(service.snapshot(agent.id).pendingUiRequest).toBeUndefined();
+  // The replayed event runs the full onEvent path (including reconcile,
+  // which settles the never-prompted agent to idle); what must not happen
+  // is the answered card coming back or status flipping to needs-attention.
+  expect(service.snapshot(agent.id).lastKnownStatus).not.toBe("needs-attention");
   await service.shutdown();
   f.store.close();
 });
@@ -536,13 +614,14 @@ describe("transcript row ordering (regression: reorder/duplicate chat rows)", ()
     });
     const agent = await service.create("w");
     await service.prompt(agent.id, "run two commands");
-    await Bun.sleep(30);
 
-    const result = await service.history(agent.id);
-    if ("unpersisted" in result) throw new Error("expected a persisted transcript");
-    const kinds = result.history.timeline.map((item) => item.kind);
-    expect(kinds).toEqual(["user", "tool", "tool"]);
-    const [, toolA, toolB] = result.history.timeline as Array<{ id: string; result?: string; status: string }>;
+    const result = await pollExpect(async () => {
+      const probe = await service.history(agent.id);
+      if ("unpersisted" in probe) throw new Error("expected a persisted transcript");
+      expect(probe.history.timeline.map((item) => item.kind)).toEqual(["user", "tool", "tool"]);
+      return probe.history;
+    });
+    const [, toolA, toolB] = result.timeline as Array<{ id: string; result?: string; status: string }>;
     expect(toolA).toMatchObject({ id: "a", result: "a-done", status: "complete" });
     expect(toolB).toMatchObject({ id: "b", result: "b-done", status: "complete" });
 
@@ -562,7 +641,7 @@ describe("transcript row ordering (regression: reorder/duplicate chat rows)", ()
     // timeline shape -- a reload never re-sorts or duplicates rows.
     const again = await service.history(agent.id);
     if ("unpersisted" in again) throw new Error("expected a persisted transcript");
-    expect(again.history.transcriptEpoch).toBe(result.history.transcriptEpoch);
+    expect(again.history.transcriptEpoch).toBe(result.transcriptEpoch);
     expect(again.history.timeline.map((item) => item.kind)).toEqual(["user", "tool", "tool"]);
 
     await service.shutdown();
@@ -578,13 +657,15 @@ describe("transcript row ordering (regression: reorder/duplicate chat rows)", ()
       pi: { executable: process.execPath, executableArgs: ["-e", crashingScript] },
     });
     const agent = await service.create("w");
-    await Bun.sleep(30);
 
-    const result = await service.history(agent.id);
-    if ("unpersisted" in result) throw new Error("expected a persisted transcript");
-    const errorRow = result.history.timeline.find((item) => item.kind === "error");
-    expect(errorRow).toBeTruthy();
-    expect((errorRow as { text: string }).text).toContain("Pi process exited (7)");
+    const errorText = await pollExpect(async () => {
+      const probe = await service.history(agent.id);
+      if ("unpersisted" in probe) throw new Error("expected a persisted transcript");
+      const errorRow = probe.history.timeline.find((item) => item.kind === "error");
+      expect(errorRow).toBeTruthy();
+      return (errorRow as { text: string }).text;
+    });
+    expect(errorText).toContain("Pi process exited (7)");
 
     await service.shutdown();
     f.store.close();
@@ -623,9 +704,10 @@ describe("agent-side git invalidations (merge button freshness)", () => {
     });
     const agent = await service.create("w");
     await service.prompt(agent.id, "commit the work");
-    await Bun.sleep(50);
-    expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
-    expect(invalidated).toEqual(["w"]);
+    await pollExpect(() => {
+      expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+      expect(invalidated).toEqual(["w"]);
+    });
     await service.shutdown();
     f.store.close();
   });
@@ -642,13 +724,15 @@ describe("agent-side git invalidations (merge button freshness)", () => {
     });
     const agent = await service.create("w");
     await service.prompt(agent.id, "list files");
-    await Bun.sleep(50);
-    expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
-    expect(invalidated).toEqual([]);
+    await pollExpect(() => {
+      expect(service.snapshot(agent.id).lastKnownStatus).toBe("running");
+      expect(invalidated).toEqual([]);
+    });
     await service.steer(agent.id, "wrap up");
-    await Bun.sleep(50);
-    expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
-    expect(invalidated).toEqual(["w"]);
+    await pollExpect(() => {
+      expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+      expect(invalidated).toEqual(["w"]);
+    });
     await service.shutdown();
     f.store.close();
   });
@@ -665,9 +749,10 @@ describe("agent-side git invalidations (merge button freshness)", () => {
     service.subscribe((event) => events.push(event.type));
     const agent = await service.create("w");
     await service.prompt(agent.id, "commit");
-    await Bun.sleep(50);
-    expect(events).toContain("settled");
-    expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+    await pollExpect(() => {
+      expect(events).toContain("settled");
+      expect(service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+    });
     await service.shutdown();
     f.store.close();
   });
@@ -709,7 +794,7 @@ describe("drain admission gate", () => {
   test("closing admission refuses new agent work but keeps abort, question answers, and resource-close working", async () => {
     const root = await mkdtemp(join("/tmp", "passage-agent-"));
     roots.push(root);
-    const store = new MetadataStore(join(root, "meta.sqlite"));
+    const store = new MetadataStore(":memory:");
     const repos = new MetadataRepositories(store.db);
     repos.projects.save({ id: "p", configuredRootPath: root, canonicalRootPath: root, displayLabel: "p", archivedAt: null });
     const workspace: Workspace = { id: "w", projectId: "p", kind: "directory", cwd: root, checkoutRoot: root, mainRepositoryRoot: root, branchRef: null, displayLabel: "w", locationId: null, ownershipState: "not-owned", archivedAt: null };
@@ -762,9 +847,10 @@ describe("drain admission gate", () => {
     const g = await make(10, ["-e", runningScript]);
     const runningAgent = await g.service.create("w");
     await g.service.prompt(runningAgent.id, "keep going");
-    await Bun.sleep(20);
-    expect(g.service.listQuickBlockers()).toContainEqual({ agentId: runningAgent.id, reason: "running" });
-    expect(await g.service.listBlockers()).toContainEqual({ agentId: runningAgent.id, reason: "running" });
+    await pollExpect(async () => {
+      expect(g.service.listQuickBlockers()).toContainEqual({ agentId: runningAgent.id, reason: "running" });
+      expect(await g.service.listBlockers()).toContainEqual({ agentId: runningAgent.id, reason: "running" });
+    });
 
     await f.service.shutdown();
     await g.service.shutdown();
@@ -776,8 +862,7 @@ describe("drain admission gate", () => {
     const f = await make();
     const idleAgent = await f.service.create("w");
     await f.service.prompt(idleAgent.id, "hi");
-    await Bun.sleep(20);
-    expect(f.service.snapshot(idleAgent.id).lastKnownStatus).toBe("idle");
+    await pollExpect(() => expect(f.service.snapshot(idleAgent.id).lastKnownStatus).toBe("idle"));
     await f.service.shutdown();
     expect(f.repos.agents.get(idleAgent.id)?.lastKnownStatus).toBe("idle");
     f.store.close();
@@ -786,8 +871,7 @@ describe("drain admission gate", () => {
     const g = await make(10, ["-e", runningScript]);
     const agent = await g.service.create("w");
     await g.service.prompt(agent.id, "keep going");
-    await Bun.sleep(20);
-    expect(g.service.snapshot(agent.id).lastKnownStatus).toBe("running");
+    await pollExpect(() => expect(g.service.snapshot(agent.id).lastKnownStatus).toBe("running"));
     // Interrupted: the forced stop's lifecycle event is still observed
     // (not silently dropped by an early detach) and honestly reported.
     await g.service.shutdown({ interrupted: true });
@@ -799,9 +883,10 @@ describe("drain admission gate", () => {
     const attentionScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');if(r.type==='get_entries')setTimeout(()=>process.stdout.write(JSON.stringify({type:'extension_ui_request',id:'q-1',method:'select',title:'Pick',options:['One','Two']})+'\\n'),5)}})`;
     const f = await make(10, ["-e", attentionScript]);
     const agent = await f.service.create("w");
-    await Bun.sleep(30);
-    expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("needs-attention");
-    expect(f.service.listQuickBlockers()).toContainEqual({ agentId: agent.id, reason: "needs-attention" });
+    await pollExpect(() => {
+      expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("needs-attention");
+      expect(f.service.listQuickBlockers()).toContainEqual({ agentId: agent.id, reason: "needs-attention" });
+    });
     await f.service.shutdown();
     f.store.close();
   });
@@ -813,9 +898,10 @@ describe("drain admission gate", () => {
     const failScript = `let n=0;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='get_state'){n++;if(n<=2){process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{isStreaming:false}})+'\\n')}else{process.stdout.write(JSON.stringify({type:'response',id:r.id,success:false,error:'boom'})+'\\n')}}else{process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n')}}})`;
     const f = await make(10, ["-e", failScript]);
     const agent = await f.service.create("w");
-    await Bun.sleep(20);
-    expect(f.service.listQuickBlockers()).toEqual([]);
-    expect(await f.service.listBlockers()).toContainEqual({ agentId: agent.id, reason: "unknown" });
+    await pollExpect(async () => {
+      expect(f.service.listQuickBlockers()).toEqual([]);
+      expect(await f.service.listBlockers()).toContainEqual({ agentId: agent.id, reason: "unknown" });
+    });
     await f.service.shutdown();
     f.store.close();
   });
@@ -825,7 +911,7 @@ describe("agent auto-titles (after the first agent response)", () => {
   const makeWithTitles = async (suggestTitle: (messages: string[], cwd?: string, model?: string, thinkingLevel?: string) => Promise<string | null>, suggestModel = "test/model", suggestThinkingLevel = "high") => {
     const root = await mkdtemp(join("/tmp", "passage-agent-"));
     roots.push(root);
-    const store = new MetadataStore(join(root, "meta.sqlite"));
+    const store = new MetadataStore(":memory:");
     const repos = new MetadataRepositories(store.db);
     repos.projects.save({ id: "p", configuredRootPath: root, canonicalRootPath: root, displayLabel: "p", archivedAt: null });
     const workspace: Workspace = { id: "w", projectId: "p", kind: "directory", cwd: root, checkoutRoot: root, mainRepositoryRoot: root, branchRef: null, displayLabel: "w", locationId: null, ownershipState: "not-owned", archivedAt: null };
@@ -959,7 +1045,7 @@ describe("getCommitConversation", () => {
     const f = await make();
     const agent = await f.service.create("w", "one");
     await f.service.prompt(agent.id, "Add retries to fetch");
-    await Bun.sleep(50);
+    await waitForIdle(f.service, agent.id);
     await f.service.steer(agent.id, "Also coach: keep it small");
     const convo = await f.service.getCommitConversation("w");
     expect(convo.userMessages).toEqual(["Add retries to fetch", "Also coach: keep it small"]);

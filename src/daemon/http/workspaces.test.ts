@@ -10,7 +10,7 @@ import { createWorkspaceRoutes } from "./workspaces.ts";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
-async function fixture() { const root = await mkdtemp(join(tmpdir(), "passage-http-")); roots.push(root); const store = new MetadataStore(join(root, "metadata.sqlite")); return { root, store, app: createWorkspaceRoutes(new WorkspaceService(new MetadataRepositories(store.db))) }; }
+async function fixture() { const root = await mkdtemp(join(tmpdir(), "passage-http-")); roots.push(root); const store = new MetadataStore(":memory:"); return { root, store, app: createWorkspaceRoutes(new WorkspaceService(new MetadataRepositories(store.db))) }; }
 const request = (path: string, init?: RequestInit) => new Request(`http://localhost${path}`, init);
 
 describe("workspace HTTP API", () => {
@@ -19,7 +19,7 @@ describe("workspace HTTP API", () => {
   test("maps not-found, archived, and outside-root failures", async () => { const f = await fixture(); expect((await f.app.fetch(request("/api/projects/missing/archive", { method: "POST" }))).status).toBe(404); const p = await (await f.app.fetch(request("/api/projects", { method: "POST", body: JSON.stringify({ configuredRootPath: f.root, displayLabel: "P" }) }))).json(); await mkdir(join(f.root, "inside")); expect((await f.app.fetch(request(`/api/projects/${p.id}/workspaces`, { method: "POST", body: JSON.stringify({ cwd: "../", displayLabel: "bad" }) }))).status).toBe(400); expect((await f.app.fetch(request(`/api/projects/${p.id}/archive`, { method: "POST" }))).status).toBe(200); expect((await f.app.fetch(request(`/api/projects/${p.id}/workspaces`, { method: "POST", body: JSON.stringify({ displayLabel: "bad" }) }))).status).toBe(409); f.store.close(); });
   test("emits workspaces-changed after snapshot mutations and nothing on failure", async () => {
     const root = await mkdtemp(join(tmpdir(), "passage-http-")); roots.push(root);
-    const store = new MetadataStore(join(root, "metadata.sqlite"));
+    const store = new MetadataStore(":memory:");
     const hub = new WorkspaceEventHub();
     const app = createWorkspaceRoutes(new WorkspaceService(new MetadataRepositories(store.db)), undefined, hub);
     const sequence = () => hub.currentSequence(WORKSPACES_SNAPSHOT_SUBJECT);

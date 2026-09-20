@@ -68,12 +68,14 @@ describe("AttachmentCache images", () => {
     const pad = (seed: string, size: number) => seed + "x".repeat(size - seed.length);
     const cache = new AttachmentCache(dir, 2 * 1024);
     const oldest = await cache.storeImage(image("old.png", pad("old", 700)));
-    const middle = await cache.storeImage(image("mid.png", pad("mid", 700)));
-    const newest = await cache.storeImage(image("new.png", pad("new", 700)));
-    // Pin an unambiguous recency order regardless of filesystem timestamp granularity.
+    // Pin recency immediately after each store: stores queue a background
+    // sweep, so pinning must preserve write order no matter when that sweep
+    // (or the explicit one below) observes the directory.
     const now = Date.now();
     await utimes(join(dir, oldest.hash), new Date(now - 3000), new Date(now - 3000));
+    const middle = await cache.storeImage(image("mid.png", pad("mid", 700)));
     await utimes(join(dir, middle.hash), new Date(now - 2000), new Date(now - 2000));
+    const newest = await cache.storeImage(image("new.png", pad("new", 700)));
     await utimes(join(dir, newest.hash), new Date(now - 1000), new Date(now - 1000));
     await cache.sweep();
 

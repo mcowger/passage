@@ -35,7 +35,7 @@ async function fixture() {
   await git(root, "commit", "-m", "gone work");
   await git(root, "checkout", "main");
   await git(root, "merge", "--no-ff", "feature/gone", "-m", "merge gone");
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(":memory:");
   const repos = new MetadataRepositories(store.db);
   const project = projectSchema.parse({
     id: "prj_branches_http",

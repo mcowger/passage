@@ -18,7 +18,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "passage-files-http-"));
   roots.push(root);
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(join(root, "metadata.sqlite")); // file-backed: the pagination test counts the db file itself in root listings
   const repos = new MetadataRepositories(store.db);
   const workspaces = new WorkspaceService(repos);
   const files = new FileService(workspaces);

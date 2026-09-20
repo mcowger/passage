@@ -15,7 +15,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "passage-term-"));
   roots.push(root);
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(":memory:");
   const repos = new MetadataRepositories(store.db);
   const workspaces = new WorkspaceService(repos);
   const project = await workspaces.registerProject(root, "Test Repo");

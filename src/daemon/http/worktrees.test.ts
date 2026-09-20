@@ -18,7 +18,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "passage-worktree-http-"));
   roots.push(root);
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(":memory:");
   const repos = new MetadataRepositories(store.db);
   const service = new WorktreeService(repos, undefined, new MetadataGenerator(50, { executable: "/does/not/exist" }));
   const app = createWorktreeRoutes(service);

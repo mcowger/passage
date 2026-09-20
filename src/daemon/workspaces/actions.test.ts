@@ -21,7 +21,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "passage-actions-test-"));
   roots.push(root);
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(":memory:");
   const repositories = new MetadataRepositories(store.db);
   const workspaceService = new WorkspaceService(repositories);
   const actions = new WorkspaceActionsService(repositories);

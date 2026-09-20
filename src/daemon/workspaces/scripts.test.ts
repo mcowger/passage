@@ -18,7 +18,7 @@ afterEach(async () => {
 async function fixture(paseoJson: unknown) {
   const root = await mkdtemp(join(tmpdir(), "passage-scripts-test-"));
   roots.push(root);
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(":memory:");
   const repositories = new MetadataRepositories(store.db);
   const workspaceService = new WorkspaceService(repositories);
   const terminals = new TerminalManager(workspaceService);

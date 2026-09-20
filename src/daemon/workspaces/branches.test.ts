@@ -46,7 +46,7 @@ async function fixture() {
   await git(root, "commit", "-m", "unmerged work");
   await git(root, "checkout", "main");
 
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(":memory:");
   stores.push(store);
   const repos = new MetadataRepositories(store.db);
   const project = projectSchema.parse({

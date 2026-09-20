@@ -20,7 +20,7 @@ async function fixture() {
   await mkdir(join(root, "payments-old"));
   await mkdir(join(root, "other"));
   await writeFile(join(root, "notes.txt"), "hi");
-  const store = new MetadataStore(join(root, "metadata.sqlite"));
+  const store = new MetadataStore(":memory:");
   const repos = new MetadataRepositories(store.db);
   const workspaces = new WorkspaceService(repos);
   const files = new FileService(workspaces);
