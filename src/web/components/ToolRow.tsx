@@ -263,7 +263,6 @@ function ToolDiffPreviewInner({ diff }: { diff: ToolDiff }) {
             <span className="tool-diff-stat-sep">/</span>
             <span className="tool-diff-stat-del">-{diff.deletions}</span>
           </span>
-          <span className="tool-diff-context">{diff.contextLines} unmodified lines</span>
           <CopyButton text={rawPatch} title="Copy patch" />
         </div>
       </div>

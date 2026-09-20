@@ -311,13 +311,17 @@ button.tool-row-summary {
   display: inline-flex;
   align-items: baseline;
   gap: 3px;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
   font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.2;
 }
 .tool-path-dir {
   color: var(--muted);
+  flex: 0 1 auto;
+  min-width: 2ch;
   direction: rtl;
   text-align: left;
   overflow: hidden;
@@ -327,6 +331,10 @@ button.tool-row-summary {
 .tool-path-name {
   color: var(--foreground);
   font-weight: 600;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -458,21 +466,25 @@ button.tool-row-summary {
   font-size: 11px;
 }
 .tool-diff-file {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 5px;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 .tool-diff-actions {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  flex-shrink: 0;
+  flex: none;
 }
 .tool-diff-stats {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  flex: none;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
@@ -482,11 +494,6 @@ button.tool-row-summary {
 .tool-diff-stat-sep { color: var(--muted); opacity: 0.6; }
 .tool-diff-stat-del { color: #dc2626; }
 .dark .tool-diff-stat-del, [data-theme-mode="dark"] .tool-diff-stat-del { color: #f87171; }
-.tool-diff-context {
-  color: var(--muted);
-  font-size: 10px;
-  font-family: var(--font-mono);
-}
 .tool-diff-lines {
   max-height: 46vh;
   overflow: auto;
@@ -571,7 +578,9 @@ button.tool-row-summary {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 .tool-read-lang-badge {
   padding: 0.5px 5px;
