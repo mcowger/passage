@@ -195,6 +195,28 @@ export class WorkspaceService {
     return this.getSettings(workspaceId);
   }
 
+  /** GitHub repo identity for a workspace checkout, fetched once and kept
+   *  in the metadata DB: the remote identity never changes for a workspace.
+   *  Returns undefined when never checked, null when checked with no result. */
+  getGithubRepo(workspaceId: string): { nameWithOwner: string; defaultBranch: string } | null | undefined {
+    this.requireWorkspace(workspaceId);
+    const stored = this.repositories.appSettings.get(`github-repo:${workspaceId}`);
+    if (stored === undefined) return undefined;
+    if (stored === null) return null;
+    if (typeof stored === "object" && stored !== null) {
+      const record = stored as Record<string, unknown>;
+      if (typeof record.nameWithOwner === "string" && typeof record.defaultBranch === "string") {
+        return { nameWithOwner: record.nameWithOwner, defaultBranch: record.defaultBranch };
+      }
+    }
+    return undefined;
+  }
+
+  saveGithubRepo(workspaceId: string, repo: { nameWithOwner: string; defaultBranch: string } | null): void {
+    this.requireWorkspace(workspaceId);
+    this.repositories.appSettings.set(`github-repo:${workspaceId}`, repo);
+  }
+
   snapshot(): WorkspaceSnapshot {
     const projects = this.repositories.projects.listAll(this.listLimit).map((project) => projectSchema.parse(project));
     const projectIds = new Set(projects.map((project) => project.id));

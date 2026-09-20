@@ -100,6 +100,27 @@ export type GitCommitGenerator = Pick<CommitGenerator, "suggestCommit"> & Partia
 export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, events?: WorkspaceEventHub, commitGenerator?: GitCommitGenerator, getConversation?: CommitConversationProvider, github?: Pick<GhService, "installed" | "available" | "repoInfo" | "prForBranch" | "createPr">): Hono => {
   const commits = commitGenerator ?? new CommitGenerator();
   const gh = github ?? new GhService();
+  /** `gh` binary/auth state is machine-global, so it is checked once per
+   *  daemon run and reused for every workspace (stale until restart). */
+  let hostStatus: { installed: boolean; available: boolean } | null = null;
+  let hostProbe: Promise<{ installed: boolean; available: boolean }> | null = null;
+  const getHostStatus = (cwd: string): Promise<{ installed: boolean; available: boolean }> => {
+    if (hostStatus) return Promise.resolve(hostStatus);
+    hostProbe ??= (async () => {
+      const installed = await gh.installed(cwd).catch(() => false);
+      const available = installed ? await gh.available(cwd).catch(() => false) : false;
+      hostStatus = { installed, available };
+      return hostStatus;
+    })();
+    return hostProbe;
+  };
+  /** Open-PR lookups are network calls: cached per workspace+branch for five
+   *  minutes with one shared in-flight fetch. `?refresh=1` bypasses it. */
+  const PR_TTL_MS = 5 * 60_000;
+  type PrEntry = { pr: Awaited<ReturnType<GhService["prForBranch"]>>; expiresAt: number };
+  const prCache = new Map<string, PrEntry>();
+  const prInflight = new Map<string, Promise<PrEntry["pr"]>>();
+  const prKey = (workspaceId: string, branch?: string) => `${workspaceId} ${branch ?? ""}`;
   const app = new Hono();
   app.use("*", async (c, next) => { c.header("Cache-Control", "no-store"); return next(); });
   const changed = (workspaceId: string, reason: GitStatusChangedReason) => {
@@ -273,35 +294,64 @@ export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, e
   });
   /** `gh` availability + open PR for the checkout's branch. Never 422s:
    *  a missing binary, missing auth, or missing PR resolves to flags/null
-   *  so the composer can disable PR commands instead of erroring. */
+   *  so the composer can disable PR commands instead of erroring. Host state
+   *  is checked once per daemon run; repo identity is fetched once per
+   *  workspace and persisted; the PR lookup has a 5-minute memory cache
+   *  (`?refresh=1` forces a live re-check, `?branch=` scopes the PR key). */
   app.get("/api/workspaces/:workspaceId/git/github-status", async (c) => {
     try {
       const workspaceId = id(c.req.param("workspaceId"));
+      const forceRefresh = c.req.query("refresh") === "1";
+      const branch = (c.req.query("branch") ?? "").slice(0, 256) || undefined;
       const cwd = await workspaces.resolvePath(workspaceId, ".");
-      const installed = await gh.installed(cwd).catch(() => false);
-      let available = false;
-      let repo: Awaited<ReturnType<GhService["repoInfo"]>> = null;
-      let pr: Awaited<ReturnType<GhService["prForBranch"]>> = null;
-      if (installed) {
-        available = await gh.available(cwd).catch(() => false);
-      }
-      if (available) {
+      const host = await getHostStatus(cwd);
+      if (!host.installed) return ok({ installed: false, available: false, repo: null, pr: null });
+      if (!host.available) return ok({ installed: true, available: false, repo: null, pr: null });
+      // Repo identity never changes for a workspace: fetch once, persist,
+      // backfilling workspaces created before this cache existed.
+      let repo = forceRefresh ? undefined : workspaces.getGithubRepo(workspaceId);
+      if (repo === undefined) {
         try {
           repo = await gh.repoInfo(cwd);
         } catch {
           repo = null;
         }
         try {
-          pr = await gh.prForBranch(cwd);
-        } catch (e) {
+          workspaces.saveGithubRepo(workspaceId, repo);
+        } catch {
+          // Persistence is best-effort; the memory path still serves this response.
+        }
+      }
+      let available = true;
+      let pr: Awaited<ReturnType<GhService["prForBranch"]>> = null;
+      const key = prKey(workspaceId, branch);
+      const cached = forceRefresh ? undefined : prCache.get(key);
+      if (cached && cached.expiresAt > Date.now()) {
+        pr = cached.pr;
+      } else {
+        let flight = prInflight.get(key);
+        if (!flight) {
+          flight = (async () => {
+            try {
+              const result = await gh.prForBranch(cwd);
+              prCache.set(key, { pr: result, expiresAt: Date.now() + PR_TTL_MS });
+              return result;
+            } finally {
+              prInflight.delete(key);
+            }
+          })();
+          prInflight.set(key, flight);
+        }
+        try {
+          pr = await flight;
+        } catch {
           // Auth/network failures downgrade to unavailable; "no PR"
           // already resolves to null inside the service.
           available = false;
           pr = null;
-          void e;
         }
       }
-      return ok({ installed, available, repo, pr });
+      return ok({ installed: true, available, repo, pr });
     } catch (e) { return error(e); }
   });
   app.post("/api/workspaces/:workspaceId/git/pr-suggest", async (c) => {
@@ -377,6 +427,7 @@ export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, e
         base: input.base,
         draft: input.draft,
       });
+      prCache.set(prKey(workspaceId, before.branchRef ?? undefined), { pr, expiresAt: Date.now() + PR_TTL_MS });
       const status = await git.status(cwd);
       changed(workspaceId, "pr-create");
       return ok({ pr, status });

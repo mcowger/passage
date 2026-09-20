@@ -553,6 +553,89 @@ describe("git GitHub HTTP API", () => {
     f.store.close();
   });
 
+  test("github-status checks host once and caches repo + PR", async () => {
+    const calls = { installed: 0, available: 0, repoInfo: 0, prForBranch: 0 };
+    const f = await mkRepo({
+      installed: async () => { calls.installed++; return true; },
+      available: async () => { calls.available++; return true; },
+      repoInfo: async () => { calls.repoInfo++; return { nameWithOwner: "o/r", defaultBranch: "main" }; },
+      prForBranch: async () => { calls.prForBranch++; return null; },
+    });
+    const url = `/api/workspaces/${f.workspace.id}/git/github-status?branch=main`;
+    const first = await f.app.fetch(request(url));
+    expect(first.status).toBe(200);
+    const second = await f.app.fetch(request(url));
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual(await first.json());
+    expect(calls).toEqual({ installed: 1, available: 1, repoInfo: 1, prForBranch: 1 });
+    f.store.close();
+  });
+
+  test("github-status refresh forces a live PR re-check", async () => {
+    let prCalls = 0;
+    const f = await mkRepo({ prForBranch: async () => { prCalls++; return null; } });
+    const base = `/api/workspaces/${f.workspace.id}/git/github-status?branch=main`;
+    await f.app.fetch(request(base));
+    expect(prCalls).toBe(1);
+    await f.app.fetch(request(base));
+    expect(prCalls).toBe(1);
+    const refreshed = await f.app.fetch(request(`${base}&refresh=1`));
+    expect(refreshed.status).toBe(200);
+    expect(prCalls).toBe(2);
+    f.store.close();
+  });
+
+  test("github-status scopes the cached PR by branch", async () => {
+    let prCalls = 0;
+    const f = await mkRepo({ prForBranch: async () => { prCalls++; return null; } });
+    const base = `/api/workspaces/${f.workspace.id}/git/github-status`;
+    await f.app.fetch(request(`${base}?branch=main`));
+    await f.app.fetch(request(`${base}?branch=feature`));
+    expect(prCalls).toBe(2);
+    await f.app.fetch(request(`${base}?branch=main`));
+    expect(prCalls).toBe(2);
+    f.store.close();
+  });
+
+  test("github-status shares one in-flight PR lookup", async () => {
+    let resolvePr!: (value: null) => void;
+    let prCalls = 0;
+    const gate = new Promise<null>((resolve) => { resolvePr = resolve; });
+    const f = await mkRepo({ prForBranch: async () => { prCalls++; return gate; } });
+    const url = `/api/workspaces/${f.workspace.id}/git/github-status?branch=main`;
+    const pending = [f.app.fetch(request(url)), f.app.fetch(request(url))];
+    resolvePr(null);
+    const [a, b] = await Promise.all(pending);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(prCalls).toBe(1);
+    f.store.close();
+  });
+
+  test("pr-create stores the new PR in the status cache", async () => {
+    let prCalls = 0;
+    const f = await mkFeatureRepo({ prForBranch: async () => { prCalls++; return null; } });
+    const statusUrl = `/api/workspaces/${f.workspace.id}/git/github-status?branch=feature`;
+    const before = await f.app.fetch(request(statusUrl));
+    expect(before.status).toBe(200);
+    expect((await before.json() as { pr: unknown }).pr).toBeNull();
+    expect(prCalls).toBe(1);
+    const origin = await mkdtemp(join(tmpdir(), "passage-git-gh-cache-origin-"));
+    roots.push(origin);
+    await runGit(origin, ["init", "--bare"]);
+    await runGit(f.root, ["remote", "add", "origin", origin]);
+    const created = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/pr-create`, {
+      method: "POST",
+      body: JSON.stringify({ title: "Feature work", body: "Details", draft: true }),
+    }));
+    expect(created.status).toBe(200);
+    const after = await f.app.fetch(request(statusUrl));
+    expect(after.status).toBe(200);
+    expect((await after.json() as { pr: { number: number } }).pr.number).toBe(7);
+    expect(prCalls).toBe(1);
+    f.store.close();
+  });
+
   test("pr-suggest falls back to a template when the model is unavailable", async () => {
     const f = await mkFeatureRepo();
     const response = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/pr-suggest`, { method: "POST", body: JSON.stringify({}) }));

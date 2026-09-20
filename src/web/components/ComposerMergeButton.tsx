@@ -39,6 +39,7 @@ import {
   GitCommitHorizontal,
   GitMerge,
   GitPullRequest,
+  RefreshCw,
   Rocket,
   Upload,
 } from "lucide-react";
@@ -142,20 +143,22 @@ export function ComposerMergeButton({
   }, [api, workspaceId]);
 
   // Same sequencing guard for `gh` checks: menu opens and several mutations
-  // can trigger overlapping loads across workspace switches.
+  // can trigger overlapping loads across workspace switches. The daemon
+  // caches host state, repo identity, and the PR lookup; `refresh` forces a
+  // live re-check and `branch` scopes the cached PR to the current branch.
   const ghSeqRef = useRef(0);
-  const loadGh = useCallback(async () => {
+  const loadGh = useCallback(async (refresh = false) => {
     const seq = ++ghSeqRef.current;
     setGhLoading(true);
     try {
-      const next = await api.gitGithubStatus(workspaceId);
+      const next = await api.gitGithubStatus(workspaceId, { refresh, branch: status?.branchRef ?? undefined });
       if (ghSeqRef.current === seq) setGhStatus(next);
     } catch {
       if (ghSeqRef.current === seq) setGhStatus(null);
     } finally {
       if (ghSeqRef.current === seq) setGhLoading(false);
     }
-  }, [api, workspaceId]);
+  }, [api, workspaceId, status?.branchRef]);
 
   useEffect(() => {
     // Invalidate any in-flight fetch from the previous workspace before the
@@ -751,7 +754,19 @@ export function ComposerMergeButton({
                 <span className="thinking-option-name">Fetch</span>
                 <span className="ml-auto text-xs text-muted-foreground">Refresh remote</span>
               </div>
-              <div className="popover-header-title px-2 py-1.5">{ghSectionTitle}</div>
+              <div className="flex items-center justify-between px-2 py-1.5">
+                <span className="popover-header-title">{ghSectionTitle}</span>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => { if (!ghLoading) void loadGh(true); }}
+                  disabled={ghLoading}
+                  title="Refresh GitHub status"
+                  aria-label="Refresh GitHub status"
+                >
+                  <RefreshCw size={14} aria-hidden="true" className={ghLoading ? "animate-spin" : undefined} />
+                </Button>
+              </div>
               {ghMenu.kind === "loading" ? (
                 <div className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground">
                   <Spinner className="size-3" />

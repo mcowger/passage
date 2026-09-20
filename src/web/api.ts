@@ -275,7 +275,13 @@ export function createWorkspaceApi(
     async gitRebaseOntoMain(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/rebase`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
     async gitPush(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/push`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
     async gitRebaseRemote(id: string, input?: { remote?: string; base?: string }): Promise<{ status: GitStatus; remote: string; base: string }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/rebase-remote`, { method: "POST", body: JSON.stringify(input ?? {}) }) as { status: GitStatus; remote: string; base: string }; },
-    async gitGithubStatus(id: string): Promise<GithubStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/github-status`) as GithubStatus; },
+    async gitGithubStatus(id: string, input?: { refresh?: boolean; branch?: string }): Promise<GithubStatus> {
+      const query = new URLSearchParams();
+      if (input?.refresh) query.set("refresh", "1");
+      if (input?.branch) query.set("branch", input.branch);
+      const suffix = query.size > 0 ? `?${query}` : "";
+      return await request(`/api/workspaces/${encodeURIComponent(id)}/git/github-status${suffix}`) as GithubStatus;
+    },
     async gitPrSuggest(id: string, input?: { base?: string; agentId?: string }): Promise<{ base: string; title: string; body: string; generated: boolean; truncated: boolean }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/pr-suggest`, { method: "POST", body: JSON.stringify(input ?? {}) }) as { base: string; title: string; body: string; generated: boolean; truncated: boolean }; },
     async gitPrCreate(id: string, input: { title: string; body?: string; base?: string; draft?: boolean }): Promise<{ pr: GithubStatus["pr"]; status: GitStatus }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/pr-create`, { method: "POST", body: JSON.stringify(input) }) as { pr: GithubStatus["pr"]; status: GitStatus }; },
     async listFiles(id: string, path = ".", cursor?: string): Promise<FileListing> { const q = new URLSearchParams({ path }); if (cursor) q.set("cursor", cursor); return await request(`/api/workspaces/${encodeURIComponent(id)}/files?${q}`) as FileListing; },
