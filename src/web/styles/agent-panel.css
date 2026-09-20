@@ -51,13 +51,11 @@
   outline-offset: 1px;
 }
 
-.context-pie {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.context-ring {
+  width: 14px;
+  height: 14px;
   flex: none;
-  box-sizing: border-box;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  display: block;
 }
 
 .ctx-details-popover {

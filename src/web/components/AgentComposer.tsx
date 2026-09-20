@@ -60,6 +60,40 @@ import {
   formatDuration,
 } from "./TimelineRow.tsx";
 
+const CONTEXT_RING_RADIUS = 6;
+const CONTEXT_RING_CIRCUMFERENCE = 2 * Math.PI * CONTEXT_RING_RADIUS;
+
+/** Stroke-based donut: stays legible at low % where a filled conic pie is a sliver.
+ *  Round caps keep even 1-3% visible as a dot on the track. */
+function ContextRing({ pct, color }: { pct: number; color: string }) {
+  const clamped = Math.min(100, Math.max(0, pct));
+  return (
+    <svg className="context-ring" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <circle
+        cx="8"
+        cy="8"
+        r={CONTEXT_RING_RADIUS}
+        fill="none"
+        stroke="var(--chip-blue-track, rgba(127, 127, 127, 0.35))"
+        strokeWidth="2.5"
+      />
+      {clamped > 0 && (
+        <circle
+          cx="8"
+          cy="8"
+          r={CONTEXT_RING_RADIUS}
+          fill="none"
+          stroke={color}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeDasharray={`${(clamped / 100) * CONTEXT_RING_CIRCUMFERENCE} ${CONTEXT_RING_CIRCUMFERENCE}`}
+          transform="rotate(-90 8 8)"
+        />
+      )}
+    </svg>
+  );
+}
+
 type AgentComposerProps = {
   agentId: string;
   workspaceId: string;
@@ -340,13 +374,7 @@ function AgentComposerInner({
               aria-expanded={ctxDetailsOpen}
               aria-haspopup="dialog"
             >
-              <span
-                className="context-pie"
-                style={{
-                  background: `conic-gradient(${pieColor} ${contextPct}%, var(--chip-blue-track, rgba(3, 105, 161, 0.18)) 0)`,
-                }}
-                aria-hidden="true"
-              />
+              <ContextRing pct={contextPct} color={pieColor} />
               <span>{contextPct}%</span>
               {usage?.cost !== undefined && usage.cost > 0 && (
                 <span className="composer-ctx-cost">
