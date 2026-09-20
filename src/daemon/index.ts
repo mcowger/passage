@@ -243,9 +243,9 @@ const agentService = new AgentService(repositories, {
 // `error`: Pi reported nothing wrong) instead of a stale spinner or an
 // unanswerable pending question.
 try {
-  const restart = await agentService.reconcileAfterRestart();
-  if (restart.interrupted.length > 0) {
-    log.warn("Interrupted agent runtime state normalized on boot", { event: "agent.restart_swept", count: restart.interrupted.length });
+  const restart = await agentService.warmAfterRestart();
+  if (restart.warmed.length > 0 || restart.failed.length > 0) {
+    log.warn("Interrupted agent runtime state normalized on boot", { event: "agent.restart_swept", count: restart.warmed.length + restart.failed.length, warmed: restart.warmed.length, continued: restart.continued.length, failed: restart.failed.length });
   }
 } catch {}
 const agentEvents = new AgentEventHub(agentService);

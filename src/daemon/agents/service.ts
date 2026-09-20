@@ -53,6 +53,33 @@ const COMPACT_TIMEOUT_MS = 300_000;
  *  believing the agent is idle (e.g. a stale WebSocket) and Pi actually
  *  still running can reach this even past Passage's own busy guard. */
 const PI_ALREADY_STREAMING_PATTERN = /already (processing|streaming)/i;
+/** Canned resume line sent as a `follow_up` when a run is auto-continued
+ *  after its Pi process disconnected mid-run (crash) or the daemon
+ *  restarted underneath it. Deliberately generic ("disconnected" covers
+ *  both) and instructs against repeating completed side effects. */
+export const CONTINUATION_MESSAGE =
+  "Your runtime disconnected mid-run before finishing. Please continue where you left off \u2014 check current state first and avoid repeating completed side effects.";
+/** Statuses that imply a run was in flight when the process went away: an
+ *  auto-continue is warranted. Anything else (idle, initializing with no
+ *  work yet, already terminal) just needs a warm process, if anything. */
+const AUTO_CONTINUE_STATUSES = new Set(["running", "stopping", "needs-attention"]);
+/** Default auto-continue budget window: one spent retry regenerates after an
+ *  hour. Overridden by `PASSAGE_AUTO_CONTINUE_WINDOW_MINUTES` (or the
+ *  `autoContinueWindowMs` service option, which wins for tests). */
+export const DEFAULT_AUTO_CONTINUE_WINDOW_MS = 60 * 60_000;
+/** Resolve the auto-continue budget window. Invalid values warn and fall
+ *  back to the default instead of disabling retries (0/negative) or
+ *  pinning them spent forever (NaN/Infinity math). */
+export function resolveAutoContinueWindowMs(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.PASSAGE_AUTO_CONTINUE_WINDOW_MINUTES;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_AUTO_CONTINUE_WINDOW_MS;
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    logger("agent").warn("Ignoring invalid PASSAGE_AUTO_CONTINUE_WINDOW_MINUTES", { event: "agent.invalid_auto_continue_window", value: raw });
+    return DEFAULT_AUTO_CONTINUE_WINDOW_MS;
+  }
+  return minutes * 60_000;
+}
 /** Upper bound on the tool payload text scanned for a `git commit` invocation. */
 const encoder = new TextEncoder();
 
@@ -108,6 +135,8 @@ export class AgentService {
   private readonly listLimit: number;
   private readonly pi: Omit<PiRpcOptions, "cwd" | "sessionDir" | "sessionId">;
   private readonly sessionsRoot: string;
+  /** How long a spent auto-continue retry takes to regenerate. */
+  private readonly autoContinueWindowMs: number;
   private readonly attachmentCache: AttachmentCache;
   private readonly abortTimeoutMs: number;
   private readonly onWorkspaceGitChanged?: (workspaceId: string) => void;
@@ -147,6 +176,9 @@ export class AgentService {
        *  level + prompt templates (Settings). Empty/undefined fields mean
        *  the suggestion backend's defaults. */
       getSuggestConfig?: (workspaceId: string) => { model?: string; thinkingLevel?: string; titlePrompt?: string } | undefined;
+      /** Regen window for a spent auto-continue retry. Defaults to
+       *  `resolveAutoContinueWindowMs()` (env `PASSAGE_AUTO_CONTINUE_WINDOW_MINUTES`, else one hour). */
+      autoContinueWindowMs?: number;
     },
   ) {
     if (!options.sessionsRoot) throw new AgentError("invalid-input", "sessionsRoot is required");
@@ -155,6 +187,9 @@ export class AgentService {
     }
     if (options.abortTimeoutMs !== undefined && (!Number.isSafeInteger(options.abortTimeoutMs) || options.abortTimeoutMs < 1)) {
       throw new AgentError("invalid-input", "invalid abort timeout");
+    }
+    if (options.autoContinueWindowMs !== undefined && (!Number.isFinite(options.autoContinueWindowMs) || options.autoContinueWindowMs <= 0)) {
+      throw new AgentError("invalid-input", "invalid auto-continue window");
     }
     if (options.maxActiveAgents !== undefined && (!Number.isSafeInteger(options.maxActiveAgents) || options.maxActiveAgents < 1)) {
       throw new AgentError("invalid-input", "invalid max active agents");
@@ -168,6 +203,7 @@ export class AgentService {
       options.attachmentCacheBytes,
     );
     this.abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_ABORT_TIMEOUT_MS;
+    this.autoContinueWindowMs = options.autoContinueWindowMs ?? resolveAutoContinueWindowMs();
     this.onWorkspaceGitChanged = options.onWorkspaceGitChanged;
     this.admissionGate = options.admissionGate ?? (() => true);
     this.titleSuggester = options.titleSuggester ?? new AgentTitleSuggester();
@@ -189,6 +225,10 @@ export class AgentService {
       emit: (event) => this.emit(event),
     });
   }
+
+  /** True once shutdown() begins: lifecycle events from the processes being
+   *  stopped must not trigger auto-continue spawns on the way out. */
+  private shuttingDown = false;
 
   /** Refuses new agent work while the daemon is draining/ready/stopping.
    *  Called synchronously at the top of every new-work entry point, before
@@ -218,6 +258,69 @@ export class AgentService {
 
   async reconcileAfterRestart(): Promise<{ interrupted: string[] }> {
     return this.views.reconcileAfterRestart();
+  }
+
+  /** Boot-time warm + continue, called after reconcileAfterRestart(). Every
+   *  agent the restart left non-idle gets a fresh Pi process (same session
+   *  dir + ID, so transcript history resumes); ones that were mid-run
+   *  (running/stopping/needs-attention) additionally get the canned
+   *  continuation follow-up, spending their one auto-continue budget.
+   *  Initializing agents warm without a message (no work to continue) and
+   *  idle/archived agents are untouched. Bounded concurrency, never throws:
+   *  failures stay `interrupted` for lazy manual retry. */
+  async warmAfterRestart(options?: { concurrency?: number }): Promise<{ warmed: string[]; continued: string[]; failed: string[] }> {
+    const warmed: string[] = [];
+    const continued: string[] = [];
+    const failed: string[] = [];
+    if (this.shuttingDown || !this.admissionGate()) return { warmed, continued, failed };
+    let previous: Array<{ id: string; status: string }>;
+    try {
+      previous = this.repositories.agents.listActiveRuntime(10_000).map((agent) => ({ id: agent.id, status: agent.lastKnownStatus }));
+    } catch (error) {
+      logger("agent").warn("Warm-after-restart lookup failed", { event: "agent.warm_lookup_failed", ...errorFields(error) });
+      return { warmed, continued, failed };
+    }
+    await this.reconcileAfterRestart();
+    const concurrency = Math.max(1, options?.concurrency ?? 4);
+    let index = 0;
+    const workers = Array.from({ length: Math.min(concurrency, previous.length) }, async () => {
+      while (index < previous.length) {
+        const entry = previous[index++]!;
+        if (this.shuttingDown) {
+          failed.push(entry.id);
+          continue;
+        }
+        try {
+          this.requireAgent(entry.id);
+          this.requireWorkspace(this.repositories.agents.get(entry.id)!.workspaceId);
+        } catch {
+          failed.push(entry.id);
+          continue;
+        }
+        await this.start(entry.id);
+        if (!this.manager.get(entry.id)) {
+          failed.push(entry.id);
+          continue;
+        }
+        warmed.push(entry.id);
+        if (AUTO_CONTINUE_STATUSES.has(entry.status)) {
+          try {
+            await this.followUp(entry.id, CONTINUATION_MESSAGE);
+            this.spendAutoContinueBudget(entry.id);
+            continued.push(entry.id);
+          } catch (cause) {
+            // Warm process is live and idle; only the resume message was
+            // lost (drain racing boot). Manual prompt still works.
+            logger("agent").warn("Agent warm continue failed", { event: "agent.warm_continue_failed", agentId: entry.id, ...errorFields(cause) });
+          }
+        }
+      }
+    });
+    await Promise.all(workers);
+    if (warmed.length > 0 || failed.length > 0) {
+      logger("agent").info("Agent processes warmed after restart", { event: "agent.warm_completed", warmed: warmed.length, continued: continued.length, failed: failed.length });
+    }
+    return { warmed, continued, failed };
   }
 
   listQuickBlockers(): DaemonBlocker[] {
@@ -329,6 +432,9 @@ export class AgentService {
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
     const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.attachmentCache.storeImage(image))) : undefined;
     const fileRefs = await this.storeUploads(agentId, files);
+    // A manual prompt is new user intent: restore the auto-continue budget
+    // a previous crash may have spent.
+    this.runtime.autoContinued.delete(agentId);
     const process = await this.ensureProcess(agentId);
     this.beginRun(agentId);
     // The transcript journals the original text plus file metadata; the
@@ -361,6 +467,7 @@ export class AgentService {
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
     const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.attachmentCache.storeImage(image))) : undefined;
     const fileRefs = await this.storeUploads(agentId, files);
+    this.runtime.autoContinued.delete(agentId);
     const process = await this.ensureProcess(agentId);
     await this.appendUserRow(agentId, text, imageRefs, fileRefs);
     await process.request({ type: "steer", message: withFileRefs(text, fileRefs), ...(validatedImages?.length ? { images: validatedImages } : {}) });
@@ -373,6 +480,7 @@ export class AgentService {
     const validatedImages = images?.map((image) => agentImageSchema.parse(image));
     const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.attachmentCache.storeImage(image))) : undefined;
     const fileRefs = await this.storeUploads(agentId, files);
+    this.runtime.autoContinued.delete(agentId);
     const process = await this.ensureProcess(agentId);
     await this.appendUserRow(agentId, text, imageRefs, fileRefs);
     await process.request({ type: "follow_up", message: withFileRefs(text, fileRefs), ...(validatedImages?.length ? { images: validatedImages } : {}) });
@@ -728,6 +836,10 @@ export class AgentService {
    *    in-flight event/lifecycle reconciliation that stop triggered --
    *    all while SQLite is still open. */
   async shutdown(options?: { interrupted?: boolean }): Promise<void> {
+    // From here on no auto-continue may spawn: the interrupted-shutdown
+    // path keeps lifecycle listeners attached while stopping processes,
+    // and those exits must stay terminal.
+    this.shuttingDown = true;
     // Let create()'s background boots finish (they clean up their own map
     // entries) so they never write to a closed database after this returns.
     await Promise.allSettled([...this.runtime.pendingStarts.values()]);
@@ -751,6 +863,7 @@ export class AgentService {
     this.runtime.transcripts.clear();
     this.runtime.transcriptSeeds.clear();
     this.runtime.transcriptEpochs.clear();
+    this.runtime.autoContinued.clear();
   }
 
   private attach(agentId: string, process: PiProcessHandle): void {
@@ -909,6 +1022,9 @@ export class AgentService {
 
   private async onLifecycle(agentId: string, event: PiLifecycleEvent): Promise<void> {
     if (this.runtime.subscriptions.get(agentId)?.generation !== event.generation) return;
+    // Captured before the error status below overwrites it: decides whether
+    // this exit deserves an automatic continuation.
+    const previousStatus = this.repositories.agents.get(agentId)?.lastKnownStatus;
     this.runtime.diagnostics.set(agentId, {
       generation: event.generation,
       exitStatus: `${event.lifecycle} (${event.exitCode})`,
@@ -922,6 +1038,54 @@ export class AgentService {
     const state = await this.getTranscript(agentId);
     this.emitRowUpsert(agentId, state.appendError(message));
     this.updateStatus(agentId, "error", "attention", event.generation, message);
+    // A run that never went idle but lost its process gets one automatic
+    // continuation (same session dir + ID, canned follow-up). Idle deaths
+    // stay a plain error for the user to retry manually.
+    if (previousStatus !== undefined && AUTO_CONTINUE_STATUSES.has(previousStatus)) {
+      await this.autoContinueAfterDisconnect(agentId, previousStatus);
+    }
+  }
+
+  /** True when this agent spent its auto-continue retry inside the current
+   *  window. An entry older than the window is deleted (budget regenerated)
+   *  instead of punishing a fresh crash for a retry spent days ago. */
+  private isAutoContinueBudgetSpent(agentId: string): boolean {
+    const spentAt = this.runtime.autoContinued.get(agentId);
+    if (spentAt === undefined) return false;
+    if (Date.now() - spentAt >= this.autoContinueWindowMs) {
+      this.runtime.autoContinued.delete(agentId);
+      return false;
+    }
+    return true;
+  }
+
+  private spendAutoContinueBudget(agentId: string): void {
+    this.runtime.autoContinued.set(agentId, Date.now());
+    while (this.runtime.autoContinued.size > MAX_RUNTIME_DIAGNOSTICS) {
+      this.runtime.autoContinued.delete(this.runtime.autoContinued.keys().next().value!);
+    }
+  }
+
+  /** One automatic continuation after a mid-run disconnect. Respawn + canned
+   *  `follow_up`; single-shot per window (the budget timestamp is spent here
+   *  and only restored early by a manual prompt/steer/follow-up), never throws.
+   *  Skipped while shutting down or draining so stops stay terminal. */
+  private async autoContinueAfterDisconnect(agentId: string, previousStatus: string): Promise<void> {
+    if (this.shuttingDown || this.isAutoContinueBudgetSpent(agentId)) return;
+    try {
+      this.requireAgent(agentId);
+    } catch {
+      return;
+    }
+    try {
+      await this.followUp(agentId, CONTINUATION_MESSAGE);
+      this.spendAutoContinueBudget(agentId);
+      logger("agent").info("Agent auto-continued after disconnect", { event: "agent.auto_continued", agentId, previousStatus });
+    } catch (cause) {
+      // Follow-up enforces the admission gate itself: a drain/shutdown (or
+      // a respawn failure) just leaves the error status for manual retry.
+      logger("agent").warn("Agent auto-continue failed", { event: "agent.auto_continue_failed", agentId, previousStatus, ...errorFields(cause) });
+    }
   }
 
   private async completeAbort(agentId: string, cancellation: Cancellation): Promise<void> {

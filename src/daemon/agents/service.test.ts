@@ -3,17 +3,17 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { MetadataStore } from "../metadata/database.ts";
 import { MetadataRepositories, type Workspace } from "../metadata/repositories.ts";
-import { AgentService, collectTitleSources, isGitCommitToolEvent } from "./service.ts";
+import { AgentService, CONTINUATION_MESSAGE, DEFAULT_AUTO_CONTINUE_WINDOW_MS, collectTitleSources, isGitCommitToolEvent, resolveAutoContinueWindowMs } from "./service.ts";
 import { PiRpcManager } from "./rpc/index.ts";
 
 const script = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'||r.type==='steer'||r.type==='follow_up')process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');const data=r.type==='get_available_models'?{models:[{provider:'test',id:'model',name:'Model',api:'test',input:['text'],authenticated:true,supportedThinkingLevels:['medium','high']}]}:r.type==='get_available_thinking_levels'?{levels:['medium','high']}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
 const roots: string[] = [];
-const make = async (limit = 10, executableArgs?: string[]) => {
+const make = async (limit = 10, executableArgs?: string[], autoContinueWindowMs?: number) => {
   const root = await mkdtemp(join("/tmp", "passage-agent-")); roots.push(root);
   const store = new MetadataStore(":memory:"); const repos = new MetadataRepositories(store.db);
   repos.projects.save({ id: "p", configuredRootPath: root, canonicalRootPath: root, displayLabel: "p", archivedAt: null });
   const workspace: Workspace = { id: "w", projectId: "p", kind: "directory", cwd: root, checkoutRoot: root, mainRepositoryRoot: root, branchRef: null, displayLabel: "w", locationId: null, ownershipState: "not-owned", archivedAt: null }; repos.workspaces.save(workspace);
-  const manager = new PiRpcManager(4); const service = new AgentService(repos, { sessionsRoot: join(root, "sessions"), manager, listLimit: limit, pi: { executable: process.execPath, executableArgs: executableArgs ?? ["-e", script] }, titleSuggester: { suggestTitle: async () => null } });
+  const manager = new PiRpcManager(4); const service = new AgentService(repos, { sessionsRoot: join(root, "sessions"), manager, listLimit: limit, pi: { executable: process.execPath, executableArgs: executableArgs ?? ["-e", script] }, titleSuggester: { suggestTitle: async () => null }, ...(autoContinueWindowMs === undefined ? {} : { autoContinueWindowMs }) });
   return { root, store, repos, manager, service };
 };
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -268,6 +268,158 @@ test("retrying a restart-interrupted agent clears the restart attribution", asyn
     expect(["running", "idle"]).toContain(restarted.snapshot(agent.id).lastKnownStatus);
   });
   await restarted.shutdown();
+  await f.service.shutdown();
+  f.store.close();
+});
+
+test("auto-continues a mid-run crash with a canned follow-up, once per intent", async () => {
+  const f = await make();
+  const agent = await f.service.create("w");
+  await f.service.capabilities(agent.id);
+  const cannedCount = async () => {
+    const result = await f.service.history(agent.id);
+    if ("unpersisted" in result) return 0;
+    return result.history.timeline.filter((row) => row.kind === "user" && row.text === CONTINUATION_MESSAGE).length;
+  };
+  // Simulate a crash while a run is in flight: DB says running, process dies.
+  f.repos.agents.updateStatus(agent.id, "running");
+  f.manager.get(agent.id)?.child.kill();
+  await pollExpect(async () => {
+    expect(await cannedCount()).toBe(1);
+    expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  });
+  // A second crash with no user intent in between must not retry again.
+  f.repos.agents.updateStatus(agent.id, "running");
+  f.manager.get(agent.id)?.child.kill();
+  await pollExpect(() => expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("error"));
+  await Bun.sleep(250);
+  expect(await cannedCount()).toBe(1);
+  // Fresh user intent restores the budget: the next mid-run crash continues.
+  await f.service.prompt(agent.id, "keep going");
+  await waitForIdle(f.service, agent.id);
+  f.repos.agents.updateStatus(agent.id, "running");
+  f.manager.get(agent.id)?.child.kill();
+  await pollExpect(async () => {
+    expect(await cannedCount()).toBe(2);
+    expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  });
+  await f.service.shutdown();
+  f.store.close();
+});
+
+test("leaves an idle crash as a plain error with no continuation", async () => {
+  const f = await make();
+  const agent = await f.service.create("w");
+  await f.service.prompt(agent.id, "hello");
+  await waitForIdle(f.service, agent.id);
+  f.manager.get(agent.id)?.child.kill();
+  await pollExpect(() => expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("error"));
+  // No respawn, no canned follow-up: manual retry owns the recovery.
+  expect(f.manager.get(agent.id)).toBeUndefined();
+  const result = await f.service.history(agent.id);
+  expect("unpersisted" in result ? [] : result.history.timeline.filter((row) => row.kind === "user" && row.text === CONTINUATION_MESSAGE)).toHaveLength(0);
+  await f.service.shutdown();
+  f.store.close();
+});
+
+test("warmAfterRestart warms interrupted agents and continues mid-run ones", async () => {
+  const f = await make();
+  const active = await f.service.create("w");
+  const idle = await f.service.create("w");
+  const booting = await f.service.create("w");
+  for (const id of [active.id, idle.id, booting.id]) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await f.service.capabilities(id);
+        break;
+      } catch (error) {
+        if ((error as { code?: string })?.code !== "not-running" || attempt >= 2) throw error;
+        await Bun.sleep(50);
+      }
+    }
+  }
+  await f.service.stop(active.id);
+  await f.service.stop(idle.id);
+  await f.service.stop(booting.id);
+  f.repos.agents.updateStatus(active.id, "running");
+  f.repos.agents.updateStatus(idle.id, "idle");
+  f.repos.agents.updateStatus(booting.id, "initializing");
+  // Fresh service instance: same DB, no in-memory runtime state -- this is
+  // what a real daemon restart looks like.
+  const restarted = new AgentService(f.repos, { sessionsRoot: join(f.root, "sessions"), manager: new PiRpcManager(4), pi: { executable: process.execPath, executableArgs: ["-e", script] } });
+  const result = await restarted.warmAfterRestart();
+  expect(result.warmed.sort()).toEqual([active.id, booting.id].sort());
+  expect(result.continued).toEqual([active.id]);
+  expect(result.failed).toEqual([]);
+  // Mid-run agent settled back to idle with the canned resume in its transcript.
+  await pollExpect(() => expect(restarted.snapshot(active.id).lastKnownStatus).toBe("idle"));
+  const resumed = await restarted.history(active.id);
+  expect("unpersisted" in resumed ? [] : resumed.history.timeline.filter((row) => row.kind === "user" && row.text === CONTINUATION_MESSAGE)).toHaveLength(1);
+  // Initializing agent warmed to idle with no continuation message.
+  await pollExpect(() => expect(restarted.snapshot(booting.id).lastKnownStatus).toBe("idle"));
+  const warmedOnly = await restarted.history(booting.id);
+  expect("unpersisted" in warmedOnly ? [] : warmedOnly.history.timeline.filter((row) => row.kind === "user" && row.text === CONTINUATION_MESSAGE)).toHaveLength(0);
+  // Idle agent untouched: no process spawned for it.
+  expect(f.repos.agents.get(idle.id)?.lastKnownStatus).toBe("idle");
+  expect(restarted.snapshot(idle.id).lastKnownStatus).toBe("idle");
+  await restarted.shutdown();
+  await f.service.shutdown();
+  f.store.close();
+});
+
+test("resolveAutoContinueWindowMs defaults to one hour with env override", () => {
+  expect(DEFAULT_AUTO_CONTINUE_WINDOW_MS).toBe(60 * 60_000);
+  expect(resolveAutoContinueWindowMs({})).toBe(60 * 60_000);
+  expect(resolveAutoContinueWindowMs({ PASSAGE_AUTO_CONTINUE_WINDOW_MINUTES: "30" })).toBe(30 * 60_000);
+  expect(resolveAutoContinueWindowMs({ PASSAGE_AUTO_CONTINUE_WINDOW_MINUTES: "" })).toBe(60 * 60_000);
+  // Invalid values warn and fall back instead of disabling retries or
+  // pinning them spent forever.
+  expect(resolveAutoContinueWindowMs({ PASSAGE_AUTO_CONTINUE_WINDOW_MINUTES: "bogus" })).toBe(60 * 60_000);
+  expect(resolveAutoContinueWindowMs({ PASSAGE_AUTO_CONTINUE_WINDOW_MINUTES: "-5" })).toBe(60 * 60_000);
+  expect(resolveAutoContinueWindowMs({ PASSAGE_AUTO_CONTINUE_WINDOW_MINUTES: "0" })).toBe(60 * 60_000);
+});
+
+test("rejects a non-positive auto-continue window option", async () => {
+  const f = await make();
+  expect(() => new AgentService(f.repos, { sessionsRoot: join(f.root, "sessions"), autoContinueWindowMs: -1 })).toThrow("invalid auto-continue window");
+  await f.service.shutdown();
+  f.store.close();
+});
+
+test("auto-continue budget regenerates after the window", async () => {
+  const f = await make(10, undefined, 50);
+  const agent = await f.service.create("w");
+  await f.service.capabilities(agent.id);
+  const cannedCount = async () => {
+    const result = await f.service.history(agent.id);
+    if ("unpersisted" in result) return 0;
+    return result.history.timeline.filter((row) => row.kind === "user" && row.text === CONTINUATION_MESSAGE).length;
+  };
+  const crashWhileRunning = () => {
+    f.repos.agents.updateStatus(agent.id, "running");
+    f.manager.get(agent.id)?.child.kill();
+  };
+  crashWhileRunning();
+  await pollExpect(async () => {
+    expect(await cannedCount()).toBe(1);
+    expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  });
+  // Inside the window a second crash stays a plain error.
+  crashWhileRunning();
+  await pollExpect(() => expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("error"));
+  await Bun.sleep(25);
+  expect(await cannedCount()).toBe(1);
+  // Past the window the budget regenerated: the next crash continues again.
+  // (capabilities() respawns the dead process without touching the budget,
+  // so there is something live to kill -- unlike prompt(), which would also
+  // restore the budget manually and confound the assertion.)
+  await Bun.sleep(100);
+  await f.service.capabilities(agent.id);
+  crashWhileRunning();
+  await pollExpect(async () => {
+    expect(await cannedCount()).toBe(2);
+    expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  });
   await f.service.shutdown();
   f.store.close();
 });

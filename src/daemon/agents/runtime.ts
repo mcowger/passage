@@ -78,6 +78,13 @@ export class AgentRuntime {
    *  fire-and-forget `maybeAutoTitle` so rapid consecutive user messages
    *  cannot spawn duplicate suggestion runs for the same agent. */
   readonly titleSuggestions = new Set<string>();
+  /** When each agent last spent its automatic continuation retry (epoch ms).
+   *  The budget regenerates after the configured window (see
+   *  `resolveAutoContinueWindowMs`): a retry spent long ago never punishes a
+   *  fresh crash. A manual prompt, steer, or follow-up deletes the entry and
+   *  restores the budget immediately; shutdown clears the whole map.
+   *  Bounded like the diagnostics map. */
+  readonly autoContinued = new Map<string, number>();
 }
 
 /** Cap on retained per-agent crash/interruption diagnostics. */
