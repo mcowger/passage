@@ -667,7 +667,7 @@ export function ComposerMergeButton({
             ) : null}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="thinking-popover w-64 max-w-[calc(100vw-2rem)] p-1" align="start" side="top" sideOffset={6}>
+        <PopoverContent className="thinking-popover w-80 max-w-[calc(100vw-2rem)] p-1" align="start" side="top" sideOffset={6}>
           <div className="popover-header-title px-2 py-1.5">
             Git{status?.branchRef ? ` · ${status.branchRef}` : ""}
           </div>
@@ -868,6 +868,8 @@ export function ComposerMergeButton({
           <div className="flex flex-col gap-2">
             <Button
               variant="default"
+              size="default"
+              className="max-sm:min-h-11"
               onClick={handleShipItToPr}
               disabled={busy || !ghReady}
               title={
@@ -881,6 +883,8 @@ export function ComposerMergeButton({
             </Button>
             <Button
               variant="secondary"
+              size="default"
+              className="max-sm:min-h-11"
               onClick={handleShipItMergeLocally}
               disabled={busy || !shipItEnabled}
               title={shipItTitle}

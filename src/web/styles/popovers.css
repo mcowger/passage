@@ -184,7 +184,6 @@
 
 /* Thinking Popover (Radix PopoverContent — positioned by Radix, not manually) */
 .thinking-popover {
-  width: 180px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: 8px;
@@ -200,6 +199,9 @@
   color: var(--muted);
   letter-spacing: 0.05em;
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .thinking-option-row {
   display: flex;
@@ -209,6 +211,11 @@
   font-size: 12px;
   cursor: pointer;
   color: var(--foreground);
+  white-space: nowrap;
+}
+.thinking-option-row > svg,
+.thinking-option-row > .size-3 {
+  flex-shrink: 0;
 }
 .thinking-option-row:hover { background: var(--surface-hover); }
 .thinking-option-row.active {
@@ -216,8 +223,9 @@
   color: var(--accent);
   font-weight: 600;
 }
-.thinking-option-row .check-icon { margin-left: auto; }
-.thinking-option-name { text-transform: capitalize; }
+.thinking-option-row .check-icon { margin-left: auto; flex-shrink: 0; }
+.thinking-option-name { text-transform: capitalize; white-space: nowrap; flex-shrink: 0; }
+.thinking-option-row > .ml-auto { white-space: nowrap; flex-shrink: 0; }
 
 /* Signal-strength bars for thinking effort (one bar per level) */
 .thinking-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
