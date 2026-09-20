@@ -19,6 +19,9 @@
     },
     "build": {
       "command": "bun run build"
+    },
+    "deploy": {
+      "command": "bun run deploy"
     }
   },
   "metadataGeneration": {
