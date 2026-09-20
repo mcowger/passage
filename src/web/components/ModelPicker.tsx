@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { AgentCapabilities } from "../../shared/domain/agents.ts";
+import { PassageLogo } from "./PassageLogo.tsx";
 import { Badge } from "./ui/badge.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import {
@@ -210,7 +211,16 @@ export function ModelPicker({
               {sections.map((section) => (
                 <CommandGroup
                   key={section.title}
-                  heading={`${section.isFav ? "★ " : section.isRecent ? "🕒 " : "❖ "}${section.title}`}
+                  heading={
+                    section.isFav || section.isRecent ? (
+                      `${section.isFav ? "★ " : "🕒 "}${section.title}`
+                    ) : (
+                      <span className="model-section-heading">
+                        <PassageLogo size={12} />
+                        <span>{section.title}</span>
+                      </span>
+                    )
+                  }
                 >
                   {section.items.map((m) => {
                     const modelKey = `${m.provider}:${m.id}`;
@@ -226,7 +236,7 @@ export function ModelPicker({
                         className={`model-row-item ${isSelected ? "selected" : ""}`}
                       >
                         <span className="drag-handle">⠿</span>
-                        <span className="model-sparkle">❖</span>
+                        <PassageLogo size={12} className="model-sparkle" />
                         <span className="model-name-text">{m.name}</span>
                         <Badge variant="outline" className="context-size-tag font-mono text-[11px] px-1 py-0">
                           {ctxLabel}

@@ -15,6 +15,7 @@ import {
   Plus,
   PauseCircle,
 } from "lucide-react";
+import { PassageLogo } from "./PassageLogo.tsx";
 import { ProjectIconBadge } from "./ProjectIcon.tsx";
 import { cn } from "../lib/utils.ts";
 import type { BuildInfo } from "../../shared/build-info.ts";
@@ -146,7 +147,7 @@ export function Sidebar({
   return (
     <aside className={`sidebar ${open ? "drawer-open" : ""}`} aria-label="Projects and workspaces">
       <div className="brand">
-        <span className="mark" aria-hidden="true">P</span>
+        <PassageLogo size={22} className="brand-mark" alt="Passage logo" />
         <strong>Passage</strong>
         <button className="icon-button mobile-only" onClick={onClose} aria-label="Close navigation">×</button>
       </div>
