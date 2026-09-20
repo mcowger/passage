@@ -884,8 +884,18 @@ export class AgentService {
     } else {
       const dialog = parsePiExtensionUiDialog(event);
       if (dialog) {
-        this.runtime.pendingUiRequests.set(agentId, dialog);
-        this.updateStatus(agentId, "needs-attention", "attention", event.generation, undefined, dialog);
+        // Dialog events drain through the per-agent queue while answers go
+        // straight to Pi, so the process's tracked pending request always
+        // reflects the latest arrival: when it no longer matches this event,
+        // the dialog was already answered, auto-answered, or superseded, and
+        // the late event must not re-animate the card or flip status back to
+        // needs-attention.
+        const live = this.manager.get(agentId);
+        const currentId = live?.generation === event.generation ? live.getPendingUiRequest()?.id : undefined;
+        if (typeof currentId === "string" && currentId === dialog.id) {
+          this.runtime.pendingUiRequests.set(agentId, dialog);
+          this.updateStatus(agentId, "needs-attention", "attention", event.generation, undefined, dialog);
+        }
       } else if (["error", "prompt_error", "extension_error"].includes(String(event.type))) {
         this.updateStatus(agentId, "error", "attention", event.generation, undefined, payload);
       } else {
