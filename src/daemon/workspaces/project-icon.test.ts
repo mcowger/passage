@@ -128,6 +128,67 @@ describe("findProjectIcon", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("finds icons in top-level src/assets as a last resort", async () => {
+    const root = await makeRoot();
+    try {
+      await mkdir(join(root, "src", "assets"), { recursive: true });
+      await writeFile(join(root, "src", "assets", "favicon-32x32.png"), png(32, 32));
+      expect(await findProjectIcon(root)).toBe(join(root, "src", "assets", "favicon-32x32.png"));
+      const icon = await getProjectIcon(root);
+      expect(icon?.mimeType).toBe("image/png");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("finds monorepo package src/assets icons without component shadowing", async () => {
+    // Plexus layout: packages/frontend/src/assets holds the served icons,
+    // while src/components holds component SVGs that must never match.
+    const root = await makeRoot();
+    try {
+      await mkdir(join(root, "packages", "frontend", "src", "assets"), { recursive: true });
+      await writeFile(
+        join(root, "packages", "frontend", "src", "assets", "favicon-32x32.png"),
+        png(32, 32),
+      );
+      await mkdir(join(root, "packages", "frontend", "src", "components"), { recursive: true });
+      await writeFile(
+        join(root, "packages", "frontend", "src", "components", "icon.svg"),
+        "<svg></svg>",
+      );
+      expect(await findProjectIcon(root)).toBe(
+        join(root, "packages", "frontend", "src", "assets", "favicon-32x32.png"),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("priority dirs outrank src/assets fallback", async () => {
+    const root = await makeRoot();
+    try {
+      await mkdir(join(root, "public"), { recursive: true });
+      await writeFile(join(root, "public", "favicon.png"), png(16, 16));
+      await mkdir(join(root, "src", "assets"), { recursive: true });
+      await writeFile(join(root, "src", "assets", "favicon-32x32.png"), png(32, 32));
+      expect(await findProjectIcon(root)).toBe(join(root, "public", "favicon.png"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("src/assets fallback is skipped at maxDepth 0", async () => {
+    const root = await makeRoot();
+    try {
+      await mkdir(join(root, "src", "assets"), { recursive: true });
+      await writeFile(join(root, "src", "assets", "favicon-32x32.png"), png(32, 32));
+      expect(await findProjectIcon(root, 0)).toBeNull();
+      expect(await findProjectIcon(root)).toBe(join(root, "src", "assets", "favicon-32x32.png"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("getProjectIcon", () => {

@@ -64,6 +64,17 @@ export const IGNORED_DIRS = [
   "__tests__",
 ];
 
+/**
+ * Source roots whose asset subdirs are searched as a last resort (see
+ * SRC_ASSET_SUBDIRS). Bundler-era apps often keep their served icons under
+ * `src/assets`, which the filename walk ignores so component-asset SVGs
+ * never shadow a real favicon.
+ */
+const SRC_ROOT_DIRS = ["src", "lib"];
+
+/** Conventional asset subdirs to look inside each source root. */
+const SRC_ASSET_SUBDIRS = ["assets", "public", "static", "images", "img"];
+
 export interface DetectedProjectIcon {
   data: string;
   mimeType: string;
@@ -662,8 +673,17 @@ export async function findProjectIcons(
   // Then search root and any other non-priority directories
   const rootMatches = await collectRootIcons(projectDir, maxDepth);
 
+  // Source-tree asset dirs (e.g. packages/app/src/assets) last: bundler-era
+  // apps keep their served icons under src/, which the filename walk above
+  // ignores so component SVGs never shadow a real favicon. Only the
+  // conventional asset subdirs are searched, and only after every
+  // higher-confidence branch, so projects that already resolve keep their
+  // existing result. Explicit well-known paths, not a tree walk, so depth
+  // beyond "root files only" (maxDepth 0) is enough to allow them.
+  const srcAssetMatches = maxDepth >= 1 ? await collectSrcAssetIcons(projectDir) : [];
+
   const seen = new Set(declaredMatches);
-  const rest = [...priorityMatches, ...monoMatches, ...rootMatches].filter((p) => {
+  const rest = [...priorityMatches, ...monoMatches, ...rootMatches, ...srcAssetMatches].filter((p) => {
     if (seen.has(p)) return false;
     seen.add(p);
     return true;
@@ -683,6 +703,37 @@ export async function findProjectIcon(
 ): Promise<string | null> {
   const matches = await findProjectIcons(projectDir, maxDepth);
   return matches[0] ?? null;
+}
+
+/**
+ * Last-resort icon search inside source-tree asset dirs: `<base>/src/assets`,
+ * `<base>/lib/public`, etc., where `<base>` is the project root plus each
+ * monorepo package root. Only the conventional asset subdirs are listed
+ * (never the source root itself), so component files like
+ * `src/components/icon.svg` still cannot shadow a real favicon.
+ */
+async function collectSrcAssetIcons(projectDir: string): Promise<string[]> {
+  const bases = [projectDir];
+  for (const monoDir of MONOREPO_PACKAGE_DIRS) {
+    let entries: string[];
+    try {
+      entries = await readdir(join(projectDir, monoDir));
+    } catch {
+      continue;
+    }
+    const packagePaths = entries.map((entry) => join(projectDir, monoDir, entry));
+    const isDirResults = await Promise.all(packagePaths.map((p) => isExistingDirectory(p)));
+    packagePaths.forEach((packagePath, index) => {
+      if (isDirResults[index]) bases.push(packagePath);
+    });
+  }
+  const assetDirs = bases.flatMap((base) =>
+    SRC_ROOT_DIRS.flatMap((srcRoot) => SRC_ASSET_SUBDIRS.map((sub) => join(base, srcRoot, sub))),
+  );
+  const results = await Promise.all(
+    assetDirs.map((dir) => findIconsInDir(dir, PROJECT_ICON_PATTERNS)),
+  );
+  return results.flat();
 }
 
 async function collectRootIcons(
