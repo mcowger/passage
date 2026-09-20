@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BuildInfo } from "../../shared/build-info.ts";
+import { formatBuildLabel, type BuildInfo } from "../../shared/build-info.ts";
+import { setRootBuildIdentifier } from "../root-error.ts";
 import type { ConnectionHealth } from "../socketLifecycle.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { subscribeDaemon } from "../daemonSocket.ts";
@@ -20,8 +21,12 @@ export function useDaemon(api: WorkspaceApi) {
     try {
       const daemon = await api.daemonSnapshot();
       setBuild(daemon.build);
+      // Feed the root-error diagnostics with the same build identity the
+      // sidebar shows; falls back to "unknown" until this resolves.
+      setRootBuildIdentifier(formatBuildLabel(daemon.build));
     } catch {
       setBuild(null);
+      setRootBuildIdentifier(undefined);
     }
   }, [api]);
 

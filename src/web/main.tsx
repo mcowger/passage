@@ -46,6 +46,8 @@ import {
 } from "./components/ui/alert-dialog.tsx";
 import { Toaster } from "./components/ui/sonner.tsx";
 import { toast } from "sonner";
+import { RootErrorBoundary } from "./components/RootErrorBoundary.tsx";
+import { createRootErrorCallbacks, installGlobalRootErrorListeners } from "./root-error.ts";
 import "./styles.css";
 
 import {
@@ -958,4 +960,21 @@ function App() {
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Passage root element is missing");
-createRoot(root).render(<StrictMode><TooltipProvider><App /><Toaster /></TooltipProvider></StrictMode>);
+// Record out-of-React failures (script errors, unhandled rejections) for
+// diagnostics without disturbing a healthy tree. Install-once guarded so
+// development hot reload re-runs don't stack duplicate listeners.
+installGlobalRootErrorListeners();
+// createRoot error callbacks share the boundary's reporting helper (with
+// dedupe); they only record diagnostics and never touch React state. Note:
+// no try/catch around render() here — it cannot catch React rendering
+// failures; the boundary above is the containment mechanism.
+createRoot(root, createRootErrorCallbacks()).render(
+  <RootErrorBoundary>
+    <StrictMode>
+      <TooltipProvider>
+        <App />
+        <Toaster />
+      </TooltipProvider>
+    </StrictMode>
+  </RootErrorBoundary>,
+);
