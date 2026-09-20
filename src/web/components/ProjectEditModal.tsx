@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Project } from "../../shared/domain/workspaces.ts";
 import type { ProjectBranch } from "../../shared/domain/git.ts";
 import { friendlyApiError, WorkspaceApiError, type WorkspaceApi } from "../api.ts";
@@ -13,6 +13,8 @@ import {
 } from "./ui/dialog.tsx";
 import { Alert, AlertDescription } from "./ui/alert.tsx";
 import { ProjectAppearanceField } from "./ProjectAppearanceField.tsx";
+import { Progress } from "./ui/progress.tsx";
+import { toast } from "sonner";
 
 export function ProjectEditModal({
   project,
@@ -38,6 +40,10 @@ export function ProjectEditModal({
   const [forceTarget, setForceTarget] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ branch: string; message: string } | null>(null);
   const [archiving, setArchiving] = useState<string | null>(null);
+  const [cleaning, setCleaning] = useState(false);
+  const [confirmCleanup, setConfirmCleanup] = useState(false);
+  const [cleanupProgress, setCleanupProgress] = useState<{ done: number; total: number; current: string } | null>(null);
+  const cleanupAbortRef = useRef(false);
 
   useEffect(() => {
     setLabel(project.displayLabel);
@@ -86,6 +92,70 @@ export function ProjectEditModal({
     }
   };
 
+  /** Sequential cleanup with real progress: one safe delete per candidate
+   *  branch, publishing the fresh list after each so rows visibly disappear
+   *  and the bar/status stay truthful. A single bulk call would only offer
+   *  a busy label. Aborting stops before the next branch; the branch
+   *  currently deleting always finishes. */
+  const handleCleanupBranches = async () => {
+    // The confirm action carries no disabled state of its own: refuse to
+    // start while a row delete or archive is in flight so two mutations
+    // never compete over the branch list.
+    if (deleting !== null || archiving !== null || cleaning) return;
+    const targets = (branches ?? [])
+      .filter((b) => !b.isMain && !b.isCheckedOut && b.mergedIntoMain === true)
+      .map((b) => b.name);
+    if (targets.length === 0) {
+      setConfirmCleanup(false);
+      return;
+    }
+    cleanupAbortRef.current = false;
+    setCleaning(true);
+    setBranchesError("");
+    setRowError(null);
+    const deleted: string[] = [];
+    const skipped: Array<{ branch: string; reason: string }> = [];
+    for (let i = 0; i < targets.length; i++) {
+      if (cleanupAbortRef.current) break;
+      const name = targets[i];
+      setCleanupProgress({ done: i, total: targets.length, current: name });
+      try {
+        setBranches(await api.deleteProjectBranch(project.id, name, false));
+        deleted.push(name);
+      } catch (err) {
+        skipped.push({
+          branch: name,
+          reason: err instanceof WorkspaceApiError ? err.message || err.code : friendlyApiError(err, "Delete failed"),
+        });
+      }
+    }
+    // `stop` during the final branch leaves nothing unprocessed, so only
+    // report a stop when at least one target never ran.
+    const stopped = cleanupAbortRef.current && deleted.length + skipped.length < targets.length;
+    setCleanupProgress(null);
+    setCleaning(false);
+    setConfirmCleanup(false);
+    try {
+      await onSaved();
+    } catch (err) {
+      toast.error(friendlyApiError(err, "Branches were cleaned up, but the workspace list could not be refreshed"));
+    }
+    if (stopped) {
+      toast.success(`Cleanup stopped — deleted ${deleted.length} of ${targets.length} branches`);
+    } else if (deleted.length > 0) {
+      toast.success(
+        deleted.length === 1
+          ? `Cleaned up 1 branch (${deleted[0]})`
+          : `Cleaned up ${deleted.length} branches`,
+      );
+    }
+    if (skipped.length > 0) {
+      setBranchesError(
+        `Skipped ${skipped.length} branch${skipped.length === 1 ? "" : "es"}: ${skipped.map((s) => `${s.branch}: ${s.reason}`).join("; ")}`,
+      );
+    }
+  };
+
   const handleArchiveWorkspace = async (workspaceId: string) => {
     setArchiving(workspaceId);
     try {
@@ -124,7 +194,7 @@ export function ProjectEditModal({
   };
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open onOpenChange={(open) => { if (!open && !cleaning) onClose(); }}>
       <DialogContent className="max-w-[min(480px,calc(100%-2rem))] max-h-[calc(100dvh-2rem)] overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-base font-semibold">Edit project</DialogTitle>
@@ -166,16 +236,23 @@ export function ProjectEditModal({
             forceTarget={forceTarget}
             rowError={rowError}
             archiving={archiving}
+            cleaning={cleaning}
+            confirmCleanup={confirmCleanup}
+            cleanupProgress={cleanupProgress}
             onRetry={loadBranches}
             onDelete={handleDeleteBranch}
             onCancelForce={() => { setForceTarget(null); setRowError(null); }}
             onArchive={handleArchiveWorkspace}
+            onRequestCleanup={() => setConfirmCleanup(true)}
+            onCancelCleanup={() => setConfirmCleanup(false)}
+            onAbortCleanup={() => { cleanupAbortRef.current = true; }}
+            onConfirmCleanup={handleCleanupBranches}
           />
           <div className="flex justify-end gap-2 pt-2 border-t border-border/40">
-            <Button type="button" variant="secondary" size="xs" onClick={onClose} disabled={busy}>
+            <Button type="button" variant="secondary" size="xs" onClick={onClose} disabled={busy || cleaning}>
               Cancel
             </Button>
-            <Button type="submit" size="xs" disabled={busy || !label.trim()}>
+            <Button type="submit" size="xs" disabled={busy || cleaning || !label.trim()}>
               {busy ? "Saving..." : "Save changes"}
             </Button>
           </div>
@@ -199,10 +276,17 @@ function BranchReviewSection({
   forceTarget,
   rowError,
   archiving,
+  cleaning,
+  confirmCleanup,
+  cleanupProgress,
   onRetry,
   onDelete,
   onCancelForce,
   onArchive,
+  onRequestCleanup,
+  onCancelCleanup,
+  onAbortCleanup,
+  onConfirmCleanup,
 }: {
   branches: ProjectBranch[] | null;
   loading: boolean;
@@ -211,23 +295,87 @@ function BranchReviewSection({
   forceTarget: string | null;
   rowError: { branch: string; message: string } | null;
   archiving: string | null;
+  cleaning: boolean;
+  confirmCleanup: boolean;
+  cleanupProgress: { done: number; total: number; current: string } | null;
   onRetry: () => void;
   onDelete: (branch: string, force: boolean) => void;
   onCancelForce: () => void;
   onArchive: (workspaceId: string) => void;
+  onRequestCleanup: () => void;
+  onCancelCleanup: () => void;
+  onAbortCleanup: () => void;
+  onConfirmCleanup: () => void;
 }) {
   const tracked = branches?.filter((b) => b.trackedWorkspaces.length > 0).length ?? 0;
   const merged = branches?.filter((b) => b.mergedIntoMain === true).length ?? 0;
+  const cleanupCandidates = branches?.filter((b) => !b.isMain && !b.isCheckedOut && b.mergedIntoMain === true) ?? [];
+  let cleanupButtonLabel: string;
+  if (cleaning && cleanupProgress) {
+    cleanupButtonLabel = `Cleaning ${cleanupProgress.done}/${cleanupProgress.total}`;
+  } else if (cleaning) {
+    cleanupButtonLabel = "Cleaning…";
+  } else if (cleanupCandidates.length > 0) {
+    cleanupButtonLabel = `Clean up (${cleanupCandidates.length})`;
+  } else {
+    cleanupButtonLabel = "Clean up";
+  }
   return (
     <div className="flex min-w-0 flex-col gap-2 rounded-md border border-border/60 p-2.5">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Branches{branches ? ` (${branches.length})` : ""}
         </h3>
-        <Button type="button" variant="ghost" size="xs" onClick={onRetry} disabled={loading}>
-          {loading ? "Loading…" : "Refresh"}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={onRequestCleanup}
+            disabled={loading || cleaning || deleting !== null || archiving !== null || !branches || cleanupCandidates.length === 0}
+            title="Delete all branches merged into the trunk (including branches with no unique commits). Trunk and checked-out branches are kept."
+          >
+            {cleanupButtonLabel}
+          </Button>
+          <Button type="button" variant="ghost" size="xs" onClick={onRetry} disabled={loading || cleaning}>
+            {loading ? "Loading…" : "Refresh"}
+          </Button>
+        </div>
       </div>
+      {confirmCleanup && (
+        <div className="flex flex-col gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 p-1.5">
+          {cleaning && cleanupProgress ? (
+            <>
+              <p className="text-[11px] font-medium" aria-live="polite">
+                Deleting {cleanupProgress.done + 1} of {cleanupProgress.total}: <span className="font-mono">⎇ {cleanupProgress.current}</span>…
+              </p>
+              <Progress value={Math.round((cleanupProgress.done / cleanupProgress.total) * 100)} aria-label={`Cleaning branches: ${cleanupProgress.done} of ${cleanupProgress.total} processed`} />
+              <div className="flex justify-end gap-1.5">
+                <Button type="button" variant="secondary" size="xs" onClick={onAbortCleanup}>
+                  Stop after current
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] font-medium">
+                Delete {cleanupCandidates.length} merged {cleanupCandidates.length === 1 ? "branch" : "branches"}? Branches with no unique commits are also removed. Trunk and checked-out branches are kept.
+              </p>
+              <p className="truncate font-mono text-[10px] text-muted-foreground" title={cleanupCandidates.map((b) => b.name).join(", ")}>
+                {cleanupCandidates.map((b) => b.name).join(", ")}
+              </p>
+              <div className="flex justify-end gap-1.5">
+                <Button type="button" variant="secondary" size="xs" onClick={onCancelCleanup}>
+                  Cancel
+                </Button>
+                <Button type="button" variant="destructive" size="xs" onClick={onConfirmCleanup}>
+                  {`Delete ${cleanupCandidates.length}`}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       {branches && branches.length > 0 && (
         <p className="text-[11px] text-muted-foreground">
           {tracked} tracked in Passage · {merged} merged into main · safe delete only; unmerged branches need a second force confirm.
@@ -250,6 +398,14 @@ function BranchReviewSection({
               ? "The trunk branch cannot be deleted"
               : "Checked out in a worktree — remove the worktree first";
             const isForceOpen = forceTarget === branch.name;
+            let deleteTitle: string;
+            if (cleaning) {
+              deleteTitle = "Cleanup is running";
+            } else if (protected_) {
+              deleteTitle = protectReason;
+            } else {
+              deleteTitle = `Delete branch ${branch.name} (safe)`;
+            }
             return (
               <li key={branch.name} className="min-w-0 rounded-md border border-border/50 px-2 py-1.5">
                 <div className="flex items-center justify-between gap-2 min-w-0">
@@ -260,8 +416,8 @@ function BranchReviewSection({
                     type="button"
                     variant="destructive"
                     size="xs"
-                    disabled={protected_ || deleting === branch.name}
-                    title={protected_ ? protectReason : `Delete branch ${branch.name} (safe)`}
+                    disabled={protected_ || deleting === branch.name || cleaning}
+                    title={deleteTitle}
                     onClick={() => onDelete(branch.name, false)}
                   >
                     {deleting === branch.name ? "Deleting…" : "Delete"}
@@ -304,7 +460,7 @@ function BranchReviewSection({
                             type="button"
                             variant="outline"
                             size="xs"
-                            disabled={archiving === w.workspaceId}
+                            disabled={archiving === w.workspaceId || cleaning}
                             onClick={() => onArchive(w.workspaceId)}
                           >
                             {archiving === w.workspaceId ? "Archiving…" : "Archive"}
@@ -330,7 +486,7 @@ function BranchReviewSection({
                             type="button"
                             variant="destructive"
                             size="xs"
-                            disabled={deleting === branch.name}
+                            disabled={deleting === branch.name || cleaning}
                             onClick={() => onDelete(branch.name, true)}
                           >
                             {deleting === branch.name ? "Deleting…" : "Force delete"}
