@@ -534,7 +534,7 @@ function AgentComposerInner({
             </label>
           </div>
           <div className="composer-toolbar-right">
-            <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} settled={!running && !stopping} refreshKey={gitStatusRefreshKey} onWorkspaceDeleted={onWorkspaceDeleted} hideIcons={isMobileComposer} />
+            <ComposerMergeButton workspaceId={workspaceId} api={api} disabled={busy || stopping} settled={!running && !stopping} refreshKey={gitStatusRefreshKey} onWorkspaceDeleted={onWorkspaceDeleted} />
             <DisplayOptionsPopover
               expansion={sessionExpansion}
               onExpansionChange={onSessionExpansionChange}

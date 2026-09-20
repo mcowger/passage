@@ -105,7 +105,7 @@ describe("ComposerMergeButton stale git status (happy-dom)", () => {
     // a lone Commit option, both inside the single Git menu.
     let tree!: ReturnType<typeof render>;
     await act(async () => {
-      tree = render(React.createElement(ComposerMergeButton, { workspaceId: "wsp-1", api, settled: true, hideIcons: true }));
+      tree = render(React.createElement(ComposerMergeButton, { workspaceId: "wsp-1", api, settled: true }));
     });
     await act(async () => {
       resolveReq(statusFor(true));

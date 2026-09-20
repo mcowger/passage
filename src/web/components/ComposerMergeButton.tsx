@@ -41,7 +41,7 @@ import {
   GitMerge,
   GitPullRequest,
   RefreshCw,
-  Rocket,
+  Truck,
   Upload,
 } from "lucide-react";
 
@@ -62,7 +62,6 @@ export function ComposerMergeButton({
   settled = true,
   refreshKey,
   onWorkspaceDeleted,
-  hideIcons,
 }: {
   workspaceId: string;
   api: WorkspaceApi;
@@ -72,8 +71,6 @@ export function ComposerMergeButton({
   /** Bumped by the owning session on every history load; drives a status re-check (see below). */
   refreshKey?: number;
   onWorkspaceDeleted?: () => void | Promise<void>;
-  /** Mobile mode: omit the decorative leading icon to save horizontal space. */
-  hideIcons?: boolean;
 }) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [statusState, setStatusState] = useState<"loading" | "ready" | "unavailable">("loading");
@@ -702,7 +699,7 @@ export function ComposerMergeButton({
                     title={shipItTitle}
                     aria-label={shipItTitle}
                   >
-                    {shipItBusy ? <Spinner className="size-3" /> : hideIcons ? null : <Rocket size={14} aria-hidden="true" />}
+                    {shipItBusy ? <Spinner className="size-3" /> : <Truck size={14} aria-hidden="true" />}
                     Ship It...
                   </Button>
                   <div className="px-2 pt-1 text-xs text-muted-foreground">
