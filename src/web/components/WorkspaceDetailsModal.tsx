@@ -144,7 +144,7 @@ export function WorkspaceDetailsModal({
         <DialogContent className="max-w-[min(560px,calc(100%-2rem))] text-sm max-h-[calc(100dvh-2rem)] overflow-y-auto overflow-x-hidden">
           <DialogHeader className="min-w-0 pr-6">
             <div className="flex items-center gap-2 mb-1 min-w-0 flex-wrap">
-              <ProjectIconBadge iconName={project.iconName} color={project.iconColor} size={13} />
+              <ProjectIconBadge iconName={project.iconName} color={project.iconColor} size={13} imageSrc={project.useProjectIcon ? api.projectIconUrl(project.id) : null} />
               <span className="text-xs text-muted-foreground font-mono shrink-0">{project.displayLabel}</span>
               <span className="text-muted-foreground shrink-0">/</span>
               <DialogTitle className="text-base font-semibold min-w-0 [overflow-wrap:anywhere]">{workspace.displayLabel}</DialogTitle>

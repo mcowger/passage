@@ -65,6 +65,9 @@ export type SidebarProps = {
    *  connected. Absent renders the same as "checking" -- never a false
    *  "Connected" before the first heartbeat lands. */
   wsHealth?: ConnectionHealth;
+  /** Builds the daemon URL for a project's detected favicon. Absent
+   *  renders lucide icons only. */
+  projectIconUrl?: (projectId: string) => string;
 };
 
 const DAEMON_PHASE_LABEL: Record<DaemonLifecycleSnapshot["phase"], string> = {
@@ -141,6 +144,7 @@ export function Sidebar({
   onBeginDrain,
   onCancelDrain,
   wsHealth,
+  projectIconUrl,
 }: SidebarProps) {
   const activeProjects = data.projects.filter((project) => !project.archivedAt);
   const [pendingRemove, setPendingRemove] = useState<Project | null>(null);
@@ -167,6 +171,7 @@ export function Sidebar({
             onRequestRemoveProject={onArchiveProject ? setPendingRemove : undefined}
             onEditProject={onEditProject}
             workspaceStatuses={workspaceStatuses}
+            projectIconUrl={projectIconUrl}
           />
         ))}
       </div>
@@ -229,6 +234,7 @@ function ProjectRow({
   onDiscoverWorktrees,
   onRequestRemoveProject,
   onEditProject,
+  projectIconUrl,
 }: {
   project: Project;
   workspaces: Workspace[];
@@ -241,6 +247,7 @@ function ProjectRow({
   onDiscoverWorktrees?: (projectId?: string) => void;
   onRequestRemoveProject?: (project: Project) => void;
   onEditProject?: (project: Project) => void;
+  projectIconUrl?: (projectId: string) => string;
 }) {
   const collapsedKey = `passage:project-collapsed:${project.id}`;
   const [collapsedOverride, setCollapsedOverride] = useState<boolean | null>(() => {
@@ -295,7 +302,7 @@ function ProjectRow({
         <span className="project-chevron shrink-0" aria-hidden="true">
           {collapsed ? <ChevronRight className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}
         </span>
-        <ProjectIconBadge iconName={project.iconName} color={project.iconColor} size={14} className={!project.iconColor ? "text-muted-foreground/80" : undefined} />
+        <ProjectIconBadge iconName={project.iconName} color={project.iconColor} size={14} className={!project.iconColor ? "text-muted-foreground/80" : undefined} imageSrc={project.useProjectIcon && projectIconUrl ? projectIconUrl(project.id) : null} />
         <strong className="min-w-0 flex-1 truncate" title={project.displayLabel}>{project.displayLabel}</strong>
         {onEditProject && (
           <button

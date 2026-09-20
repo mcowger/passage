@@ -50,6 +50,7 @@ const project: Project = {
   displayLabel: "Project",
   iconName: null,
   iconColor: null,
+  useProjectIcon: false,
   archivedAt: null,
 };
 

@@ -3,6 +3,7 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import { PROJECT_COLORS, PROJECT_ICON_NAMES } from "../../shared/domain/workspaces.ts";
 import { cn } from "../lib/utils.ts";
 import { Button } from "./ui/button.tsx";
+import { Checkbox } from "./ui/checkbox.tsx";
 import { Label } from "./ui/label.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import {
@@ -32,12 +33,22 @@ export function ProjectAppearanceField({
   onIconChange,
   onColorChange,
   idPrefix = "project-appearance",
+  useProjectIcon = false,
+  onUseProjectIconChange,
+  detectedIconUrl,
 }: {
   icon: string | null;
   color: string | null;
   onIconChange: (icon: string | null) => void;
   onColorChange: (color: string | null) => void;
   idPrefix?: string;
+  /** "Use project icon" toggle state. The toggle itself only renders when
+   *  onUseProjectIconChange is provided (editing an existing project). */
+  useProjectIcon?: boolean;
+  onUseProjectIconChange?: (value: boolean) => void;
+  /** Daemon URL for the detected favicon; shown in the preview when the
+   *  toggle is on. Falls back to the lucide icon when nothing is found. */
+  detectedIconUrl?: string | null;
 }) {
   const [iconOpen, setIconOpen] = useState(false);
   const activeColor = normalizeColor(color);
@@ -50,10 +61,10 @@ export function ProjectAppearanceField({
     <div className="flex flex-col gap-3">
       <div className="flex items-start gap-3">
         <div
-          className="flex items-center justify-center w-10 h-10 rounded-md border border-border/60 bg-muted/30 shrink-0"
+          className="flex items-center justify-center w-10 h-10 rounded-md border border-border/60 bg-muted/30 shrink-0 overflow-hidden"
           aria-hidden="true"
         >
-          <ProjectIconBadge iconName={icon} color={color} size={20} />
+          <ProjectIconBadge iconName={icon} color={color} size={20} imageSrc={useProjectIcon ? (detectedIconUrl ?? null) : null} />
         </div>
         <div className="flex flex-col gap-1 min-w-0 flex-1">
           <Label htmlFor={`${idPrefix}-icon`} className="text-xs">
@@ -64,6 +75,23 @@ export function ProjectAppearanceField({
           </p>
         </div>
       </div>
+
+      {onUseProjectIconChange && (
+        <label htmlFor={`${idPrefix}-use-project-icon`} className="flex items-start gap-2 cursor-pointer">
+          <Checkbox
+            id={`${idPrefix}-use-project-icon`}
+            checked={useProjectIcon}
+            onCheckedChange={(checked) => onUseProjectIconChange(checked === true)}
+            className="mt-0.5"
+          />
+          <span className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-xs font-medium">Use project icon</span>
+            <span className="text-[11px] text-muted-foreground">
+              Automatically use the project&apos;s favicon or app icon when one is found; otherwise the icon below is used.
+            </span>
+          </span>
+        </label>
+      )}
 
       <div className="flex flex-col gap-1.5">
         <span className="text-xs font-medium" id={`${idPrefix}-icon-label`}>
@@ -81,13 +109,13 @@ export function ProjectAppearanceField({
               className="w-full justify-between h-8 text-xs font-normal"
             >
               <span className="flex items-center gap-2 min-w-0">
-                <ProjectIconBadge iconName={icon} color={color} size={14} />
+                <ProjectIconBadge iconName={icon} color={color} size={14} imageSrc={useProjectIcon ? (detectedIconUrl ?? null) : null} />
                 <span className="truncate">{icon ?? "Folder"}</span>
               </span>
               <ChevronsUpDown className="w-3.5 h-3.5 shrink-0 opacity-50" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-[300px] max-w-[calc(100vw-2rem)] p-0 z-[60]" align="start">
+          <PopoverContent className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-0 z-[60]" align="start">
             <Command>
               <CommandInput placeholder="Search icons..." className="h-9 text-xs" />
               <CommandList className="max-h-[260px]">

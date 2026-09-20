@@ -480,6 +480,7 @@ function App() {
           daemon={daemonLifecycle}
           daemonBusy={drainBusy}
           wsHealth={wsHealth}
+          projectIconUrl={api.projectIconUrl}
           onBeginDrain={handleBeginDrain}
           onCancelDrain={handleCancelDrain}
           onDiscoverWorktrees={(projId) => {

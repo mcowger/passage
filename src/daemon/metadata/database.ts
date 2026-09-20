@@ -71,6 +71,13 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE projects ADD COLUMN icon_color TEXT;
     `,
   },
+  {
+    version: 5,
+    name: "project_detected_icon",
+    sql: `
+      ALTER TABLE projects ADD COLUMN use_project_icon INTEGER NOT NULL DEFAULT 0 CHECK (use_project_icon IN (0,1));
+    `,
+  },
 ];
 
 export class MetadataStore {

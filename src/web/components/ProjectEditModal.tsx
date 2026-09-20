@@ -28,6 +28,7 @@ export function ProjectEditModal({
   const [label, setLabel] = useState(project.displayLabel);
   const [icon, setIcon] = useState<string | null>(project.iconName ?? null);
   const [color, setColor] = useState<string | null>(project.iconColor ?? null);
+  const [useProjectIcon, setUseProjectIcon] = useState(project.useProjectIcon ?? false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [branches, setBranches] = useState<ProjectBranch[] | null>(null);
@@ -42,10 +43,11 @@ export function ProjectEditModal({
     setLabel(project.displayLabel);
     setIcon(project.iconName ?? null);
     setColor(project.iconColor ?? null);
+    setUseProjectIcon(project.useProjectIcon ?? false);
     setError("");
     setForceTarget(null);
     setRowError(null);
-  }, [project.id, project.displayLabel, project.iconName, project.iconColor]);
+  }, [project.id, project.displayLabel, project.iconName, project.iconColor, project.useProjectIcon]);
 
   const loadBranches = async () => {
     setBranchesLoading(true);
@@ -110,6 +112,7 @@ export function ProjectEditModal({
         displayLabel: label.trim(),
         iconName: icon,
         iconColor: color,
+        useProjectIcon,
       });
       await onSaved();
       onClose();
@@ -122,7 +125,7 @@ export function ProjectEditModal({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-[min(480px,calc(100%-2rem))] max-h-[calc(100dvh-2rem)] overflow-y-auto">
+      <DialogContent className="max-w-[min(480px,calc(100%-2rem))] max-h-[calc(100dvh-2rem)] overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-base font-semibold">Edit project</DialogTitle>
         </DialogHeader>
@@ -131,7 +134,7 @@ export function ProjectEditModal({
             <AlertDescription className="text-xs">{error}</AlertDescription>
           </Alert>
         )}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4 pt-1">
+        <form onSubmit={handleSubmit} className="flex min-w-0 flex-col gap-4 pt-1">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="edit-project-label" className="text-xs">Project name</Label>
             <Input
@@ -150,6 +153,9 @@ export function ProjectEditModal({
             onIconChange={setIcon}
             onColorChange={setColor}
             idPrefix="edit-project"
+            useProjectIcon={useProjectIcon}
+            onUseProjectIconChange={setUseProjectIcon}
+            detectedIconUrl={api.projectIconUrl(project.id)}
           />
           <p className="text-[11px] text-muted-foreground font-mono break-all">{project.canonicalRootPath}</p>
           <BranchReviewSection
@@ -213,7 +219,7 @@ function BranchReviewSection({
   const tracked = branches?.filter((b) => b.trackedWorkspaces.length > 0).length ?? 0;
   const merged = branches?.filter((b) => b.mergedIntoMain === true).length ?? 0;
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border/60 p-2.5">
+    <div className="flex min-w-0 flex-col gap-2 rounded-md border border-border/60 p-2.5">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Branches{branches ? ` (${branches.length})` : ""}
@@ -237,7 +243,7 @@ function BranchReviewSection({
         <p className="text-xs text-muted-foreground">No local branches found in this repository.</p>
       )}
       {branches && branches.length > 0 && (
-        <ul className="flex max-h-72 flex-col gap-1.5 overflow-y-auto pr-0.5">
+        <ul className="flex max-h-72 min-w-0 touch-pan-y flex-col gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain pr-0.5 [-webkit-overflow-scrolling:touch]">
           {branches.map((branch) => {
             const protected_ = branch.isMain || branch.isCheckedOut;
             const protectReason = branch.isMain
@@ -245,7 +251,7 @@ function BranchReviewSection({
               : "Checked out in a worktree — remove the worktree first";
             const isForceOpen = forceTarget === branch.name;
             return (
-              <li key={branch.name} className="rounded-md border border-border/50 px-2 py-1.5">
+              <li key={branch.name} className="min-w-0 rounded-md border border-border/50 px-2 py-1.5">
                 <div className="flex items-center justify-between gap-2 min-w-0">
                   <span className="min-w-0 flex-1 truncate font-mono text-xs font-semibold" title={branch.name}>
                     ⎇ {branch.name}

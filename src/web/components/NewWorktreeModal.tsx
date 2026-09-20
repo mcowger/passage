@@ -307,7 +307,7 @@ export function NewWorktreeModal({
               <Label htmlFor="worktree-project" className="text-xs">Project</Label>
               {lockedProject ? (
                 <p id="worktree-project" className="text-xs text-foreground font-normal truncate min-w-0 max-w-full break-all flex items-center gap-1.5" title={lockedProject.canonicalRootPath}>
-                  <ProjectIconBadge iconName={lockedProject.iconName} color={lockedProject.iconColor} size={14} />
+                  <ProjectIconBadge iconName={lockedProject.iconName} color={lockedProject.iconColor} size={14} imageSrc={lockedProject.useProjectIcon ? api.projectIconUrl(lockedProject.id) : null} />
                   <span className="truncate">{lockedProject.displayLabel} ({lockedProject.canonicalRootPath})</span>
                 </p>
               ) : (
@@ -327,7 +327,7 @@ export function NewWorktreeModal({
                 </SelectTrigger>
                 <SelectContent position="popper" align="start" className="w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
                   {activeProjects.map((p) => (
-                    <SelectItem key={p.id} value={p.id}><span className="min-w-0 flex-1 truncate flex items-center gap-1.5"><ProjectIconBadge iconName={p.iconName} color={p.iconColor} size={13} /><span className="truncate">{p.displayLabel} ({p.canonicalRootPath})</span></span></SelectItem>
+                    <SelectItem key={p.id} value={p.id}><span className="min-w-0 flex-1 truncate flex items-center gap-1.5"><ProjectIconBadge iconName={p.iconName} color={p.iconColor} size={13} imageSrc={p.useProjectIcon ? api.projectIconUrl(p.id) : null} /><span className="truncate">{p.displayLabel} ({p.canonicalRootPath})</span></span></SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -532,7 +532,7 @@ export function NewWorktreeModal({
                 <Label htmlFor="discover-project" className="text-xs shrink-0">Project:</Label>
                 {lockedProject ? (
                   <span id="discover-project" className="text-xs font-normal truncate flex items-center gap-1.5" title={lockedProject.canonicalRootPath}>
-                    <ProjectIconBadge iconName={lockedProject.iconName} color={lockedProject.iconColor} size={13} />
+                    <ProjectIconBadge iconName={lockedProject.iconName} color={lockedProject.iconColor} size={13} imageSrc={lockedProject.useProjectIcon ? api.projectIconUrl(lockedProject.id) : null} />
                     <span className="truncate">{lockedProject.displayLabel}</span>
                   </span>
                 ) : (
@@ -542,7 +542,7 @@ export function NewWorktreeModal({
                   </SelectTrigger>
                   <SelectContent position="popper" align="start" className="w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
                     {activeProjects.map((p) => (
-                      <SelectItem key={p.id} value={p.id}><span className="min-w-0 flex-1 truncate flex items-center gap-1.5"><ProjectIconBadge iconName={p.iconName} color={p.iconColor} size={13} /><span className="truncate">{p.displayLabel}</span></span></SelectItem>
+                      <SelectItem key={p.id} value={p.id}><span className="min-w-0 flex-1 truncate flex items-center gap-1.5"><ProjectIconBadge iconName={p.iconName} color={p.iconColor} size={13} imageSrc={p.useProjectIcon ? api.projectIconUrl(p.id) : null} /><span className="truncate">{p.displayLabel}</span></span></SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

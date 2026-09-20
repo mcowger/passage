@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MetadataRepositories, MetadataStore } from "../metadata/index.ts";
@@ -55,6 +55,36 @@ describe("workspace HTTP API", () => {
     expect((await f.app.fetch(request(`/api/projects/${created.id}`, { method: "PATCH", body: JSON.stringify({}) }))).status).toBe(400);
     const snapshot = await (await f.app.fetch(request("/api/workspaces/snapshot"))).json();
     expect(snapshot.projects.find((p: { id: string }) => p.id === created.id).iconName).toBe("Bot");
+    f.store.close();
+  });
+  test("persists the use-project-icon flag and serves the detected icon", async () => {
+    const f = await fixture();
+    const created = await (await f.app.fetch(request("/api/projects", { method: "POST", body: JSON.stringify({ configuredRootPath: f.root, displayLabel: "P", useProjectIcon: true }) }))).json();
+    expect(created.useProjectIcon).toBe(true);
+    // No favicon in the project yet: 404 with no-store.
+    const missing = await f.app.fetch(request(`/api/projects/${created.id}/icon`));
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "icon-not-found", message: expect.any(String) });
+    expect(missing.headers.get("cache-control")).toBe("no-store");
+    // Drop a favicon in: served as image bytes with a short private cache.
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    await mkdir(join(f.root, "public"), { recursive: true });
+    await writeFile(join(f.root, "public", "favicon.png"), png);
+    const found = await f.app.fetch(request(`/api/projects/${created.id}/icon`));
+    expect(found.status).toBe(200);
+    expect(found.headers.get("content-type")).toBe("image/png");
+    expect(found.headers.get("cache-control")).toBe("private, max-age=60");
+    // SVG-capable endpoint: sandboxed so a directly opened URL cannot run scripts.
+    expect(found.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    expect(found.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(Buffer.from(await found.arrayBuffer()).equals(png)).toBe(true);
+    // Unknown projects 404 through the shared error shape.
+    expect((await f.app.fetch(request("/api/projects/prj_missing/icon"))).status).toBe(404);
+    // Flag round-trips through PATCH and the snapshot.
+    const updated = await (await f.app.fetch(request(`/api/projects/${created.id}`, { method: "PATCH", body: JSON.stringify({ useProjectIcon: false }) }))).json();
+    expect(updated.useProjectIcon).toBe(false);
+    const snapshot = await (await f.app.fetch(request("/api/workspaces/snapshot"))).json();
+    expect(snapshot.projects.find((p: { id: string }) => p.id === created.id).useProjectIcon).toBe(false);
     f.store.close();
   });
 });

@@ -28,6 +28,9 @@ export const PROJECT_ICON_NAMES = [
   "Magnet", "Key", "Lock", "Shield", "ShieldCheck", "Eye", "Bell",
   "Settings", "Bookmark", "Tag", "Flag", "Gift", "Laptop", "Smartphone",
   "FlaskConical", "Headphones",
+  "Route", "Waypoints", "Milestone", "Footprints", "Signpost", "SignpostBig", "Navigation", "MapPin", "MapPinned", "Tent", "TentTree",
+  "TrainFront", "TramFront", "Bike", "Ship", "Anchor", "Sailboat", "Luggage", "Hotel", "Castle", "Landmark", "Factory", "Warehouse", "Store", "Church", "Mosque",
+  "User", "Users", "Smile", "Handshake", "PersonStanding", "ThumbsUp", "Accessibility", "VenetianMask", "Drama", "Clapperboard", "Joystick", "Swords", "Shapes", "Infinity", "Hash", "AtSign", "Asterisk", "Quote", "Gauge", "Timer", "Hourglass", "AlarmClock", "WandSparkles", "Sparkle", "CircleDot",
 ] as const;
 export const DEFAULT_PROJECT_ICON = "Folder" as const;
 export type ProjectIconName = (typeof PROJECT_ICON_NAMES)[number];
@@ -42,7 +45,7 @@ export const PROJECT_COLORS = [
 export const projectColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Invalid hex color");
 export type ProjectColor = string;
 
-export const projectSchema = z.object({ id: opaqueDomainIdSchema, configuredRootPath: pathSchema, canonicalRootPath: pathSchema, displayLabel: labelSchema, iconName: projectIconSchema.nullable().default(null), iconColor: projectColorSchema.nullable().default(null), archivedAt: z.string().nullable() }).strict();
+export const projectSchema = z.object({ id: opaqueDomainIdSchema, configuredRootPath: pathSchema, canonicalRootPath: pathSchema, displayLabel: labelSchema, iconName: projectIconSchema.nullable().default(null), iconColor: projectColorSchema.nullable().default(null), useProjectIcon: z.boolean().default(false), archivedAt: z.string().nullable() }).strict();
 export const locationSchema = z.object({ id: opaqueDomainIdSchema, projectId: opaqueDomainIdSchema.nullable(), scope: z.enum(["global", "project"]), displayLabel: labelSchema, configuredRootPath: pathSchema, canonicalRootPath: pathSchema, enabled: z.boolean() }).strict();
 export const workspaceSnapshotSchema = z.object({
   projects: z.array(projectSchema).max(100),

@@ -53,6 +53,7 @@ const FRIENDLY_API_ERRORS: Record<string, string> = {
   "invalid-root": "Directory does not exist or is inaccessible.",
   "outside-root": "That path is outside the registered workspace root.",
   "not-found": "The requested item was not found. It may have been removed.",
+  "icon-not-found": "No recognizable icon file found in this project.",
   "archived": "This item is archived. Reopen it before making changes.",
   "invalid-location": "That worktree location is not valid. Choose another location.",
   "invalid-path": "That path is not valid. Check it and try again.",
@@ -175,11 +176,16 @@ export function createWorkspaceApi(
     async snapshot(): Promise<WorkspaceSnapshot> {
       return workspaceSnapshotSchema.parse(await request("/api/workspaces/snapshot"));
     },
-    async registerProject(input: { configuredRootPath: string; displayLabel: string; iconName?: string | null; iconColor?: string | null }): Promise<Project> {
+    async registerProject(input: { configuredRootPath: string; displayLabel: string; iconName?: string | null; iconColor?: string | null; useProjectIcon?: boolean }): Promise<Project> {
       return projectSchema.parse(await request("/api/projects", { method: "POST", body: JSON.stringify(input) }));
     },
-    async updateProject(id: string, input: { displayLabel?: string; iconName?: string | null; iconColor?: string | null }): Promise<Project> {
+    async updateProject(id: string, input: { displayLabel?: string; iconName?: string | null; iconColor?: string | null; useProjectIcon?: boolean }): Promise<Project> {
       return projectSchema.parse(await request(`/api/projects/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }));
+    },
+    /** Image URL for a project's detected favicon/app icon. Served by the
+     *  daemon; 404s (no icon found) are rendered by callers as the lucide fallback. */
+    projectIconUrl(id: string): string {
+      return `/api/projects/${encodeURIComponent(id)}/icon`;
     },
     async archiveProject(id: string): Promise<void> {
       await request(`/api/projects/${encodeURIComponent(id)}/archive`, { method: "POST" });
