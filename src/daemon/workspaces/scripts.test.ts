@@ -36,7 +36,7 @@ async function fixture(paseoJson: unknown) {
     cwd: dir,
     displayLabel: "Scripts",
   });
-  return { root, dir, store, workspaceService, terminals, scripts, workspace, changed };
+  return { root, dir, store, repositories, workspaceService, terminals, scripts, workspace, changed };
 }
 
 async function waitFor(
@@ -200,6 +200,106 @@ describe("WorkspaceScriptsService runs", () => {
     expect((await f.scripts.list(f.workspace.id)).every((s) => s.lifecycle === "stopped")).toBe(true);
     expect(f.scripts.stopForWorkspace(f.workspace.id)).toEqual([]);
     f.store.close();
+  });
+});
+
+describe("WorkspaceScriptsService restart recovery", () => {
+  test("services re-link to reattached PTYs with stable ports", async () => {
+    const f = await fixture({
+      worktree: { servicePorts: { range: "48920-48929" } },
+      scripts: { api: { type: "service", command: "sleep 30" } },
+    });
+    try {
+      const started = await f.scripts.start(f.workspace.id, "api");
+      expect(started.lifecycle).toBe("running");
+
+      // Simulate a daemon restart: fresh managers over the same tmux server
+      // and sqlite, terminal sweep first, then scripts re-link.
+      const manager2 = new TerminalManager(f.workspaceService);
+      await manager2.recoverAfterRestart();
+      const scripts2 = new WorkspaceScriptsService(f.repositories, manager2, {});
+      const { reattached, dropped } = await scripts2.recoverAfterRestart();
+      expect(reattached).toEqual([`${f.workspace.id}:api`]);
+      expect(dropped).toEqual([]);
+
+      const recovered = await scripts2.get(f.workspace.id, "api");
+      expect(recovered.lifecycle).toBe("running");
+      expect(recovered.terminalId).toBe(started.terminalId);
+      expect(recovered.port).toBe(started.port);
+      expect(recovered.url).toBe(started.url);
+
+      // The re-linked terminal is live: output flows through the new manager.
+      const capture = attachCapture(manager2, recovered.terminalId!);
+      manager2.writeInput(recovered.terminalId!, "echo recovery_ping\n");
+      await waitFor(() => capture.text().includes("recovery_ping"), "re-linked terminal is not live");
+
+      // Port plan survived: restart keeps the port, stop clears persistence.
+      const restarted = await scripts2.restart(f.workspace.id, "api");
+      expect(restarted.port).toBe(started.port);
+      expect(restarted.terminalId).not.toBe(started.terminalId);
+      await scripts2.stop(f.workspace.id, "api");
+      expect(f.repositories.scriptRuntimes.listAll()).toEqual([]);
+      f.scripts.stopForWorkspace(f.workspace.id);
+      scripts2.stopForWorkspace(f.workspace.id);
+    } finally {
+      f.store.close();
+    }
+  });
+
+  test("one-shots never persist and stale rows are dropped", async () => {
+    const f = await fixture({ scripts: { quick: { command: "echo one_shot_marker" } } });
+    try {
+      const started = await f.scripts.start(f.workspace.id, "quick");
+      const capture = attachCapture(f.terminals, started.terminalId!);
+      await waitFor(() => capture.text().includes("one_shot_marker"), "one-shot output never appeared");
+      await waitFor(
+        async () => (await f.scripts.get(f.workspace.id, "quick")).lifecycle === "stopped",
+        "one-shot never settled",
+      );
+      // Settled one-shots leave no persistence behind.
+      expect(f.repositories.scriptRuntimes.listAll()).toEqual([]);
+      // Settle reaps the server-side session (remain-on-exit would otherwise
+      // accumulate dead sessions) while the ring buffer stays viewable.
+      const hasGone = Bun.spawnSync(["tmux", "-L", "passage", "has-session", "-t", `passage-${started.terminalId}`]);
+      expect(hasGone.exitCode).not.toBe(0);
+      expect(capture.text()).toContain("one_shot_marker");
+
+      // A row pointing at a dead terminal is dropped on recovery.
+      f.repositories.scriptRuntimes.save({
+        workspaceId: f.workspace.id,
+        scriptName: "quick",
+        terminalId: "trm_missing",
+        port: null,
+        startedAt: new Date().toISOString(),
+      });
+      const manager2 = new TerminalManager(f.workspaceService);
+      await manager2.recoverAfterRestart();
+      const scripts2 = new WorkspaceScriptsService(f.repositories, manager2, {});
+      const { reattached, dropped } = await scripts2.recoverAfterRestart();
+      expect(reattached).toEqual([]);
+      expect(dropped).toEqual([`${f.workspace.id}:quick`]);
+      expect(f.repositories.scriptRuntimes.listAll()).toEqual([]);
+    } finally {
+      f.store.close();
+    }
+  });
+
+  test("terminating a service terminal settles the runtime via exit notification", async () => {
+    const f = await fixture({ scripts: { api: { type: "service", command: "sleep 30" } } });
+    try {
+      const started = await f.scripts.start(f.workspace.id, "api");
+      expect(started.lifecycle).toBe("running");
+      // Terminate out-of-band, as the terminal UI would: kill routes through
+      // the single-shot exit path, so the runtime settles instead of going stale.
+      expect(f.terminals.terminate(started.terminalId!)).toBe(true);
+      await waitFor(
+        async () => (await f.scripts.get(f.workspace.id, "api")).lifecycle === "stopped",
+        "runtime never settled after terminal termination",
+      );
+      expect(f.repositories.scriptRuntimes.listAll()).toEqual([]);
+    } finally {
+      f.store.close();
+    }
   });
 });
 

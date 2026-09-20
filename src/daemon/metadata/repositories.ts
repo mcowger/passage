@@ -108,6 +108,24 @@ export class PushSubscriptionRepository {
   }
 }
 
+export type ScriptRuntimeRow = { workspaceId: string; scriptName: string; terminalId: string; port: number | null; startedAt: string };
+
+export class ScriptRuntimeRepository {
+  constructor(private readonly db: Database) {}
+  save(value: ScriptRuntimeRow): void {
+    this.db.query("INSERT INTO script_runtimes (workspace_id, script_name, terminal_id, port, started_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, script_name) DO UPDATE SET terminal_id=excluded.terminal_id, port=excluded.port, started_at=excluded.started_at").run(value.workspaceId, value.scriptName, value.terminalId, value.port, value.startedAt);
+  }
+  delete(workspaceId: string, scriptName: string): void {
+    this.db.query("DELETE FROM script_runtimes WHERE workspace_id=? AND script_name=?").run(workspaceId, scriptName);
+  }
+  deleteForWorkspace(workspaceId: string): void {
+    this.db.query("DELETE FROM script_runtimes WHERE workspace_id=?").run(workspaceId);
+  }
+  listAll(): ScriptRuntimeRow[] {
+    return this.db.query<{ workspace_id: string; script_name: string; terminal_id: string; port: number | null; started_at: string }, []>("SELECT workspace_id, script_name, terminal_id, port, started_at FROM script_runtimes ORDER BY started_at").all().map((row) => ({ workspaceId: row.workspace_id, scriptName: row.script_name, terminalId: row.terminal_id, port: row.port, startedAt: row.started_at }));
+  }
+}
+
 export class WebPreviewRepository {
   constructor(private readonly db: Database) {}
   save(value: WebPreviewRow): void {
@@ -124,6 +142,6 @@ export class WebPreviewRepository {
 }
 
 export class MetadataRepositories {
-  readonly projects: ProjectRepository; readonly worktreeLocations: WorktreeLocationRepository; readonly workspaces: WorkspaceRepository; readonly agents: AgentRepository; readonly webPreviews: WebPreviewRepository; readonly appSettings: AppSettingsRepository; readonly pushSubscriptions: PushSubscriptionRepository;
-  constructor(db: Database) { this.projects = new ProjectRepository(db); this.worktreeLocations = new WorktreeLocationRepository(db); this.workspaces = new WorkspaceRepository(db); this.agents = new AgentRepository(db); this.webPreviews = new WebPreviewRepository(db); this.appSettings = new AppSettingsRepository(db); this.pushSubscriptions = new PushSubscriptionRepository(db); }
+  readonly projects: ProjectRepository; readonly worktreeLocations: WorktreeLocationRepository; readonly workspaces: WorkspaceRepository; readonly agents: AgentRepository; readonly webPreviews: WebPreviewRepository; readonly appSettings: AppSettingsRepository; readonly pushSubscriptions: PushSubscriptionRepository; readonly scriptRuntimes: ScriptRuntimeRepository;
+  constructor(db: Database) { this.projects = new ProjectRepository(db); this.worktreeLocations = new WorktreeLocationRepository(db); this.workspaces = new WorkspaceRepository(db); this.agents = new AgentRepository(db); this.webPreviews = new WebPreviewRepository(db); this.appSettings = new AppSettingsRepository(db); this.pushSubscriptions = new PushSubscriptionRepository(db); this.scriptRuntimes = new ScriptRuntimeRepository(db); }
 }

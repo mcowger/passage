@@ -73,6 +73,8 @@ import icon from "../web/icon.svg" with { type: "text" };
 import swScript from "../web/sw.js" with { type: "text" };
 import { getBuildInfo } from "./build-info.ts";
 import { resolveDaemonPort } from "./env.ts";
+import { setTmuxSocketName } from "./terminals/tmux.ts";
+import { createHash } from "node:crypto";
 
 const MAX_WEBSOCKET_COMMAND_BYTES = 64 * 1024;
 const MAX_AGENT_SUBSCRIPTIONS_PER_SOCKET = 32;
@@ -134,6 +136,13 @@ if (pidPath) {
 }
 
 const metadata = new MetadataStore(metadataPath);
+// tmux server identity: one server per data root. Concurrent daemons
+// (separate checkouts) must never share a server -- each boot sweep reaps
+// sessions it cannot map, so a shared server means killing each other's
+// terminals. Derived deterministically so restarts rejoin the same server.
+setTmuxSocketName(
+  process.env.PASSAGE_TMUX_SOCKET ?? `passage-${createHash("sha256").update(dirname(metadataPath)).digest("hex").slice(0, 12)}`,
+);
 const repositories = new MetadataRepositories(metadata.db);
 const workspaceService = new WorkspaceService(repositories);
 const gitService = new GitService();
@@ -157,6 +166,24 @@ const workspaceScriptsService = new WorkspaceScriptsService(repositories, termin
     workspaceEvents.emitActionsChanged({ workspaceId, runId: `script:${runtime.name}` });
   },
 });
+// Boot-time terminal + script recovery, before serving: tmux sessions
+// outlive the daemon, so reattach interactive terminals and service PTYs
+// from the previous run instead of orphaning live shells/processes.
+// Anonymous sessions (one-shot script runs) and sessions for unknown or
+// archived workspaces are reaped; service rows for dead terminals drop.
+// Order matters: scripts re-link to PTYs the terminal sweep reattached.
+try {
+  const recovery = await terminalManager.recoverAfterRestart();
+  if (recovery.reattached.length > 0 || recovery.reaped.length > 0) {
+    log.info("Terminal sessions recovered after restart", { event: "terminal.restart_recovered", reattached: recovery.reattached.length, reaped: recovery.reaped.length });
+  }
+  const scriptsRecovery = await workspaceScriptsService.recoverAfterRestart();
+  if (scriptsRecovery.reattached.length > 0 || scriptsRecovery.dropped.length > 0) {
+    log.info("Workspace scripts recovered after restart", { event: "scripts.restart_recovered", reattached: scriptsRecovery.reattached.length, dropped: scriptsRecovery.dropped.length });
+  }
+} catch (error) {
+  log.warn("Terminal recovery failed", { event: "terminal.recovery_failed", ...errorFields(error) });
+}
 const previewManager = new WebPreviewManager(repositories, workspaceService, undefined, workspaceScriptsService);
 const sessionsRoot = process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(metadataPath), "sessions");
 // Dev-mode guard: a shell descending from a staging-owned process once fed

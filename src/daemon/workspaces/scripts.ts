@@ -6,6 +6,7 @@ import type {
 } from "../../shared/domain/workspace-actions.ts";
 import type { MetadataRepositories } from "../metadata/repositories.ts";
 import type { TerminalManager } from "../terminals/manager.ts";
+import { tmuxGetSessionMeta, tmuxKillSession, tmuxListTerminalIds, type TmuxSessionMeta } from "../terminals/tmux.ts";
 import { readPaseoConfig, type PaseoScriptEntry } from "./paseo-config.ts";
 import {
   allocateWorkspaceServicePort,
@@ -80,8 +81,12 @@ async function probeHealth(snapshot: WorkspaceScriptRuntime): Promise<WorkspaceS
  *  PTY. Services receive an allocated port plus `PASEO_PORT` /
  *  `PASEO_SERVICE_*` / `HOST` env; one-shots run the same way but with no
  *  port. At most one live instance per script; crashes stay stopped with
- *  their exit code (manual restart only). Runtimes are daemon memory and do
- *  not survive a daemon restart. */
+ *  their exit code (manual restart only).
+ *
+ *  Service runtimes persist in sqlite and survive daemon restarts: the tmux
+ *  session keeps the process alive and `recoverAfterRestart` (run after the
+ *  terminal sweep) re-links the runtime record to the reattached PTY.
+ *  One-shot script sessions stay anonymous and are reaped on restart. */
 export class WorkspaceScriptsService {
   private readonly runtimes = new Map<string, Map<string, RuntimeEntry>>();
   /** Stable per-workspace port plan: allocated once, retained across
@@ -182,6 +187,7 @@ export class WorkspaceScriptsService {
         title: entry.name,
         command: entry.command,
         ...(env ? { env } : {}),
+        ...(entry.type === "service" ? { persistent: true, scriptName: entry.name } : {}),
       });
     } catch (error) {
       throw new WorkspaceScriptError(
@@ -198,6 +204,29 @@ export class WorkspaceScriptsService {
     };
     runtimes.set(entry.name, runtime);
     this.terminalIndex.set(summary.id, { workspaceId: workspace.id, scriptName: entry.name });
+    if (entry.type === "service") {
+      // Persist before emitting: a crash after this point must recover the
+      // runtime; a persist failure terminates the orphaned PTY instead.
+      try {
+        this.repositories.scriptRuntimes.save({
+          workspaceId: workspace.id,
+          scriptName: entry.name,
+          terminalId: summary.id,
+          port,
+          startedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        runtimes.delete(entry.name);
+        this.terminalIndex.delete(summary.id);
+        try {
+          this.terminals.terminate(summary.id);
+        } catch {}
+        throw new WorkspaceScriptError(
+          "allocation-failed",
+          error instanceof Error ? error.message : "Could not persist script runtime",
+        );
+      }
+    }
     const snapshot = toSnapshot(workspace.id, runtime);
     this.emit(snapshot, workspace.id);
     return snapshot;
@@ -223,11 +252,112 @@ export class WorkspaceScriptsService {
         this.terminals.terminate(runtime.terminalId);
       } catch {}
     }
+    try {
+      this.repositories.scriptRuntimes.delete(workspace.id, entry.name);
+    } catch {}
     runtime.lifecycle = "stopped";
     runtime.terminalId = null;
     const snapshot = toSnapshot(workspace.id, runtime);
     this.emit(snapshot, workspace.id);
     return snapshot;
+  }
+
+  /** Boot-time recovery, run after the terminal sweep: re-link persisted
+   *  service runtimes to their reattached PTYs. Rows whose workspace is
+   *  gone/archived, whose script vanished from `paseo.json` or changed away
+   *  from `service`, or whose terminal did not survive are dropped -- and
+   *  the orphaned process is terminated, never left running unmanaged.
+   *  A final sweep terminates script-identified sessions with no row
+   *  (starts that crashed between session creation and the sqlite save).
+   *  Ports re-seed the stable plan so peer env and future allocations stay
+   *  consistent. */
+  async recoverAfterRestart(): Promise<{ reattached: string[]; dropped: string[] }> {
+    const reattached: string[] = [];
+    const dropped: string[] = [];
+    const linked = new Set<string>();
+    let rows: Array<{ workspaceId: string; scriptName: string; terminalId: string; port: number | null }>;
+    try {
+      rows = this.repositories.scriptRuntimes.listAll();
+    } catch {
+      return { reattached, dropped };
+    }
+    for (const row of rows) {
+      const label = `${row.workspaceId}:${row.scriptName}`;
+      const drop = (terminateFirst: boolean) => {
+        if (terminateFirst) {
+          try {
+            if (this.terminals.get(row.terminalId)) this.terminals.terminate(row.terminalId);
+            else tmuxKillSession(row.terminalId);
+          } catch {}
+        }
+        try {
+          this.repositories.scriptRuntimes.delete(row.workspaceId, row.scriptName);
+        } catch {}
+        dropped.push(label);
+      };
+      let workspace: Workspace;
+      try {
+        workspace = this.requireWorkspace(row.workspaceId);
+      } catch {
+        // Terminal sweep already reaped sessions for unknown workspaces.
+        drop(false);
+        continue;
+      }
+      let entry: PaseoScriptEntry | undefined;
+      try {
+        entry = this.configFor(workspace).scripts.find((script) => script.name === row.scriptName);
+      } catch {
+        entry = undefined;
+      }
+      if (!entry || entry.type !== "service") {
+        drop(true);
+        continue;
+      }
+      const terminal = this.terminals.get(row.terminalId);
+      if (!terminal || terminal.status !== "running") {
+        drop(false);
+        continue;
+      }
+      let runtimes = this.runtimes.get(workspace.id);
+      if (!runtimes) {
+        runtimes = new Map();
+        this.runtimes.set(workspace.id, runtimes);
+      }
+      runtimes.set(entry.name, { entry, lifecycle: "running", terminalId: row.terminalId, exitCode: null, port: row.port });
+      this.terminalIndex.set(row.terminalId, { workspaceId: workspace.id, scriptName: entry.name });
+      if (row.port !== null) {
+        let plan = this.portPlans.get(workspace.id);
+        if (!plan) {
+          plan = new Map();
+          this.portPlans.set(workspace.id, plan);
+        }
+        plan.set(entry.name, row.port);
+      }
+      linked.add(label);
+      reattached.push(label);
+      const runtime = runtimes.get(entry.name);
+      if (runtime) this.emit(toSnapshot(workspace.id, runtime), workspace.id);
+    }
+    // Orphaned starts: tmux sessions carrying script identity with no
+    // persisted row (crash between session creation and sqlite save).
+    try {
+      for (const id of tmuxListTerminalIds()) {
+        let meta: TmuxSessionMeta | null = null;
+        try {
+          meta = tmuxGetSessionMeta(id);
+        } catch {
+          continue;
+        }
+        if (!meta?.script) continue;
+        if (!linked.has(`${meta.workspace}:${meta.script}`)) {
+          try {
+            if (this.terminals.get(id)) this.terminals.terminate(id);
+            else tmuxKillSession(id);
+          } catch {}
+        }
+      }
+    } catch {}
+    return { reattached, dropped };
   }
 
   /** Restart: stop the live PTY (if any), then start again. The planned
@@ -252,6 +382,9 @@ export class WorkspaceScriptsService {
           this.terminals.terminate(runtime.terminalId);
         } catch {}
       }
+      try {
+        this.repositories.scriptRuntimes.delete(workspaceId, name);
+      } catch {}
       runtime.lifecycle = "stopped";
       runtime.terminalId = null;
       stopped.push(name);
@@ -272,6 +405,9 @@ export class WorkspaceScriptsService {
     runtime.lifecycle = "stopped";
     runtime.terminalId = null;
     runtime.exitCode = exitCode;
+    try {
+      this.repositories.scriptRuntimes.delete(location.workspaceId, location.scriptName);
+    } catch {}
     this.emit(toSnapshot(location.workspaceId, runtime), location.workspaceId);
   }
 

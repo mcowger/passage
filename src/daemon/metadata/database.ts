@@ -78,6 +78,19 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE projects ADD COLUMN use_project_icon INTEGER NOT NULL DEFAULT 0 CHECK (use_project_icon IN (0,1));
     `,
   },
+  {
+    version: 6,
+    name: "script_runtimes",
+    sql: `
+      CREATE TABLE script_runtimes (
+        workspace_id TEXT NOT NULL, script_name TEXT NOT NULL,
+        terminal_id TEXT NOT NULL, port INTEGER,
+        started_at TEXT NOT NULL,
+        PRIMARY KEY (workspace_id, script_name),
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+      );
+    `,
+  },
 ];
 
 export class MetadataStore {

@@ -153,4 +153,67 @@ describe("TerminalManager", () => {
       f.store.close();
     }
   });
+
+  test("recoverAfterRestart reattaches live shells and reaps the rest", async () => {
+    const f = await fixture();
+    try {
+      // Interactive terminal with state worth keeping.
+      const live = await f.manager.create(f.workspace.id, { title: "Keep Me Around", columns: 80, rows: 24 });
+      const liveChunks: Uint8Array[] = [];
+      f.manager.attach(live.id, {
+        clientId: "client_before",
+        isHolder: false,
+        sendBinary: (buf) => {
+          liveChunks.push(decodeBinaryFrame(buf).payload);
+        },
+        sendControl: () => {},
+      });
+      f.manager.writeInput(live.id, "export RECOVERY_MARKER=alive42\n");
+      await waitForOutput(liveChunks, (t) => t.includes("alive42"), "shell did not echo marker setup");
+
+      // Anonymous one-shot script session: intentionally not recoverable.
+      const cmd = await f.manager.createCommand(f.workspace.id, {
+        title: "one-shot",
+        command: "sleep 30",
+      });
+
+      // Simulate a daemon restart: brand-new manager over the same tmux server.
+      const resurrected = new TerminalManager(f.workspaces);
+      const { reattached, reaped } = await resurrected.recoverAfterRestart();
+      expect(reattached).toContain(live.id);
+      expect(reaped).toContain(cmd.id);
+
+      // The resurrected wrapper serves the same live shell: prior shell
+      // state is visible without any history replay.
+      expect(resurrected.get(live.id)?.workspaceId).toBe(f.workspace.id);
+      expect(resurrected.get(live.id)?.title).toBe("Keep Me Around");
+      expect(resurrected.list(f.workspace.id).map((t) => t.id)).toContain(live.id);
+      const afterChunks: Uint8Array[] = [];
+      resurrected.attach(live.id, {
+        clientId: "client_after",
+        isHolder: false,
+        sendBinary: (buf) => {
+          afterChunks.push(decodeBinaryFrame(buf).payload);
+        },
+        sendControl: () => {},
+      });
+      resurrected.writeInput(live.id, "echo $RECOVERY_MARKER\n");
+      const text = await waitForOutput(afterChunks, (t) => t.includes("alive42"), "reattached shell lost its state");
+      expect(text).toContain("alive42");
+
+      // Anonymous session was reaped from the tmux server.
+      expect(resurrected.get(cmd.id)).toBeNull();
+      const hasGone = Bun.spawnSync(["tmux", "-L", "passage", "has-session", "-t", `passage-${cmd.id}`]);
+      expect(hasGone.exitCode).not.toBe(0);
+
+      // Recovery is idempotent: nothing left to do on a second sweep.
+      const again = await resurrected.recoverAfterRestart();
+      expect(again).toEqual({ reattached: [], reaped: [] });
+
+      resurrected.terminate(live.id);
+      f.manager.terminate(cmd.id);
+    } finally {
+      f.store.close();
+    }
+  });
 });
