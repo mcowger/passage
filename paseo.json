@@ -22,6 +22,12 @@
     },
     "deploy": {
       "command": "bun run deploy"
+    },
+    "review": {
+      "command": "bun run code:review:human"
+    },
+    "review-branch": {
+      "command": "bun run code:review:branch:human"
     }
   },
   "metadataGeneration": {

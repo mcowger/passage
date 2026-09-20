@@ -22,7 +22,11 @@
     "test:pi-live": "bun run tests/pi-rpc/run-live.ts",
     "test:pty-websocket": "bun test tests/pty-websocket",
     "test:pty-live": "bun run tests/pty-websocket/run.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "code:review:human": "opencodereview review",
+    "code:review:agent": "opencodereview review --format json --audience agent",
+    "code:review:branch:human": "BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'); BASE=${BASE:-main}; if git rev-parse --verify -q \"origin/$BASE\" >/dev/null; then BASE=\"origin/$BASE\"; fi; opencodereview review --from \"$BASE\" --to HEAD",
+    "code:review:branch:agent": "BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'); BASE=${BASE:-main}; if git rev-parse --verify -q \"origin/$BASE\" >/dev/null; then BASE=\"origin/$BASE\"; fi; opencodereview review --from \"$BASE\" --to HEAD --format json --audience agent"
   },
   "dependencies": {
     "@codemirror/lang-cpp": "^6.0.3",
