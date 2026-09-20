@@ -20,7 +20,7 @@ import { filesSearchResponseSchema, directorySuggestResponseSchema } from "../sh
 import { buildInfoSchema, type BuildInfo } from "../shared/build-info.ts";
 import { daemonBlockerSchema, daemonPhaseSchema, daemonLifecycleSnapshotSchema, type DaemonLifecycleSnapshot } from "../shared/protocol/daemon.ts";
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
-import type { GitDiff, GitStatus, GithubStatus } from "../shared/domain/git.ts";
+import type { GitDiff, GitStatus, GithubStatus, ProjectBranch } from "../shared/domain/git.ts";
 import { webPreviewSchema, type WebPreview } from "../shared/domain/previews.ts";
 import { createWorktreeResponseSchema, workspaceActionListSchema, workspaceActionRunSchema, workspaceScriptListSchema, workspaceScriptRuntimeSchema, type CreateWorktreeResponse, type WorkspaceActionList, type WorkspaceActionRun, type WorkspaceScriptList, type WorkspaceScriptRuntime } from "../shared/domain/workspace-actions.ts";
 
@@ -61,7 +61,7 @@ const FRIENDLY_API_ERRORS: Record<string, string> = {
   "invalid-cursor": "The listing expired. Refresh and try again.",
   "body-too-large": "The request was too large.",
   "conflict": "That conflicts with the current state. Refresh and try again.",
-  "force-required": "That would discard uncommitted changes. Confirm a force delete to proceed.",
+  "force-required": "That would discard unmerged or uncommitted work. Confirm a force action to proceed.",
   "git-failed": "The git operation failed. Check the repository state and try again.",
   "preview-not-running": "The preview is not running. Start it and try again.",
   "timeout": "Request timed out. Check your connection and try again.",
@@ -261,6 +261,12 @@ export function createWorkspaceApi(
     async removeWorktree(workspaceId: string, force = false, deleteBranch = false): Promise<{ branchDeleted: boolean }> {
       const res = removeWorktreeResponseSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/worktree/remove`, { method: "POST", body: JSON.stringify({ ...(force ? { force: true } : {}), ...(deleteBranch ? { deleteBranch: true } : {}) }) }));
       return { branchDeleted: res.branchDeleted ?? false };
+    },
+    async listProjectBranches(projectId: string): Promise<ProjectBranch[]> {
+      return (await request(`/api/projects/${encodeURIComponent(projectId)}/branches`)) as ProjectBranch[];
+    },
+    async deleteProjectBranch(projectId: string, branch: string, force = false): Promise<ProjectBranch[]> {
+      return (await request(`/api/projects/${encodeURIComponent(projectId)}/branches/delete`, { method: "POST", body: JSON.stringify(force ? { branch, force: true } : { branch }) })) as ProjectBranch[];
     },
     async gitStatus(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/status`) as GitStatus; },
     async gitDiff(id: string, target: "staged" | "working-tree" = "working-tree"): Promise<GitDiff[]> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/diff?target=${target}`) as GitDiff[]; },

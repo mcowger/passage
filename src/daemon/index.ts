@@ -13,6 +13,7 @@ import { HttpInputError, readJsonBody } from "./http/body.ts";
 import { createAgentRoutes } from "./http/agents.ts";
 import { createModelRoutes } from "./http/models.ts";
 import { createWorkspaceRoutes } from "./http/workspaces.ts";
+import { createBranchRoutes } from "./http/branches.ts";
 import { createGitRoutes, createTranscriptPreviewRoutes } from "./http/git.ts";
 import { createFileRoutes } from "./http/files.ts";
 import { createWorktreeRoutes } from "./http/worktrees.ts";
@@ -25,6 +26,7 @@ import { GitService } from "./workspaces/git.ts";
 import { CommitGenerator } from "./workspaces/commit-generator.ts";
 import { FileService } from "./workspaces/files.ts";
 import { WorktreeService } from "./workspaces/worktrees.ts";
+import { BranchService } from "./workspaces/branches.ts";
 import { WorkspaceActionsService } from "./workspaces/actions.ts";
 import { createWorkspaceActionRoutes } from "./http/actions.ts";
 import { WorkspaceScriptsService } from "./workspaces/scripts.ts";
@@ -147,6 +149,7 @@ const workspaceActionsService = new WorkspaceActionsService(repositories, undefi
   },
 });
 const worktreeService = new WorktreeService(repositories, gitService, undefined, workspaceActionsService);
+const branchService = new BranchService(repositories, gitService);
 const commitGenerator = new CommitGenerator();
 const terminalManager = new TerminalManager(workspaceService);
 const workspaceScriptsService = new WorkspaceScriptsService(repositories, terminalManager, {
@@ -379,6 +382,7 @@ app.route("/", createWorkspaceRoutes(workspaceService, { onArchiveWorkspace: (wo
 app.route("/", createGitRoutes(workspaceService, gitService, workspaceEvents, commitGenerator, (workspaceId, agentId) => agentService.getCommitConversation(workspaceId, agentId)));
 app.route("/", createFileRoutes(fileService, workspaceEvents));
 app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (workspaceId) => teardownWorkspace(workspaceId) }, workspaceEvents));
+app.route("/", createBranchRoutes(branchService, workspaceEvents));
 app.route("/", createWorkspaceActionRoutes(workspaceActionsService));
 app.route("/", createWorkspaceScriptRoutes(workspaceScriptsService));
 app.route("/", createTerminalRoutes(terminalManager));

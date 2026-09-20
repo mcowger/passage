@@ -15,6 +15,8 @@ type Options = { signal?: AbortSignal; timeoutMs?: number; maxOutputBytes?: numb
 const CONFLICTED_MERGE_TREE_ENTRY = /^[0-7]{6} [0-9a-f]{40,64} [1-3]\t(.+)$/;
 type Result = { stdout: string; stderr: string; code: number; truncated: boolean };
 
+export type GitBranchEntry = { name: string; head: string; upstream: string | null; lastCommitAt: string | null; subject: string };
+
 export class GitError extends Error { constructor(message: string, public readonly stderr = "", public readonly code = -1) { super(message); this.name = "GitError"; } }
 
 /** First meaningful line from a failed Git command, for curated error messages. */
@@ -405,5 +407,73 @@ export class GitService {
       }
     }
     return entries;
+  }
+
+  /** Every local branch with last-commit metadata, for project branch review.
+   *  Bounded to 500 branches; subjects are truncated to 500 chars so one
+   *  pathological commit message cannot bloat the snapshot. */
+  async listBranches(cwd: string, options?: Options): Promise<GitBranchEntry[]> {
+    const r = await this.run(
+      cwd,
+      ["for-each-ref", "--format=%(refname:short)%1f%(objectname)%1f%(upstream:short)%1f%(committerdate:iso-strict)%1f%(subject)", "refs/heads"],
+      { maxOutputBytes: 1024 * 1024, ...options },
+    );
+    const entries: GitBranchEntry[] = [];
+    for (const line of r.stdout.split("\n")) {
+      if (!line.trim()) continue;
+      const parts = line.split("\x1f");
+      const name = (parts[0] ?? "").trim();
+      if (!name) continue;
+      entries.push({
+        name,
+        head: (parts[1] ?? "").trim(),
+        upstream: (parts[2] ?? "").trim() || null,
+        lastCommitAt: (parts[3] ?? "").trim() || null,
+        subject: (parts[4] ?? "").trim().slice(0, 500),
+      });
+      if (entries.length >= 500) break;
+    }
+    return entries;
+  }
+
+  /** Names fully merged into `base` (e.g. `main`), for the merged badge.
+   *  Returns an empty set when the base ref does not exist. */
+  async mergedBranches(cwd: string, base: string, options?: Options): Promise<Set<string>> {
+    try {
+      await this.run(cwd, ["rev-parse", "--verify", base], options);
+    } catch {
+      return new Set();
+    }
+    const r = await this.run(cwd, ["branch", "--format=%(refname:short)", "--merged", base], options);
+    return new Set(r.stdout.split("\n").map((l) => l.trim().replace(/^[*+]\s*/, "")).filter(Boolean));
+  }
+
+  /** Delete one local branch. Safe by default (`-d` refuses unmerged work);
+   *  `force` escalates to `-D` and must only follow an explicit second
+   *  confirm. Refuses branches checked out in any linked worktree and the
+   *  `main`/`master` trunk itself; arg injection is closed by the `--`
+   *  separator plus a leading-dash/empty-path rejection. */
+  async deleteBranch(cwd: string, branch: string, force = false, options?: Options): Promise<void> {
+    const name = branch.trim();
+    if (!name || name === "HEAD" || name.startsWith("-") || name.includes("\0") || name.includes("..")) {
+      throw new GitError(`Invalid branch name: "${branch}"`);
+    }
+    if (name === "main" || name === "master") {
+      throw new GitError(`The "${name}" branch cannot be deleted`);
+    }
+    const worktrees = await this.listWorktrees(cwd, options).catch(() => []);
+    const checkedOut = worktrees.find((w) => w.branchRef === name);
+    if (checkedOut) {
+      throw new GitError(`Branch "${name}" is checked out in ${checkedOut.path}. Remove the worktree first.`);
+    }
+    try {
+      await this.run(cwd, ["branch", force ? "-D" : "-d", "--", name], { timeoutMs: 30_000, ...options });
+    } catch (cause) {
+      const detail = gitDetail(cause);
+      if (!force && /not fully merged/i.test(detail)) {
+        throw new GitError(`Branch "${name}" is not fully merged`, `Not fully merged. Force delete to discard it${detail ? `: ${detail}` : ""}.`);
+      }
+      throw new GitError(detail ? `Could not delete branch "${name}": ${detail}` : `Could not delete branch "${name}"`);
+    }
   }
 }
