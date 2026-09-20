@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { createQueuedFollowUp, extractLatestThinkingSummary, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, isComposerSendItEnabled, isComposerSendItMergeable, isWorkspaceDeletable, resolveComposerGitOptions, resolvePinned, REPIN_SLACK_PX, UNPIN_SLACK_PX, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, shouldSuppressComposerClickAfterTouch, COMPOSER_TOUCH_SEND_SUPPRESS_MS, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
+import { createQueuedFollowUp, extractLatestThinkingSummary, formatDuration, formatThinkingPreview, isComposerLocked, isComposerMergeRelevant, isComposerSendItEnabled, isComposerSendItMergeable, isComposerShipItEnabled, isComposerShipItMergeable, isWorkspaceDeletable, resolveComposerGitOptions, resolveGithubMenuState, shipPrSteps, resolvePinned, REPIN_SLACK_PX, UNPIN_SLACK_PX, QueuedFollowUpList, removeQueuedFollowUp, resolveActiveQuestionRequest, resolveCurrentModel, resolveCurrentThinking, resolveStreamActive, resolveStreamStartMs, shouldSuppressComposerClickAfterTouch, COMPOSER_TOUCH_SEND_SUPPRESS_MS, timelineWithoutBlockingTool, TimelineRow } from "./AgentPanel.tsx";
 import type { AgentCapabilities, AgentSummary, TimelineItem } from "../../shared/domain/agents.ts";
 import type { WorkspaceApi } from "../api.ts";
 
@@ -145,7 +145,9 @@ describe("resolveComposerGitOptions", () => {
   };
 
   test("offers merge only when ahead of main", () => {
-    expect(resolveComposerGitOptions({ ...base, aheadOfMain: 2 })).toEqual(["merge"]);
+    // No upstream yet but ahead of main: merge plus first-push.
+    expect(resolveComposerGitOptions({ ...base, aheadOfMain: 2 })).toEqual(["merge", "push"]);
+    expect(resolveComposerGitOptions({ ...base, aheadOfMain: 2, hasUpstream: true })).toEqual(["merge"]);
   });
 
   test("offers rebase only when main has diverged", () => {
@@ -156,6 +158,10 @@ describe("resolveComposerGitOptions", () => {
     expect(resolveComposerGitOptions({ ...base, hasUpstream: true, ahead: 1 })).toEqual(["push"]);
     expect(resolveComposerGitOptions({ ...base, hasUpstream: false, ahead: 1 })).toEqual([]);
     expect(resolveComposerGitOptions({ ...base, hasUpstream: true, ahead: 0 })).toEqual([]);
+  });
+
+  test("offers push on first publish (ahead of main, no upstream yet)", () => {
+    expect(resolveComposerGitOptions({ ...base, hasUpstream: false, aheadOfMain: 2 })).toEqual(["merge", "push"]);
   });
 
   test("offers multiple options together in merge/rebase/push order", () => {
@@ -194,7 +200,7 @@ describe("resolveComposerGitOptions", () => {
   });
 });
 
-describe("isComposerSendItEnabled", () => {
+describe("isComposerShipItEnabled", () => {
   const base: import("../../shared/domain/git.ts").GitStatus = {
     checkoutRoot: "/wt/feature",
     mainCheckoutRoot: "/repo",
@@ -214,27 +220,33 @@ describe("isComposerSendItEnabled", () => {
   const dirtyFile = { path: "a.ts", kind: "modified" as const, staged: false, workingTree: true, binary: false, submodule: false };
 
   test("enables only when the workspace is dirty", () => {
-    expect(isComposerSendItEnabled({ ...base, dirty: true, files: [dirtyFile] })).toBe(true);
+    expect(isComposerShipItEnabled({ ...base, dirty: true, files: [dirtyFile] })).toBe(true);
     // Files present without the dirty flag still count as dirty.
-    expect(isComposerSendItEnabled({ ...base, dirty: false, files: [dirtyFile] })).toBe(true);
-    expect(isComposerSendItEnabled({ ...base, dirty: false, files: [] })).toBe(false);
+    expect(isComposerShipItEnabled({ ...base, dirty: false, files: [dirtyFile] })).toBe(true);
+    expect(isComposerShipItEnabled({ ...base, dirty: false, files: [] })).toBe(false);
   });
 
   test("stays disabled when conflicted, even with changes", () => {
-    expect(isComposerSendItEnabled({ ...base, dirty: true, files: [dirtyFile], conflicted: true })).toBe(false);
+    expect(isComposerShipItEnabled({ ...base, dirty: true, files: [dirtyFile], conflicted: true })).toBe(false);
   });
 
   test("enables on main too (merge step is skipped there)", () => {
-    expect(isComposerSendItEnabled({ ...base, dirty: true, files: [dirtyFile], branchRef: "main" })).toBe(true);
+    expect(isComposerShipItEnabled({ ...base, dirty: true, files: [dirtyFile], branchRef: "main" })).toBe(true);
   });
 
   test("disables without a status", () => {
-    expect(isComposerSendItEnabled(null)).toBe(false);
-    expect(isComposerSendItEnabled(undefined)).toBe(false);
+    expect(isComposerShipItEnabled(null)).toBe(false);
+    expect(isComposerShipItEnabled(undefined)).toBe(false);
+  });
+
+  test("legacy Send-It aliases match Ship-It", () => {
+    const dirty = { ...base, dirty: true, files: [dirtyFile] };
+    expect(isComposerSendItEnabled(dirty)).toBe(isComposerShipItEnabled(dirty));
+    expect(isComposerSendItEnabled(null)).toBe(isComposerShipItEnabled(null));
   });
 });
 
-describe("isComposerSendItMergeable", () => {
+describe("isComposerShipItMergeable", () => {
   const base: import("../../shared/domain/git.ts").GitStatus = {
     checkoutRoot: "/wt/feature",
     mainCheckoutRoot: "/repo",
@@ -253,12 +265,43 @@ describe("isComposerSendItMergeable", () => {
   };
 
   test("merges on feature branches, not on main or detached HEADs", () => {
-    expect(isComposerSendItMergeable({ ...base })).toBe(true);
-    expect(isComposerSendItMergeable({ ...base, branchRef: "main" })).toBe(false);
-    expect(isComposerSendItMergeable({ ...base, checkoutRoot: "/repo", mainCheckoutRoot: "/repo" })).toBe(false);
-    expect(isComposerSendItMergeable({ ...base, branchRef: null, detached: true })).toBe(false);
-    expect(isComposerSendItMergeable(null)).toBe(false);
-    expect(isComposerSendItMergeable(undefined)).toBe(false);
+    expect(isComposerShipItMergeable({ ...base })).toBe(true);
+    expect(isComposerShipItMergeable({ ...base, branchRef: "main" })).toBe(false);
+    expect(isComposerShipItMergeable({ ...base, checkoutRoot: "/repo", mainCheckoutRoot: "/repo" })).toBe(false);
+    expect(isComposerShipItMergeable({ ...base, branchRef: null, detached: true })).toBe(false);
+    expect(isComposerShipItMergeable(null)).toBe(false);
+    expect(isComposerShipItMergeable(undefined)).toBe(false);
+    expect(isComposerSendItMergeable({ ...base })).toBe(isComposerShipItMergeable({ ...base }));
+  });
+});
+
+describe("resolveGithubMenuState", () => {
+  const ready = { installed: true, available: true, repo: null, pr: null };
+  const pr = { number: 9, url: "https://github.com/o/r/pull/9", title: "T", state: "OPEN", base: "main", head: "feature", isDraft: false };
+
+  test("loading wins while the gh check is in flight", () => {
+    expect(resolveGithubMenuState(ready, true)).toEqual({ kind: "loading" });
+  });
+  test("degrades through unavailable, missing binary, and missing auth", () => {
+    expect(resolveGithubMenuState(null, false)).toEqual({ kind: "unavailable" });
+    expect(resolveGithubMenuState(undefined, false)).toEqual({ kind: "unavailable" });
+    expect(resolveGithubMenuState({ ...ready, installed: false, available: false }, false)).toEqual({ kind: "not-installed" });
+    expect(resolveGithubMenuState({ ...ready, available: false }, false)).toEqual({ kind: "not-authenticated" });
+  });
+  test("creates when ready and views when a PR exists", () => {
+    expect(resolveGithubMenuState(ready, false)).toEqual({ kind: "create" });
+    expect(resolveGithubMenuState({ ...ready, pr }, false)).toEqual({ kind: "view", pr });
+  });
+});
+
+describe("shipPrSteps", () => {
+  test("orders commit, rebase, and push for a dirty branch", () => {
+    expect(shipPrSteps(true, true)).toEqual(["commit", "rebase", "push"]);
+  });
+  test("skips the commit when clean and the remote steps on main", () => {
+    expect(shipPrSteps(false, true)).toEqual(["rebase", "push"]);
+    expect(shipPrSteps(true, false)).toEqual(["commit"]);
+    expect(shipPrSteps(false, false)).toEqual([]);
   });
 });
 

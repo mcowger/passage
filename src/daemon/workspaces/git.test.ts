@@ -362,4 +362,90 @@ describe("GitService", () => {
     expect(after.hasUpstream).toBe(true);
     expect(after.ahead).toBe(0);
   });
+  test("push sets upstream on first publish", async () => {
+    const origin = await mkdtemp(join(tmpdir(), "passage-git-origin-"));
+    roots.push(origin);
+    await git(origin, "init", "--bare");
+    const root = await mkdtemp(join(tmpdir(), "passage-git-clone-"));
+    roots.push(root);
+    await git(root, "init", "-b", "main");
+    await git(root, "config", "user.email", "test@example.com");
+    await git(root, "config", "user.name", "Test");
+    await git(root, "remote", "add", "origin", origin);
+    await writeFile(join(root, "a.txt"), "a\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "initial");
+    const service = new GitService();
+    expect((await service.status(root)).hasUpstream).toBe(false);
+    await service.push(root);
+    const after = await service.status(root);
+    expect(after.hasUpstream).toBe(true);
+    expect(after.ahead).toBe(0);
+  });
+  test("rebases a worktree branch onto the remote default", async () => {
+    const origin = await mkdtemp(join(tmpdir(), "passage-git-origin-"));
+    roots.push(origin);
+    await git(origin, "init", "--bare");
+    const root = await fixture();
+    const service = new GitService();
+    await git(root, "remote", "add", "origin", origin);
+    await writeFile(join(root, "base.txt"), "base\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "base");
+    await git(root, "push", "-u", "origin", "main");
+    const wt = join(root, "feature-wt");
+    await git(root, "worktree", "add", "-b", "feature", wt);
+    await writeFile(join(wt, "feature.txt"), "feature\n");
+    await git(wt, "add", ".");
+    await git(wt, "commit", "-m", "feature work");
+    // Advance the remote after the branch was cut.
+    await writeFile(join(root, "remote.txt"), "remote\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "remote progress");
+    await git(root, "push", "origin", "main");
+    expect(await service.remoteDefaultBranch(wt)).toBe("main");
+    const rebased = await service.rebaseOntoRemote(wt);
+    expect(rebased).toEqual({ remote: "origin", base: "main" });
+    expect(await readFile(join(wt, "remote.txt"), "utf8")).toBe("remote\n");
+    expect(await readFile(join(wt, "feature.txt"), "utf8")).toBe("feature\n");
+  });
+  test("rebase onto a missing remote branch fails cleanly", async () => {
+    const root = await fixture();
+    const service = new GitService();
+    const wt = join(root, "feature-wt");
+    await writeFile(join(root, "base.txt"), "base\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "base");
+    await git(root, "worktree", "add", "-b", "feature", wt);
+    // No remotes at all: fetch fails fast with a GitError.
+    await expect(service.rebaseOntoRemote(wt)).rejects.toBeInstanceOf(GitError);
+    // Untracked-file guard: the failed rebase leaves no mid-rebase state.
+    expect((await service.status(wt)).files.length).toBe(0);
+  });
+  test("describes a branch diff against its base for PRs", async () => {
+    const root = await fixture();
+    const service = new GitService();
+    await writeFile(join(root, "base.txt"), "base\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "base");
+    await git(root, "checkout", "-b", "feature");
+    await writeFile(join(root, "feature.txt"), "feature\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "feature work");
+    const preview = await service.branchDiffForPr(root);
+    expect(preview.base).toBe("main");
+    expect(preview.mergeBase).toMatch(/^[0-9a-f]{40}$/);
+    expect(preview.files).toEqual([{ path: "feature.txt", kind: "added" }]);
+    expect(preview.diff).toContain("+feature");
+    expect(preview.truncated).toBe(false);
+  });
+  test("branch diff with no commits beyond base is empty", async () => {
+    const root = await fixture();
+    const service = new GitService();
+    await writeFile(join(root, "base.txt"), "base\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "base");
+    const preview = await service.branchDiffForPr(root, "main");
+    expect(preview.files).toEqual([]);
+  });
 });

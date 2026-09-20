@@ -9,9 +9,11 @@ import { setupDomTests } from "../test-utils/dom.ts";
 // settle re-checks, and WS invalidations overlap freely. Without sequencing,
 // the last response to *resolve* wins -- e.g. the previous workspace's dirty
 // fetch landing after the new workspace's clean one -- and a stale dirty
-// snapshot sticks commit/send-it onto a clean tree (a brand-new worktree
-// shows both buttons with no changes) until the next invalidation. Only the
-// latest request may write state; older resolutions are dropped.
+// snapshot sticks commit/ship-it options onto a clean tree (a brand-new
+// worktree shows ship-it affordances with no changes) until the next
+// invalidation. Only the latest request may write state; older resolutions
+// are dropped. The composer always renders exactly one Git button; options
+// live inside its menu.
 //
 // NOTE: use render-bound queries, never the `screen` global -- screen binds
 // to document at import time, before setupDomTests' beforeAll registers
@@ -85,11 +87,12 @@ describe("ComposerMergeButton stale git status (happy-dom)", () => {
     });
     await flush();
 
-    expect(tree.queryByRole("button", { name: /auto-commit/i })).toBeNull();
-    expect(tree.container.textContent ?? "").not.toContain("Send It");
+    // Exactly one Git button, and no ship-it affordance leaks onto the clean tree.
+    expect(tree.getAllByRole("button", { name: /git options for feature/i })).toHaveLength(1);
+    expect(tree.container.textContent ?? "").not.toContain("Ship It");
   });
 
-  test("mobile with send-it collapses a lone option into the git menu", async () => {
+  test("dirty tree renders one Git button (options live in the menu)", async () => {
     let resolveReq!: (status: GitStatus) => void;
     const api = {
       gitStatus: () =>
@@ -98,8 +101,8 @@ describe("ComposerMergeButton stale git status (happy-dom)", () => {
         }),
     } as unknown as WorkspaceApi;
 
-    // Dirty tree on a feature branch with nothing ahead/behind: Send It plus
-    // a lone Commit option. On mobile the Commit must collapse into the menu.
+    // Dirty tree on a feature branch with nothing ahead/behind: Ship It plus
+    // a lone Commit option, both inside the single Git menu.
     let tree!: ReturnType<typeof render>;
     await act(async () => {
       tree = render(React.createElement(ComposerMergeButton, { workspaceId: "wsp-1", api, settled: true, hideIcons: true }));
@@ -109,10 +112,10 @@ describe("ComposerMergeButton stale git status (happy-dom)", () => {
     });
     await flush();
 
-    // Send It stays a direct button; the lone Commit collapses into the menu
-    // trigger instead of rendering as a second direct button.
-    expect(tree.getByRole("button", { name: /merge into main/i })).toBeInTheDocument();
-    expect(tree.getByRole("button", { name: /git options for feature/i })).toBeInTheDocument();
+    // One Git button total; Ship It and Commit live in the menu, not as
+    // direct composer buttons.
+    expect(tree.getAllByRole("button", { name: /git options for feature/i })).toHaveLength(1);
+    expect(tree.queryByRole("button", { name: /merge into main/i })).toBeNull();
     expect(tree.queryByRole("button", { name: /stage all \+ generate message/i })).toBeNull();
   });
 
@@ -134,7 +137,8 @@ describe("ComposerMergeButton stale git status (happy-dom)", () => {
     });
     await flush();
 
-    // Dirty tree on a feature branch: Send It plus the standalone Commit button.
-    expect(tree.getAllByRole("button", { name: /auto-commit 1 changed/i })).toHaveLength(2);
+    // Dirty tree on a feature branch: exactly one Git button; the commit
+    // affordance lives in the menu, not beside the button.
+    expect(tree.getAllByRole("button", { name: /git options for feature/i })).toHaveLength(1);
   });
 });

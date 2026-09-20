@@ -5,7 +5,8 @@ import { opaqueDomainIdSchema } from "../../shared/domain/workspaces.ts";
 import { MAX_FILE_PATH_LENGTH } from "../../shared/domain/files.ts";
 import type { GitStatusChangedReason } from "../../shared/protocol/index.ts";
 import { GitError, GitService } from "../workspaces/git.ts";
-import { CommitGenerator, fallbackCommitMessage, formatConversationMessages, serializeDiffsForPrompt } from "../workspaces/commit-generator.ts";
+import { GhError, GhService } from "../workspaces/github.ts";
+import { CommitGenerator, fallbackCommitMessage, fallbackPrBody, formatConversationMessages, serializeDiffsForPrompt } from "../workspaces/commit-generator.ts";
 import type { WorkspaceEventHub } from "../workspaces/events.ts";
 import { WorkspaceService } from "../workspaces/service.ts";
 import { readJsonBody } from "./body.ts";
@@ -22,6 +23,22 @@ const commitAutoInput = z.object({
   commitPrompt: z.string().max(8000).optional(),
   agentId: z.string().min(1).max(128).optional(),
 }).strict();
+const rebaseRemoteInput = z.object({
+  remote: z.string().trim().min(1).max(128).optional(),
+  base: z.string().trim().min(1).max(128).optional(),
+}).strict();
+const prSuggestInput = z.object({
+  base: z.string().trim().min(1).max(128).optional(),
+  model: z.string().trim().max(256).optional(),
+  thinkingLevel: z.string().trim().max(256).optional(),
+  agentId: z.string().min(1).max(128).optional(),
+}).strict();
+const prCreateInput = z.object({
+  title: z.string().trim().min(1).max(256),
+  body: z.string().max(20000).optional(),
+  base: z.string().trim().min(1).max(128).optional(),
+  draft: z.boolean().optional(),
+}).strict();
 
 /** Best-effort conversation excerpts for the commit prompt (plain text only).
  *  The daemon wires this to `AgentService.getCommitConversation`; tests and
@@ -36,10 +53,19 @@ const gitMessage = (e: GitError): string | undefined => {
   const detail = (e.stderr || e.message || "").split("\n")[0].trim().replace(/^fatal:\s*/i, "");
   return detail ? detail.slice(0, 500) : undefined;
 };
+const ghMessage = (e: GhError): string | undefined => {
+  const detail = (e.stderr || e.message || "").split("\n").map((l) => l.trim()).find((l) => l && !/^\s*$/i.test(l)) ?? "";
+  const clean = detail.replace(/^(failed|error):\s*/i, "");
+  return clean ? clean.slice(0, 500) : undefined;
+};
 const error = (e: unknown) => {
   if (e instanceof GitError) {
     const message = gitMessage(e);
     return Response.json({ error: "git-failed", ...(message ? { message } : {}) }, { status: 422, headers: { "Cache-Control": "no-store" } });
+  }
+  if (e instanceof GhError) {
+    const message = ghMessage(e) ?? "The `gh` command failed. Check that `gh` is installed and authenticated.";
+    return Response.json({ error: "git-failed", message }, { status: 422, headers: { "Cache-Control": "no-store" } });
   }
   return Response.json({ error: "invalid-request" }, { status: 400, headers: { "Cache-Control": "no-store" } });
 };
@@ -70,8 +96,10 @@ const resolveRepoPath = async (workspaces: WorkspaceService, workspaceId: string
   return { cwd, rel };
 };
 
-export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, events?: WorkspaceEventHub, commitGenerator?: Pick<CommitGenerator, "suggestCommit">, getConversation?: CommitConversationProvider): Hono => {
+export type GitCommitGenerator = Pick<CommitGenerator, "suggestCommit"> & Partial<Pick<CommitGenerator, "suggestPullRequest">>;
+export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, events?: WorkspaceEventHub, commitGenerator?: GitCommitGenerator, getConversation?: CommitConversationProvider, github?: Pick<GhService, "installed" | "available" | "repoInfo" | "prForBranch" | "createPr">): Hono => {
   const commits = commitGenerator ?? new CommitGenerator();
+  const gh = github ?? new GhService();
   const app = new Hono();
   app.use("*", async (c, next) => { c.header("Cache-Control", "no-store"); return next(); });
   const changed = (workspaceId: string, reason: GitStatusChangedReason) => {
@@ -230,6 +258,128 @@ export const createGitRoutes = (workspaces: WorkspaceService, git: GitService, e
     try {
       const workspaceId = id(c.req.param("workspaceId"));
       return await mutate(workspaceId, "push", (cwd) => git.push(cwd));
+    } catch (e) { return error(e); }
+  });
+  app.post("/api/workspaces/:workspaceId/git/rebase-remote", async (c) => {
+    try {
+      const input = rebaseRemoteInput.parse(await readJsonBody(c.req.raw));
+      const workspaceId = id(c.req.param("workspaceId"));
+      const cwd = await workspaces.resolvePath(workspaceId, ".");
+      const { remote, base } = await git.rebaseOntoRemote(cwd, input.remote, input.base);
+      const status = await git.status(cwd);
+      changed(workspaceId, "rebase-remote");
+      return ok({ status, remote, base });
+    } catch (e) { return error(e); }
+  });
+  /** `gh` availability + open PR for the checkout's branch. Never 422s:
+   *  a missing binary, missing auth, or missing PR resolves to flags/null
+   *  so the composer can disable PR commands instead of erroring. */
+  app.get("/api/workspaces/:workspaceId/git/github-status", async (c) => {
+    try {
+      const workspaceId = id(c.req.param("workspaceId"));
+      const cwd = await workspaces.resolvePath(workspaceId, ".");
+      const installed = await gh.installed(cwd).catch(() => false);
+      let available = false;
+      let repo: Awaited<ReturnType<GhService["repoInfo"]>> = null;
+      let pr: Awaited<ReturnType<GhService["prForBranch"]>> = null;
+      if (installed) {
+        available = await gh.available(cwd).catch(() => false);
+      }
+      if (available) {
+        try {
+          repo = await gh.repoInfo(cwd);
+        } catch {
+          repo = null;
+        }
+        try {
+          pr = await gh.prForBranch(cwd);
+        } catch (e) {
+          // Auth/network failures downgrade to unavailable; "no PR"
+          // already resolves to null inside the service.
+          available = false;
+          pr = null;
+          void e;
+        }
+      }
+      return ok({ installed, available, repo, pr });
+    } catch (e) { return error(e); }
+  });
+  app.post("/api/workspaces/:workspaceId/git/pr-suggest", async (c) => {
+    try {
+      const input = prSuggestInput.parse(await readJsonBody(c.req.raw));
+      const workspaceId = id(c.req.param("workspaceId"));
+      const cwd = await workspaces.resolvePath(workspaceId, ".");
+      const before = await git.status(cwd);
+      if (!before.branchRef) throw new GitError("Cannot describe a detached HEAD as a pull request");
+      if (before.conflicted) throw new GitError("Resolve merge conflicts before creating a pull request");
+      const preview = await git.branchDiffForPr(cwd, input.base);
+      if (preview.files.length === 0) throw new GitError("Nothing to describe: the branch has no commits beyond its base");
+      let storedModel = input.model ?? "";
+      let storedThinking = input.thinkingLevel ?? "";
+      try {
+        const settings = workspaces.getSettings(workspaceId);
+        if (!input.model) storedModel = settings.suggestModel ?? "";
+        if (!input.thinkingLevel) storedThinking = settings.suggestThinkingLevel ?? "";
+      } catch {
+        // Stored settings are best-effort; explicit body fields still apply.
+      }
+      let conversation = { userMessages: "(none)", finalAssistantMessages: "(none)" };
+      try {
+        const raw = await getConversation?.(workspaceId, input.agentId);
+        if (raw) {
+          conversation = {
+            userMessages: formatConversationMessages(raw.userMessages ?? []),
+            finalAssistantMessages: formatConversationMessages(raw.finalAssistantMessages ?? []),
+          };
+        }
+      } catch {
+        // Conversation context is advisory; the diff still generates a description.
+      }
+      const suggestion = await commits.suggestPullRequest?.(
+        preview.files,
+        preview.diff,
+        preview.base,
+        before.branchRef,
+        cwd,
+        storedModel,
+        storedThinking,
+        conversation,
+      ) ?? null;
+      if (suggestion) {
+        return ok({ base: preview.base, title: suggestion.title, body: suggestion.body, generated: true, truncated: preview.truncated });
+      }
+      return ok({
+        base: preview.base,
+        title: fallbackCommitMessage(preview.files),
+        body: fallbackPrBody(preview.files, preview.base),
+        generated: false,
+        truncated: preview.truncated,
+      });
+    } catch (e) { return error(e); }
+  });
+  app.post("/api/workspaces/:workspaceId/git/pr-create", async (c) => {
+    try {
+      const input = prCreateInput.parse(await readJsonBody(c.req.raw));
+      const workspaceId = id(c.req.param("workspaceId"));
+      const cwd = await workspaces.resolvePath(workspaceId, ".");
+      const before = await git.status(cwd);
+      if (!before.branchRef) throw new GitError("Cannot create a pull request from a detached HEAD");
+      if (before.conflicted) throw new GitError("Resolve merge conflicts before creating a pull request");
+      if (before.dirty) throw new GitError("Commit or stash your changes before creating a pull request");
+      // Creating a PR requires the branch on the remote; push first when
+      // there is anything to publish (first push sets the upstream).
+      if (!before.hasUpstream || before.ahead > 0) {
+        await git.push(cwd);
+      }
+      const pr = await gh.createPr(cwd, {
+        title: input.title,
+        body: input.body ?? "",
+        base: input.base,
+        draft: input.draft,
+      });
+      const status = await git.status(cwd);
+      changed(workspaceId, "pr-create");
+      return ok({ pr, status });
     } catch (e) { return error(e); }
   });
   return app;

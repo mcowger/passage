@@ -250,7 +250,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
       (err: unknown) => {
         const message = friendlyApiError(err, "Could not merge into main. Resolve any conflicts and try again.");
         setError(message);
-        toast.error("Merge into main failed", { description: message });
+        toast.error("Merge locally failed", { description: message });
       },
     ).finally(() => setBulkOp(null));
   };
@@ -318,7 +318,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
             title={isMainWorktree ? "The main worktree or branch cannot be merged into itself" : !hasCommitsToMerge ? "No commits to merge into main" : "Merge this branch into main"}
           >
             {bulkOp === "merge" ? <Spinner className="size-3" /> : null}
-            Merge
+            Merge locally
           </Button>
           <Button
             variant="ghost"

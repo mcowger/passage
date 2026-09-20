@@ -276,3 +276,33 @@ test("client starts, reads, and cancels workspace action runs", async () => {
     "POST /api/workspaces/wsp_123/actions/runs/arun_1/cancel",
   ]);
 });
+
+test("client requests remote rebase, github status, and PR endpoints", async () => {
+  const calls: string[] = [];
+  const api = createWorkspaceApi(async (input, init) => {
+    calls.push(`${init?.method ?? "GET"} ${String(input)}`);
+    if (String(input).endsWith("/git/rebase-remote")) {
+      return Response.json({ status: { branchRef: "feature" }, remote: "origin", base: "main" });
+    }
+    if (String(input).endsWith("/git/github-status")) {
+      return Response.json({ installed: true, available: true, repo: null, pr: null });
+    }
+    if (String(input).endsWith("/git/pr-suggest")) {
+      return Response.json({ base: "main", title: "T", body: "B", generated: false, truncated: false });
+    }
+    if (String(input).endsWith("/git/pr-create")) {
+      return Response.json({ pr: null, status: { branchRef: "feature" } });
+    }
+    throw new Error(`unexpected request ${String(input)}`);
+  });
+  await api.gitRebaseRemote("wsp_feature");
+  await api.gitGithubStatus("wsp_feature");
+  await api.gitPrSuggest("wsp_feature");
+  await api.gitPrCreate("wsp_feature", { title: "T" });
+  expect(calls).toEqual([
+    "POST /api/workspaces/wsp_feature/git/rebase-remote",
+    "GET /api/workspaces/wsp_feature/git/github-status",
+    "POST /api/workspaces/wsp_feature/git/pr-suggest",
+    "POST /api/workspaces/wsp_feature/git/pr-create",
+  ]);
+});

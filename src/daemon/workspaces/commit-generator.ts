@@ -165,6 +165,51 @@ export function serializeDiffsForPrompt(diffs: GitDiff[]): string {
   return parts.join("\n");
 }
 
+/** Max raw diff characters forwarded for a PR description (branch diffs
+ *  run larger than working-tree diffs). */
+export const MAX_PR_DIFF_CHARS = 100000;
+/** Hard cap for a generated PR body. */
+export const MAX_PR_BODY_CHARS = 6000;
+
+export type PrSuggestion = { title: string; body: string };
+
+/** Deterministic PR body when the model is unavailable: changed files plus
+ *  an honest testing section (never invent test runs). */
+export function fallbackPrBody(files: Array<{ path: string; kind: string }>, base: string): string {
+  const lines = files.length === 0
+    ? ["- (no committed changes found)"]
+    : files.slice(0, 30).map((f) => `- ${f.path} (${f.kind})`);
+  if (files.length > 30) lines.push(`- …and ${files.length - 30} more`);
+  return [`## Summary`, ``, `Changes on this branch vs \`${base}\`.`, ``, `## Changes`, ``, ...lines, ``, `## Testing`, ``, `Not run.`, ``].join("\n");
+}
+
+/** Split raw model output into a title (first line, <=72 chars) and body.
+ *  Returns null when nothing usable is present. */
+export function parsePrSuggestion(raw: string | null | undefined): PrSuggestion | null {
+  if (!raw) return null;
+  let text = raw.trim();
+  const fence = text.match(/```(?:\w+)?\n([\s\S]*?)```/);
+  if (fence) text = fence[1].trim();
+  const lines = text.split("\n").map((l) => l.trim());
+  while (lines.length > 0 && !lines[0]) lines.shift();
+  if (lines.length === 0) return null;
+  let title = (lines.shift() ?? "").replace(/^["'“”‘’#\-\*\s]+/, "").replace(/["'“”‘’\s]+$/, "").trim();
+  if (!title) return null;
+  if (title.length > MAX_COMMIT_SUBJECT_CHARS) {
+    const cut = title.slice(0, MAX_COMMIT_SUBJECT_CHARS);
+    const boundary = cut.lastIndexOf(" ");
+    title = (boundary > 24 ? cut.slice(0, boundary) : cut).trim();
+  }
+  let body = lines.join("\n").replace(/^\s*(?:---+|___+)\s*\n/, "").trim();
+  // Drop a repeated title heading if the model echoed it.
+  if (body.startsWith("#")) {
+    const [heading, ...rest] = body.split("\n");
+    if (heading.replace(/^#+\s*/, "").trim() === title) body = rest.join("\n").trim();
+  }
+  if (body.length > MAX_PR_BODY_CHARS) body = body.slice(0, MAX_PR_BODY_CHARS).trimEnd();
+  return { title, body };
+}
+
 /** Deterministic fallback when the model is unavailable: a subject line
  *  derived from the changed file list. */
 export function fallbackCommitMessage(files: Array<{ path: string; kind: string }>): string {
@@ -187,6 +232,46 @@ export class CommitGenerator {
 
   constructor(private readonly timeoutMs = 30_000, private readonly pi: CommitGeneratorPiOptions = {}) {}
 
+  /** Best-effort PR title + body for a branch diff vs a base. Never throws:
+   *  returns null when the model is unavailable, times out, or answers with
+   *  nothing usable (the caller falls back to a template). */
+  async suggestPullRequest(
+    files: Array<{ path: string; kind: string }>,
+    diff: string,
+    base: string,
+    branch: string,
+    cwd?: string,
+    model?: string,
+    thinkingLevel?: string,
+    conversation: CommitConversation = {},
+  ): Promise<PrSuggestion | null> {
+    if (files.length === 0) return null;
+    const prompt = [
+      `Write a GitHub pull request for branch "${branch}" into "${base}".`,
+      `First line: the PR title only (imperative, max 72 characters).`,
+      `Then a blank line, then the markdown body with exactly these sections:`,
+      `## Summary`,
+      `## Changes`,
+      `## Testing`,
+      `Under Testing, write "Not run." unless the diff or conversation shows evidence tests ran.`,
+      `Describe the diff; do not paste the conversation. No code fences around the answer.`,
+      ``,
+      `Files changed:`,
+      formatChangedFiles(files),
+      ``,
+      `Diff (truncated):`,
+      diff.trim() ? diff.slice(0, MAX_PR_DIFF_CHARS).trimEnd() : "(no textual diff)",
+      ``,
+      `User requests (context):`,
+      truncateCommitConversation(conversation.userMessages ?? "", MAX_COMMIT_USER_MESSAGES_CHARS),
+      ``,
+      `Final agent summaries (context):`,
+      truncateCommitConversation(conversation.finalAssistantMessages ?? "", MAX_COMMIT_FINAL_ASSISTANT_CHARS),
+    ].join("\n");
+    const response = await this.generate(prompt, cwd, model, thinkingLevel, "passage-pr-description-");
+    return parsePrSuggestion(response);
+  }
+
   /** Best-effort commit message for the given changed files + diff. Never
    *  throws: returns null when the model is unavailable, times out, or
    *  answers with nothing usable (the caller falls back). */
@@ -200,32 +285,38 @@ export class CommitGenerator {
     conversation: CommitConversation = {},
   ): Promise<string | null> {
     if (files.length === 0) return null;
+    const prompt = buildCommitPrompt(
+      formatChangedFiles(files),
+      truncateCommitDiff(diff),
+      promptTemplate,
+      conversation,
+    );
+    // Best-effort: an unsupported level must never fail the commit --
+    // the caller falls back to a deterministic message.
+    const response = await this.generate(prompt, cwd, model, thinkingLevel, "passage-commit-message-");
+    return sanitizeCommitMessage(response);
+  }
+
+  /** Run one tools-disabled Pi prompt and return the raw text. Never throws:
+   *  failures resolve to null so callers can fall back. */
+  private async generate(prompt: string, cwd?: string, model?: string, thinkingLevel?: string, tag = "passage-generate-"): Promise<string | null> {
     let sessionDir: string | undefined;
     let agentId: string | undefined;
     try {
-      const prompt = buildCommitPrompt(
-        formatChangedFiles(files),
-        truncateCommitDiff(diff),
-        promptTemplate,
-        conversation,
-      );
-      sessionDir = await mkdtemp(join(tmpdir(), "passage-commit-message-"));
-      agentId = `commit-message-${crypto.randomUUID()}`;
+      sessionDir = await mkdtemp(join(tmpdir(), tag));
+      agentId = `${tag}${crypto.randomUUID()}`;
       const piProcess = await this.manager.start(agentId, {
         cwd: cwd?.trim() || process.cwd(),
         sessionDir,
-        sessionId: `commit-message-${crypto.randomUUID()}`,
+        sessionId: `${tag}${crypto.randomUUID()}`,
         model: model?.trim() || undefined,
         disableTools: true,
         ...this.pi,
       });
-      // Best-effort: an unsupported level must never fail the commit --
-      // the caller falls back to a deterministic message.
       if (thinkingLevel?.trim()) {
         await piProcess.request({ type: "set_thinking_level", level: thinkingLevel.trim() }, this.timeoutMs).catch(() => undefined);
       }
-      const response = await this.readMessage(piProcess, prompt);
-      return sanitizeCommitMessage(response);
+      return await this.readMessage(piProcess, prompt);
     } catch {
       return null;
     } finally {

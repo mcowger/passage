@@ -86,7 +86,7 @@ Persistent Bun daemon
 - Arbitrary executable server or browser plugins.
 - Hosted multi-user workspaces, collaboration, tenancy, relay networking, or
   account management.
-- Pull-request hosting-provider integrations and review-comment publishing.
+- Review-comment publishing and PR flows beyond `gh`: pull requests are created, viewed, and described through the installed `gh` CLI (daemon `GhService`, fixed argv like Git); a separate hosting-provider API integration is out of scope.
 - Cloud telemetry, remote usage monitoring, or a separate message database.
 - Offline editing or offline agent control. The PWA caches the application
   shell only (`passage-shell-v1`; never `/api/*` or `/ws*`); all mutable

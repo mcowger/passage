@@ -111,7 +111,7 @@ export function commitToastDescription(message: string): React.ReactNode | undef
 
 let commitToastSeq = 0;
 
-// Commit/send-it success toast with a tap-to-expand description. The toast
+// Commit/ship-it success toast with a tap-to-expand description. The toast
 // gets a stable id so expanding can switch it to hold-until-closed.
 export function commitToast(title: string, message: string): void {
   const id = `commit-toast-${++commitToastSeq}`;

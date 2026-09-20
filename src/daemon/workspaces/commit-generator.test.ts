@@ -3,8 +3,10 @@ import {
   buildCommitPrompt,
   extractCommitConversation,
   fallbackCommitMessage,
+  fallbackPrBody,
   formatChangedFiles,
   formatConversationMessages,
+  parsePrSuggestion,
   sanitizeCommitMessage,
   serializeDiffsForPrompt,
   truncateCommitDiff,
@@ -135,5 +137,35 @@ describe("CommitGenerator", () => {
   it("returns null with no files", async () => {
     const generator = new CommitGenerator(50, { executable: "/does/not/exist" });
     expect(await generator.suggestCommit([], "+x")).toBeNull();
+  });
+});
+
+describe("parsePrSuggestion", () => {
+  it("splits a title from a markdown body", () => {
+    const out = parsePrSuggestion("Ship the git menu\n\n## Summary\n\nDoes things.\n\n## Testing\n\nNot run.");
+    expect(out?.title).toBe("Ship the git menu");
+    expect(out?.body).toContain("## Testing");
+  });
+  it("strips fences, quotes, and heading echoes", () => {
+    const out = parsePrSuggestion('```\n"Ship it"\n\n# Ship it\n\nBody here.\n```');
+    expect(out?.title).toBe("Ship it");
+    expect(out?.body).toBe("Body here.");
+  });
+  it("truncates an overlong title", () => {
+    const out = parsePrSuggestion(`${"x".repeat(100)}\n\nBody.`);
+    expect(out!.title.length).toBeLessThanOrEqual(72);
+  });
+  it("rejects empty output", () => {
+    expect(parsePrSuggestion("")).toBeNull();
+    expect(parsePrSuggestion(null)).toBeNull();
+  });
+});
+
+describe("fallbackPrBody", () => {
+  it("lists changes and admits testing did not run", () => {
+    const body = fallbackPrBody([{ path: "a.ts", kind: "modified" }], "main");
+    expect(body).toContain("a.ts");
+    expect(body).toContain("Not run.");
+    expect(body).toContain("main");
   });
 });

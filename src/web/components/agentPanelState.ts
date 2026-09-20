@@ -5,7 +5,7 @@ import type {
   TimelineItem,
 } from "../../shared/domain/agents.ts";
 import type { AgentFile, AgentImage } from "../../shared/protocol/agents.ts";
-import type { GitStatus } from "../../shared/domain/git.ts";
+import type { GitStatus, GithubStatus } from "../../shared/domain/git.ts";
 import type { QuestionOption, QuestionRequest } from "./QuestionCard.tsx";
 
 /**
@@ -234,27 +234,33 @@ export function isComposerMergeRelevant(status: GitStatus | null | undefined): b
 }
 
 /**
- * Send-it gate: true only when the workspace is dirty (uncommitted changes
+ * Ship-It gate: true only when the workspace is dirty (uncommitted changes
  * present) and committable (not conflicted). This is the sole enablement
- * rule for the composer's Send-it button.
+ * rule for the composer's Ship-It action.
  */
-export function isComposerSendItEnabled(status: GitStatus | null | undefined): boolean {
+export function isComposerShipItEnabled(status: GitStatus | null | undefined): boolean {
   if (!status) return false;
   if (status.conflicted) return false;
   return status.dirty || status.files.length > 0;
 }
 
+/** @deprecated Use isComposerShipItEnabled. Kept for existing importers. */
+export const isComposerSendItEnabled = isComposerShipItEnabled;
+
 /**
- * True when a send-it run should attempt the merge step after committing:
+ * True when a ship-it run should attempt the merge step after committing:
  * a non-main branch with a branchRef (the same branches the standalone
- * merge/rebase options serve). On main or a detached HEAD, send-it stops
+ * merge/rebase options serve). On main or a detached HEAD, ship-it stops
  * after the auto-commit.
  */
-export function isComposerSendItMergeable(status: GitStatus | null | undefined): boolean {
+export function isComposerShipItMergeable(status: GitStatus | null | undefined): boolean {
   if (!status?.branchRef) return false;
   const isMainWorktree = status.checkoutRoot === status.mainCheckoutRoot || status.branchRef === "main";
   return !isMainWorktree;
 }
+
+/** @deprecated Use isComposerShipItMergeable. Kept for existing importers. */
+export const isComposerSendItMergeable = isComposerShipItMergeable;
 
 /**
  * True when the workspace itself can be offered for deletion (a separate
@@ -267,20 +273,56 @@ export function isWorkspaceDeletable(status: GitStatus | null | undefined): bool
   return status.checkoutRoot !== status.mainCheckoutRoot;
 }
 
-/** Pending "delete this workspace?" prompt after a merge or a Send It.
+/** Ordered steps for Ship It to a PR: commit when dirty, then (on a branch)
+ *  rebase onto the remote and push before the PR dialog opens. PR creation
+ *  itself re-pushes as a safety net, but the explicit steps surface
+ *  commit/rebase/push failures before the dialog. Pure for testing. */
+export type ShipPrStep = "commit" | "rebase" | "push";
+
+export function shipPrSteps(dirty: boolean, mergeable: boolean): ShipPrStep[] {
+  const steps: ShipPrStep[] = [];
+  if (dirty) steps.push("commit");
+  if (mergeable) steps.push("rebase", "push");
+  return steps;
+}
+
+/** Decision state for the composer Git menu's GitHub section. Pure for
+ *  testing: the menu itself renders in a Radix portal, which happy-dom
+ *  cannot mount, so this is unit-tested instead of interaction-tested. */
+export type GithubMenuState =
+  | { kind: "loading" }
+  | { kind: "unavailable" }
+  | { kind: "not-installed" }
+  | { kind: "not-authenticated" }
+  | { kind: "create" }
+  | { kind: "view"; pr: NonNullable<GithubStatus["pr"]> };
+
+export function resolveGithubMenuState(gh: GithubStatus | null | undefined, loading: boolean): GithubMenuState {
+  if (loading) return { kind: "loading" };
+  if (!gh) return { kind: "unavailable" };
+  if (!gh.installed) return { kind: "not-installed" };
+  if (!gh.available) return { kind: "not-authenticated" };
+  if (gh.pr) return { kind: "view", pr: gh.pr };
+  return { kind: "create" };
+}
+
+/** Pending "delete this workspace?" prompt after a merge or a Ship It.
  * commitMessage lets the user review what was committed before deciding. */
 export type DeleteWorkspacePrompt = { branch: string; merged: boolean; commitMessage?: string };
 
 export type ComposerGitOption = "commit" | "merge" | "rebase" | "push";
 
 /**
- * Smart Git options for the composer button:
+ * Smart Git options for the single composer Git menu:
  * - Commit: the workspace is dirty (uncommitted changes present).
- * - Merge: the branch is ahead of main.
+ * - Merge: the branch is ahead of main (labelled "Merge locally...").
  * - Rebase: main has moved since the branch was cut (branch is behind main).
- * - Push: a remote branch exists and is behind the local branch.
+ * - Push: the branch has commits the remote lacks. Push and publish are
+ *   one action: a missing upstream is set up on first push, so this is
+ *   also offered when the branch is ahead of main but has no upstream yet.
  * Commit is offered on any branch (including main) whenever the tree is
  * dirty; merge/rebase/push stay gated on non-main branches with a branchRef.
+ * Fetch is always available in the menu itself, so it is not part of this list.
  */
 export function resolveComposerGitOptions(status: GitStatus | null | undefined): ComposerGitOption[] {
   if (!status) return [];
@@ -292,7 +334,7 @@ export function resolveComposerGitOptions(status: GitStatus | null | undefined):
   if (isMainWorktree) return options;
   if (status.aheadOfMain > 0) options.push("merge");
   if ((status.behindMain ?? 0) > 0) options.push("rebase");
-  if (status.hasUpstream && status.ahead > 0) options.push("push");
+  if ((status.hasUpstream && status.ahead > 0) || (!status.hasUpstream && status.aheadOfMain > 0)) options.push("push");
   return options;
 }
 

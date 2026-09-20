@@ -3,12 +3,14 @@ import { toast } from "sonner";
 import { friendlyApiError, type WorkspaceApi } from "../api.ts";
 import { commitToast, CommitToastDescription } from "./ui/sonner.tsx";
 import { subscribeWorkspace } from "../workspaceSocket.ts";
-import type { GitStatus } from "../../shared/domain/git.ts";
+import type { GitStatus, GithubStatus } from "../../shared/domain/git.ts";
 import {
-  isComposerSendItEnabled,
-  isComposerSendItMergeable,
+  isComposerShipItEnabled,
+  isComposerShipItMergeable,
   isWorkspaceDeletable,
   resolveComposerGitOptions,
+  resolveGithubMenuState,
+  shipPrSteps,
   type ComposerGitOption,
   type DeleteWorkspacePrompt,
 } from "./agentPanelState.ts";
@@ -24,29 +26,32 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "./ui/alert-dialog.tsx";
+import { Input } from "./ui/input.tsx";
+import { Label } from "./ui/label.tsx";
+import { Textarea } from "./ui/textarea.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { Spinner } from "./ui/spinner.tsx";
 import {
   ArrowDownUp,
+  Download,
+  ExternalLink,
   FolderGit2,
   GitCommitHorizontal,
   GitMerge,
+  GitPullRequest,
   Rocket,
   Upload,
 } from "lucide-react";
 
 /**
- * Smart Git shortcut for the bottom composer bar. Fetches its own Git status and
- * only renders when at least one action is relevant: commit (dirty tree),
- * merge (ahead of main), rebase (main has diverged), push (remote branch
- * exists and is behind), or send-it (dirty tree: auto-commit, then rebase +
- * merge into main in one go).
- * A single option renders as a direct action button; multiple options collapse
- * into a FolderGit2 icon button with a thinking-selector-style popup menu.
- * The Send-it button only renders when its dirty-tree gate passes (hidden,
- * not disabled, when the tree is clean or conflicted). Merge still runs only
- * after explicit confirmation; send-it runs its merge step without a second prompt.
+ * The single Git entry point for the bottom composer bar. Exactly one Git
+ * button renders in all cases: clicking it always opens Git controls and
+ * never mutates the repository directly. Ship It... gets the prominent spot
+ * inside the menu; individual commands (Commit..., Push, Fetch, Rebase...,
+ * Merge locally...) sit below it, with a GitHub section for PRs (via `gh`).
  */
+type BusyOp = ComposerGitOption | "fetch" | "rebase-remote" | "ship-it" | "pr-create";
+
 /** Exported for regression tests (stale git-status sequencing). */
 export function ComposerMergeButton({
   workspaceId,
@@ -69,12 +74,28 @@ export function ComposerMergeButton({
   hideIcons?: boolean;
 }) {
   const [status, setStatus] = useState<GitStatus | null>(null);
-  const [busyOp, setBusyOp] = useState<ComposerGitOption | "send-it" | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [statusState, setStatusState] = useState<"loading" | "ready" | "unavailable">("loading");
+  const [busyOp, setBusyOp] = useState<BusyOp | null>(null);
+  const [confirmMergeOpen, setConfirmMergeOpen] = useState(false);
+  const [rebaseOpen, setRebaseOpen] = useState(false);
+  const [shipItOpen, setShipItOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [deletePrompt, setDeletePrompt] = useState<DeleteWorkspacePrompt | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  // GitHub (`gh`) state for the PR section. Loaded when the menu opens and
+  // refreshed after mutations; null means the check itself failed.
+  const [ghStatus, setGhStatus] = useState<GithubStatus | null>(null);
+  const [ghLoading, setGhLoading] = useState(false);
+  // Create-PR dialog state.
+  const [prOpen, setPrOpen] = useState(false);
+  const [prBase, setPrBase] = useState("");
+  const [prTitle, setPrTitle] = useState("");
+  const [prBody, setPrBody] = useState("");
+  const [prDraft, setPrDraft] = useState(false);
+  const [prSuggestLoading, setPrSuggestLoading] = useState(false);
+  const [prError, setPrError] = useState("");
+  const [prGeneratedNote, setPrGeneratedNote] = useState("");
   // The delete-workspace AlertDialog is modal: Radix disables pointer events
   // outside it, so a Sonner toast fired at the same time is visible but
   // dead (Show more / close X can't receive taps). The commit message lives
@@ -98,7 +119,7 @@ export function ComposerMergeButton({
   // settle re-check, WS invalidations) overlap freely. Without sequencing,
   // the last response to *resolve* wins -- e.g. the previous workspace's
   // fetch landing after the new workspace's -- and a stale dirty snapshot
-  // sticks commit/send-it onto a clean tree (or a stale clean hides them
+  // sticks commit/ship-it onto a clean tree (or a stale clean hides them
   // on a dirty one) until the next invalidation. Only the latest request
   // may write state; older resolutions are dropped on the floor.
   const statusSeqRef = useRef(0);
@@ -106,10 +127,33 @@ export function ComposerMergeButton({
     const seq = ++statusSeqRef.current;
     try {
       const next = await api.gitStatus(workspaceId);
-      if (statusSeqRef.current === seq) setStatus(next);
+      if (statusSeqRef.current === seq) {
+        setStatus(next);
+        setStatusState("ready");
+      }
     } catch {
-      // Non-Git workspaces (or transient failures): hide the button.
-      if (statusSeqRef.current === seq) setStatus(null);
+      // Non-Git workspaces (or transient failures): show the button with an
+      // explanatory empty state instead of disappearing.
+      if (statusSeqRef.current === seq) {
+        setStatus(null);
+        setStatusState("unavailable");
+      }
+    }
+  }, [api, workspaceId]);
+
+  // Same sequencing guard for `gh` checks: menu opens and several mutations
+  // can trigger overlapping loads across workspace switches.
+  const ghSeqRef = useRef(0);
+  const loadGh = useCallback(async () => {
+    const seq = ++ghSeqRef.current;
+    setGhLoading(true);
+    try {
+      const next = await api.gitGithubStatus(workspaceId);
+      if (ghSeqRef.current === seq) setGhStatus(next);
+    } catch {
+      if (ghSeqRef.current === seq) setGhStatus(null);
+    } finally {
+      if (ghSeqRef.current === seq) setGhLoading(false);
     }
   }, [api, workspaceId]);
 
@@ -117,8 +161,15 @@ export function ComposerMergeButton({
     // Invalidate any in-flight fetch from the previous workspace before the
     // fresh fetch below: its resolution must not overwrite this workspace.
     statusSeqRef.current += 1;
+    ghSeqRef.current += 1;
     setStatus(null);
-    setConfirmOpen(false);
+    setStatusState("loading");
+    setGhStatus(null);
+    setGhLoading(false);
+    setConfirmMergeOpen(false);
+    setRebaseOpen(false);
+    setShipItOpen(false);
+    setPrOpen(false);
     setMenuOpen(false);
     setDeletePrompt(null);
     setDeleteError("");
@@ -128,11 +179,10 @@ export function ComposerMergeButton({
 
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
-  // Commit is the only option when the tree is dirty but the branch is
-  // otherwise up to date, so a stale clean snapshot hides this button
-  // entirely. The `git-status-changed` invalidation can be missed, so also
-  // re-check when the owning agent settles (run writes are on disk by
-  // then). Skips the initial mount, which already fetches.
+  // Commit is only visible when the tree is dirty, so a stale clean snapshot
+  // hides it entirely. The `git-status-changed` invalidation can be missed,
+  // so also re-check when the owning agent settles (run writes are on disk
+  // by then). Skips the initial mount, which already fetches.
   const wasSettledRef = useRef(settled);
   useEffect(() => {
     const wasSettled = wasSettledRef.current;
@@ -141,9 +191,9 @@ export function ComposerMergeButton({
   }, [settled]);
   // History loads also refresh: after a browser refresh the live
   // `git-status-changed` WS invalidations that normally keep this fresh were
-  // never received, so the buttons sit hidden on a stale snapshot until the
-  // next invalidation. The owning session bumps `refreshKey` on every history
-  // load. Skips the initial mount value, which the fetch above already covers.
+  // never received, so the menu sits stale until the next invalidation. The
+  // owning session bumps `refreshKey` on every history load. Skips the
+  // initial mount value, which the fetch above already covers.
   const refreshKeyRef = useRef(refreshKey);
   useEffect(() => {
     if (refreshKeyRef.current === refreshKey) return;
@@ -173,40 +223,83 @@ export function ComposerMergeButton({
   }, [workspaceId]);
 
   const busy = busyOp !== null;
+  const ghMenu = resolveGithubMenuState(ghStatus, ghLoading);
+  const ghReady = ghMenu.kind === "create" || ghMenu.kind === "view";
+  const existingPr = ghMenu.kind === "view" ? ghMenu.pr : null;
 
   const handleConfirmMerge = () => {
     if (busy) return;
     const branchRef = status?.branchRef ?? "branch";
-    setConfirmOpen(false);
+    setConfirmMergeOpen(false);
     setMenuOpen(false);
     setBusyOp("merge");
     void api.gitMergeIntoMain(workspaceId).then(
       (next) => {
         setStatus(next);
+        setStatusState("ready");
         setDeleteError("");
         setDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true });
         pendingToastRef.current = () => toast.success(`Merged ${next.branchRef ?? branchRef} into main`);
       },
       (err: unknown) => {
         const message = friendlyApiError(err, "Could not merge into main. Resolve any conflicts and try again.");
-        toast.error("Merge into main failed", { description: message });
+        toast.error("Merge locally failed", { description: message });
       },
     ).finally(() => setBusyOp(null));
   };
 
-  const handleRebase = () => {
+  const handleRebaseLocal = () => {
     if (busy) return;
     const branchRef = status?.branchRef ?? "branch";
+    setRebaseOpen(false);
     setMenuOpen(false);
     setBusyOp("rebase");
     void api.gitRebaseOntoMain(workspaceId).then(
       (next) => {
         setStatus(next);
+        setStatusState("ready");
         toast.success(`Rebased ${next.branchRef ?? branchRef} onto main`);
       },
       (err: unknown) => {
         const message = friendlyApiError(err, "Could not rebase onto main. Resolve any conflicts and try again.");
-        toast.error("Rebase onto main failed", { description: message });
+        toast.error("Rebase failed", { description: message });
+      },
+    ).finally(() => setBusyOp(null));
+  };
+
+  const handleRebaseRemote = () => {
+    if (busy) return;
+    const branchRef = status?.branchRef ?? "branch";
+    setRebaseOpen(false);
+    setMenuOpen(false);
+    setBusyOp("rebase-remote");
+    void api.gitRebaseRemote(workspaceId).then(
+      (result) => {
+        setStatus(result.status);
+        setStatusState("ready");
+        toast.success(`Rebased ${result.status.branchRef ?? branchRef} onto ${result.remote}/${result.base}`);
+        void loadGh();
+      },
+      (err: unknown) => {
+        const message = friendlyApiError(err, "Could not rebase onto the remote. Resolve any conflicts and try again.");
+        toast.error("Rebase failed", { description: message });
+      },
+    ).finally(() => setBusyOp(null));
+  };
+
+  const handleFetch = () => {
+    if (busy) return;
+    setBusyOp("fetch");
+    void api.gitFetch(workspaceId).then(
+      (next) => {
+        setStatus(next);
+        setStatusState("ready");
+        toast.success("Fetched from remote");
+        void loadGh();
+      },
+      (err: unknown) => {
+        const message = friendlyApiError(err, "Could not fetch from the remote. Check the remote and try again.");
+        toast.error("Fetch failed", { description: message });
       },
     ).finally(() => setBusyOp(null));
   };
@@ -214,12 +307,15 @@ export function ComposerMergeButton({
   const handlePush = () => {
     if (busy) return;
     const branchRef = status?.branchRef ?? "branch";
+    const hadUpstream = status?.hasUpstream ?? true;
     setMenuOpen(false);
     setBusyOp("push");
     void api.gitPush(workspaceId).then(
       (next) => {
         setStatus(next);
-        toast.success(`Pushed ${next.branchRef ?? branchRef}`);
+        setStatusState("ready");
+        toast.success(hadUpstream ? `Pushed ${next.branchRef ?? branchRef}` : `Pushed ${next.branchRef ?? branchRef} (upstream set)`);
+        void loadGh();
       },
       (err: unknown) => {
         const message = friendlyApiError(err, "Could not push the branch. Check the remote and try again.");
@@ -235,6 +331,7 @@ export function ComposerMergeButton({
     void api.gitCommitAuto(workspaceId).then(
       (result) => {
         setStatus(result.status);
+        setStatusState("ready");
         toast.success("Committed changes", { description: result.message });
       },
       (err: unknown) => {
@@ -244,24 +341,98 @@ export function ComposerMergeButton({
     ).finally(() => setBusyOp(null));
   };
 
+  /** Fetch an AI-generated PR title/body for the current branch vs its base.
+   *  Falls back to a template when the model is unavailable. */
+  const handlePrSuggest = (baseOverride?: string) => {
+    if (prSuggestLoading) return;
+    setPrSuggestLoading(true);
+    setPrError("");
+    void api.gitPrSuggest(workspaceId, { base: (baseOverride ?? prBase).trim() || undefined }).then(
+      (suggestion) => {
+        setPrBase(suggestion.base);
+        setPrTitle(suggestion.title);
+        setPrBody(suggestion.body);
+        setPrGeneratedNote(
+          suggestion.generated
+            ? "Generated from the branch diff."
+            : "Model unavailable — started from a template. Edit before creating.",
+        );
+      },
+      (err: unknown) => {
+        setPrError(friendlyApiError(err, "Could not generate a pull request description. Fill it in manually."));
+      },
+    ).finally(() => setPrSuggestLoading(false));
+  };
+
+  const openPrDialog = () => {
+    if (!ghReady) return;
+    setMenuOpen(false);
+    setShipItOpen(false);
+    setPrError("");
+    setPrGeneratedNote("");
+    setPrDraft(false);
+    setPrTitle("");
+    setPrBody("");
+    // Prefill the base from the repo default; the suggestion refines it to
+    // the base the diff was actually computed against.
+    setPrBase(ghStatus?.repo?.defaultBranch ?? "");
+    setPrOpen(true);
+    handlePrSuggest(ghStatus?.repo?.defaultBranch ?? "");
+  };
+
+  const handlePrCreate = (draft: boolean) => {
+    if (busy || prSuggestLoading) return;
+    const title = prTitle.trim();
+    if (!title) {
+      setPrError("Give the pull request a title.");
+      return;
+    }
+    setPrError("");
+    setPrDraft(draft);
+    setBusyOp("pr-create");
+    void api.gitPrCreate(workspaceId, {
+      title,
+      body: prBody,
+      base: prBase.trim() || undefined,
+      draft,
+    }).then(
+      (result) => {
+        setStatus(result.status);
+        setStatusState("ready");
+        setPrOpen(false);
+        const pr = result.pr;
+        toast.success(pr ? `Created PR #${pr.number}` : "Created pull request", {
+          description: pr?.url,
+          action: pr ? { label: "View", onClick: () => window.open(pr.url, "_blank", "noopener") } : undefined,
+        });
+        void loadGh();
+      },
+      (err: unknown) => {
+        setPrError(friendlyApiError(err, "Could not create the pull request. Check `gh` auth and try again."));
+      },
+    ).finally(() => setBusyOp(null));
+  };
+
   /**
-   * Send it: auto-commit (stage all + generated message), then merge into
+   * Ship It: auto-commit (stage all + generated message), then merge into
    * main (which itself rebases the branch onto main before fast-forwarding).
    * Commit runs first because a rebase refuses a dirty tree; on main or a
    * detached HEAD there is nothing to merge, so it stops after the commit.
    */
-  const handleSendIt = () => {
-    if (busy || !isComposerSendItEnabled(status)) return;
+  const handleShipItMergeLocally = () => {
+    if (busy || !isComposerShipItEnabled(status)) return;
     const branchRef = status?.branchRef ?? "branch";
-    const mergeable = isComposerSendItMergeable(status);
+    const mergeable = isComposerShipItMergeable(status);
+    setShipItOpen(false);
     setMenuOpen(false);
-    setBusyOp("send-it");
+    setBusyOp("ship-it");
     void (async () => {
       try {
         const commit = await api.gitCommitAuto(workspaceId);
         setStatus(commit.status);
+        setStatusState("ready");
         if (!mergeable) {
-          // A commit-only Send It (main branch or detached HEAD) still
+          // A commit-only Ship It (main branch or detached HEAD) still
           // leaves a disposable worktree behind, so offer the same delete
           // workspace prompt -- except on the main checkout, which the
           // daemon refuses to remove.
@@ -275,17 +446,71 @@ export function ComposerMergeButton({
         }
         const next = await api.gitMergeIntoMain(workspaceId);
         setStatus(next);
+        setStatusState("ready");
         setDeleteError("");
         setDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true, commitMessage: commit.message });
       } catch (err: unknown) {
-        const message = friendlyApiError(err, "Could not send changes. Resolve any conflicts and try again.");
-        toast.error("Send It failed", { description: message });
+        const message = friendlyApiError(err, "Could not ship changes. Resolve any conflicts and try again.");
+        toast.error("Ship It failed", { description: message });
         try {
-          setStatus(await api.gitStatus(workspaceId));
+          const fresh = await api.gitStatus(workspaceId);
+          setStatus(fresh);
+          setStatusState("ready");
         } catch {
           // Keep the last known status; the toast already surfaced the failure.
         }
       } finally {
+        setBusyOp(null);
+      }
+    })();
+  };
+
+  /**
+   * Ship It to a PR: commit when dirty, then rebase onto the remote and
+   * push the branch before the PR dialog opens. PR creation itself
+   * re-pushes as a safety net, but these explicit steps surface
+   * commit/rebase/push failures before the dialog.
+   */
+  const handleShipItToPr = () => {
+    if (busy || !ghReady) return;
+    setShipItOpen(false);
+    setMenuOpen(false);
+    const steps = shipPrSteps(isComposerShipItEnabled(status), isComposerShipItMergeable(status));
+    if (steps.length === 0) {
+      openPrDialog();
+      return;
+    }
+    setBusyOp("ship-it");
+    void (async () => {
+      try {
+        for (const step of steps) {
+          if (step === "commit") {
+            const commit = await api.gitCommitAuto(workspaceId);
+            setStatus(commit.status);
+            setStatusState("ready");
+          } else if (step === "rebase") {
+            const rebased = await api.gitRebaseRemote(workspaceId);
+            setStatus(rebased.status);
+            setStatusState("ready");
+          } else {
+            const pushed = await api.gitPush(workspaceId);
+            setStatus(pushed);
+            setStatusState("ready");
+          }
+        }
+        void loadGh();
+        setBusyOp(null);
+        openPrDialog();
+      } catch (err: unknown) {
+        const message = friendlyApiError(err, "Could not ship changes. Resolve any conflicts and try again.");
+        toast.error("Ship It failed", { description: message });
+        try {
+          const fresh = await api.gitStatus(workspaceId);
+          setStatus(fresh);
+          setStatusState("ready");
+        } catch {
+          // Keep the last known status; the toast already surfaced the failure.
+        }
         setBusyOp(null);
       }
     })();
@@ -311,156 +536,474 @@ export function ComposerMergeButton({
   };
 
   const options = resolveComposerGitOptions(status);
-  const sendItEnabled = isComposerSendItEnabled(status);
-  const sendItBusy = busyOp === "send-it";
-  // Send-it is hidden (not disabled) when its dirty-tree gate fails, so the
-  // component only stays mounted for send-it while it is enabled or running.
-  // Otherwise it mounts for standalone commit/merge/rebase/push options.
-  // Non-Git workspaces (no status) render nothing.
-  if (status === null && deletePrompt === null) return null;
-  // Keep the button mounted mid-run: committing cleans the tree, which
-  // would otherwise hide the spinner while the merge step is still going.
-  const showSendIt = status !== null && (sendItEnabled || sendItBusy);
-  // Mobile: horizontal space is scarce and Send It already occupies a labeled
-  // button, so any other git option collapses into the FolderGit2 menu even
-  // when it is the only one -- a lone Commit next to Send It crowds the
-  // model chip off the single composer row.
-  const collapseSingleOption = hideIcons === true && showSendIt && options.length === 1;
+  const shipItEnabled = isComposerShipItEnabled(status);
+  const shipItBusy = busyOp === "ship-it";
+  const showShipIt = status !== null && (shipItEnabled || shipItBusy);
   const dirtyCount = status?.files.length ?? 0;
-  const sendItTitle = status?.conflicted
-    ? "Resolve merge conflicts before sending"
-    : !sendItEnabled
-      ? "No changes to send"
-      : isComposerSendItMergeable(status)
-        ? `Auto-commit ${dirtyCount} changed file${dirtyCount === 1 ? "" : "s"}, rebase onto main, and merge into main`
+  const shipItTitle = status?.conflicted
+    ? "Resolve merge conflicts before shipping"
+    : !shipItEnabled
+      ? "No changes to ship"
+      : isComposerShipItMergeable(status)
+        ? `Auto-commit ${dirtyCount} changed file${dirtyCount === 1 ? "" : "s"} and merge into main`
         : `Auto-commit ${dirtyCount} changed file${dirtyCount === 1 ? "" : "s"} (stage all + generate message)`;
   const branchRef = status?.branchRef ?? deletePrompt?.branch ?? "branch";
   const ahead = status?.aheadOfMain ?? 0;
   const behindMain = status?.behindMain ?? 0;
   const aheadUpstream = status?.ahead ?? 0;
+  const hasUpstream = status?.hasUpstream ?? false;
+  const remoteBaseLabel = `origin/${ghStatus?.repo?.defaultBranch ?? "default"}`;
 
   const runOption = (option: ComposerGitOption) => {
     if (option === "commit") handleCommitAuto();
-    else if (option === "merge") setConfirmOpen(true);
-    else if (option === "rebase") handleRebase();
+    else if (option === "merge") {
+      if (busy) return;
+      setMenuOpen(false);
+      setConfirmMergeOpen(true);
+    }
+    else if (option === "rebase") {
+      if (busy) return;
+      setMenuOpen(false);
+      setRebaseOpen(true);
+    }
     else handlePush();
   };
 
   const optionMeta: Record<ComposerGitOption, { label: string; detail: string; title: string; Icon: typeof GitMerge }> = {
     commit: {
-      label: "Commit",
+      label: "Commit...",
       detail: `${dirtyCount} changed`,
       title: `Auto-commit ${dirtyCount} changed file${dirtyCount === 1 ? "" : "s"} (stage all + generate message)`,
       Icon: GitCommitHorizontal,
     },
     merge: {
-      label: "Merge",
+      label: "Merge locally...",
       detail: `${ahead} ahead`,
       title: `Merge ${branchRef} into main (${ahead} commit${ahead === 1 ? "" : "s"} ahead)`,
       Icon: GitMerge,
     },
     rebase: {
-      label: "Rebase",
+      label: "Rebase...",
       detail: `${behindMain} behind main`,
-      title: `Rebase ${branchRef} onto main (${behindMain} commit${behindMain === 1 ? "" : "s"} behind)`,
+      title: `Rebase ${branchRef} onto main or ${remoteBaseLabel} (${behindMain} commit${behindMain === 1 ? "" : "s"} behind)`,
       Icon: ArrowDownUp,
     },
     push: {
       label: "Push",
-      detail: `${aheadUpstream} ahead`,
-      title: `Push ${branchRef} to remote (${aheadUpstream} commit${aheadUpstream === 1 ? "" : "s"} ahead)`,
+      detail: hasUpstream ? `${aheadUpstream} ahead` : "Set upstream and push",
+      title: hasUpstream
+        ? `Push ${branchRef} to remote (${aheadUpstream} commit${aheadUpstream === 1 ? "" : "s"} ahead)`
+        : `Push ${branchRef} to origin and set upstream`,
       Icon: Upload,
     },
   };
 
+  const busyLabel = busyOp === "ship-it"
+    ? "Shipping changes"
+    : busyOp === "commit"
+      ? "Committing changes"
+      : busyOp === "merge"
+        ? "Merging into main"
+        : busyOp === "rebase" || busyOp === "rebase-remote"
+          ? "Rebasing branch"
+          : busyOp === "push"
+            ? "Pushing branch"
+            : busyOp === "fetch"
+              ? "Fetching from remote"
+              : busyOp === "pr-create"
+                ? "Creating pull request"
+                : "Working";
+  const triggerLabel = busy
+    ? `${busyLabel}...`
+    : statusState !== "ready"
+      ? "Git options (status unavailable)"
+      : status?.branchRef
+        ? `Git options for ${status.branchRef}${dirtyCount > 0 ? `, ${dirtyCount} changed` : ""}`
+        : "Git options";
+  const triggerTitle = status?.conflicted
+    ? `Git options for ${branchRef}: resolve merge conflicts`
+    : triggerLabel;
+
+  const openShipItDialog = () => {
+    if (busy || !shipItEnabled) return;
+    setMenuOpen(false);
+    setShipItOpen(true);
+  };
+
+  const ghSectionTitle = ghStatus?.repo ? `GitHub · ${ghStatus.repo.nameWithOwner}` : "GitHub";
+  const ghPrDetail = existingPr
+    ? `#${existingPr.number}${existingPr.isDraft ? " · Draft" : ""}`
+    : null;
+
   return (
     <>
-      {showSendIt && (
-        <Button
-          variant="default"
-          size="xs"
-          className="composer-action-btn"
-          onClick={handleSendIt}
-          disabled={disabled || busy}
-          title={sendItTitle}
-          aria-label={sendItTitle}
-        >
-          {sendItBusy ? <Spinner className="size-3" /> : hideIcons ? null : <Rocket size={14} aria-hidden="true" />}
-          Send It
-        </Button>
-      )}
-      {options.length === 1 && options[0] !== undefined && !collapseSingleOption ? (() => {
-        const only = options[0];
-        const meta = optionMeta[only];
-        const MetaIcon = meta.Icon;
-        return (
+      <Popover
+        open={menuOpen}
+        onOpenChange={(open) => {
+          setMenuOpen(open);
+          if (open && statusState === "ready") void loadGh();
+        }}
+      >
+        <PopoverTrigger asChild>
           <Button
             variant="secondary"
             size="xs"
             className="composer-action-btn"
-            onClick={() => runOption(only)}
             disabled={disabled || busy}
-            title={meta.title}
-            aria-label={meta.title}
+            title={triggerTitle}
+            aria-label={triggerLabel}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
           >
-            {busy ? <Spinner className="size-3" /> : hideIcons ? null : <MetaIcon size={14} aria-hidden="true" />}
-            {meta.label}
+            {busy ? <Spinner className="size-3" /> : hideIcons ? null : <FolderGit2 size={14} aria-hidden="true" />}
+            Git
+            {dirtyCount > 0 && statusState === "ready" && !busy ? (
+              <span className="ml-1 rounded-full bg-muted px-1 text-[10px] leading-3" aria-hidden="true">
+                {dirtyCount}
+              </span>
+            ) : null}
           </Button>
-        );
-      })() : options.length > 1 || collapseSingleOption ? (
-        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="secondary"
-              size="xs"
-              className="composer-action-btn"
-              disabled={disabled || busy}
-              title={`Git options for ${branchRef}: ${options.map((o) => optionMeta[o].label).join(", ")}`}
-              aria-label={`Git options for ${branchRef}`}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-            >
-              {busy ? <Spinner className="size-3" /> : <FolderGit2 size={14} aria-hidden="true" />}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="thinking-popover w-56 max-w-[calc(100vw-2rem)] p-1" align="start" side="top" sideOffset={6}>
-            <div className="popover-header-title px-2 py-1.5">Git options</div>
-            <div role="menu" aria-label={`Git options for ${branchRef}`}>
-              {options.map((option) => {
-                const meta = optionMeta[option];
-                const MetaIcon = meta.Icon;
-                const isBusy = busyOp === option;
-                return (
-                  <div
-                    key={option}
-                    role="menuitem"
-                    className="thinking-option-row"
-                    title={meta.title}
-                    aria-label={meta.title}
-                    aria-disabled={busy}
-                    tabIndex={busy ? -1 : 0}
-                    onClick={() => { if (!busy) runOption(option); }}
-                    onKeyDown={(e) => {
-                      if ((e.key === "Enter" || e.key === " ") && !busy) {
-                        e.preventDefault();
-                        runOption(option);
-                      }
-                    }}
-                  >
-                    {isBusy ? <Spinner className="size-3" /> : <MetaIcon size={14} aria-hidden="true" />}
-                    <span className="thinking-option-name">{meta.label}</span>
-                    <span className="ml-auto text-xs text-muted-foreground">{meta.detail}</span>
-                  </div>
-                );
-              })}
+        </PopoverTrigger>
+        <PopoverContent className="thinking-popover w-64 max-w-[calc(100vw-2rem)] p-1" align="start" side="top" sideOffset={6}>
+          <div className="popover-header-title px-2 py-1.5">
+            Git{status?.branchRef ? ` · ${status.branchRef}` : ""}
+          </div>
+          {statusState === "loading" ? (
+            <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
+              <Spinner className="size-3" />
+              Checking Git status...
             </div>
-          </PopoverContent>
-        </Popover>
-      ) : null}
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          ) : statusState === "unavailable" || status === null ? (
+            <div className="px-2 py-2">
+              <p className="text-sm text-muted-foreground">Git status unavailable. This workspace may not be a Git checkout.</p>
+              <Button variant="secondary" size="xs" className="mt-2" onClick={() => void refresh()}>
+                Retry
+              </Button>
+            </div>
+          ) : (
+            <div role="menu" aria-label={triggerLabel}>
+              {showShipIt && (
+                <div className="px-1 pb-1">
+                  <Button
+                    variant="default"
+                    size="xs"
+                    className="w-full justify-start"
+                    onClick={openShipItDialog}
+                    disabled={disabled || busy || !shipItEnabled}
+                    title={shipItTitle}
+                    aria-label={shipItTitle}
+                  >
+                    {shipItBusy ? <Spinner className="size-3" /> : hideIcons ? null : <Rocket size={14} aria-hidden="true" />}
+                    Ship It...
+                  </Button>
+                  <div className="px-2 pt-1 text-xs text-muted-foreground">
+                    {isComposerShipItMergeable(status) ? "Commit and merge locally, or open a PR" : "Commit changes"}
+                  </div>
+                </div>
+              )}
+              {options.length === 0 && !showShipIt ? (
+                <div className="px-2 py-1.5 text-sm text-muted-foreground">Working tree clean. Nothing to commit, merge, or push.</div>
+              ) : (
+                options.map((option) => {
+                  const meta = optionMeta[option];
+                  const MetaIcon = meta.Icon;
+                  const isBusy = busyOp === option;
+                  return (
+                    <div
+                      key={option}
+                      role="menuitem"
+                      className="thinking-option-row"
+                      title={meta.title}
+                      aria-label={meta.title}
+                      aria-disabled={busy}
+                      tabIndex={busy ? -1 : 0}
+                      onClick={() => { if (!busy) runOption(option); }}
+                      onKeyDown={(e) => {
+                        if ((e.key === "Enter" || e.key === " ") && !busy) {
+                          e.preventDefault();
+                          runOption(option);
+                        }
+                      }}
+                    >
+                      {isBusy ? <Spinner className="size-3" /> : <MetaIcon size={14} aria-hidden="true" />}
+                      <span className="thinking-option-name">{meta.label}</span>
+                      <span className="ml-auto text-xs text-muted-foreground">{meta.detail}</span>
+                    </div>
+                  );
+                })
+              )}
+              <div
+                role="menuitem"
+                className="thinking-option-row"
+                title="Fetch from remote (refresh remote branches)"
+                aria-label="Fetch from remote"
+                aria-disabled={busy}
+                tabIndex={busy ? -1 : 0}
+                onClick={() => { if (!busy) handleFetch(); }}
+                onKeyDown={(e) => {
+                  if ((e.key === "Enter" || e.key === " ") && !busy) {
+                    e.preventDefault();
+                    handleFetch();
+                  }
+                }}
+              >
+                {busyOp === "fetch" ? <Spinner className="size-3" /> : <Download size={14} aria-hidden="true" />}
+                <span className="thinking-option-name">Fetch</span>
+                <span className="ml-auto text-xs text-muted-foreground">Refresh remote</span>
+              </div>
+              <div className="popover-header-title px-2 py-1.5">{ghSectionTitle}</div>
+              {ghMenu.kind === "loading" ? (
+                <div className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground">
+                  <Spinner className="size-3" />
+                  Checking GitHub...
+                </div>
+              ) : ghMenu.kind === "unavailable" ? (
+                <div
+                  role="menuitem"
+                  className="thinking-option-row opacity-60"
+                  title="Could not reach GitHub. Open the menu again to retry."
+                  aria-label="Create pull request (GitHub unavailable)"
+                  aria-disabled="true"
+                  tabIndex={-1}
+                >
+                  <GitPullRequest size={14} aria-hidden="true" />
+                  <span className="thinking-option-name">Create PR...</span>
+                  <span className="ml-auto text-xs text-muted-foreground">Unavailable</span>
+                </div>
+              ) : ghMenu.kind === "not-installed" ? (
+                <div
+                  role="menuitem"
+                  className="thinking-option-row opacity-60"
+                  title="Install and authenticate the gh CLI to create pull requests."
+                  aria-label="Create pull request (gh not installed)"
+                  aria-disabled="true"
+                  tabIndex={-1}
+                >
+                  <GitPullRequest size={14} aria-hidden="true" />
+                  <span className="thinking-option-name">Create PR...</span>
+                  <span className="ml-auto text-xs text-muted-foreground">gh not installed</span>
+                </div>
+              ) : ghMenu.kind === "not-authenticated" ? (
+                <div
+                  role="menuitem"
+                  className="thinking-option-row opacity-60"
+                  title="Run `gh auth login` (or `gh auth status`) so Passage can create pull requests."
+                  aria-label="Create pull request (gh not authenticated)"
+                  aria-disabled="true"
+                  tabIndex={-1}
+                >
+                  <GitPullRequest size={14} aria-hidden="true" />
+                  <span className="thinking-option-name">Create PR...</span>
+                  <span className="ml-auto text-xs text-muted-foreground">gh not authenticated</span>
+                </div>
+              ) : ghMenu.kind === "view" ? (
+                <div
+                  role="menuitem"
+                  className="thinking-option-row"
+                  title={`View PR #${ghMenu.pr.number}: ${ghMenu.pr.title || ghMenu.pr.url}`}
+                  aria-label={`View pull request #${ghMenu.pr.number}`}
+                  aria-disabled={busy}
+                  tabIndex={busy ? -1 : 0}
+                  onClick={() => { if (!busy) window.open(ghMenu.pr.url, "_blank", "noopener"); }}
+                  onKeyDown={(e) => {
+                    if ((e.key === "Enter" || e.key === " ") && !busy) {
+                      e.preventDefault();
+                      window.open(ghMenu.pr.url, "_blank", "noopener");
+                    }
+                  }}
+                >
+                  <ExternalLink size={14} aria-hidden="true" />
+                  <span className="thinking-option-name">View PR</span>
+                  <span className="ml-auto text-xs text-muted-foreground">{ghPrDetail}</span>
+                </div>
+              ) : (
+                <div
+                  role="menuitem"
+                  className="thinking-option-row"
+                  title={`Create a pull request for ${branchRef} (generates title and description)`}
+                  aria-label="Create pull request"
+                  aria-disabled={busy}
+                  tabIndex={busy ? -1 : 0}
+                  onClick={() => { if (!busy) openPrDialog(); }}
+                  onKeyDown={(e) => {
+                    if ((e.key === "Enter" || e.key === " ") && !busy) {
+                      e.preventDefault();
+                      openPrDialog();
+                    }
+                  }}
+                >
+                  <GitPullRequest size={14} aria-hidden="true" />
+                  <span className="thinking-option-name">Create PR...</span>
+                  <span className="ml-auto text-xs text-muted-foreground">Generate description</span>
+                </div>
+              )}
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+      <AlertDialog open={shipItOpen} onOpenChange={setShipItOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Merge into main?</AlertDialogTitle>
+            <AlertDialogTitle>Ship It</AlertDialogTitle>
+            <AlertDialogDescription>
+              Auto-commit {dirtyCount} changed file{dirtyCount === 1 ? "" : "s"} on{" "}
+              <code className="font-mono">{branchRef}</code>, then choose where it goes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex flex-col gap-2">
+            <Button
+              variant="default"
+              onClick={handleShipItToPr}
+              disabled={busy || !ghReady}
+              title={
+                ghReady
+                  ? "Commit, rebase onto the remote, push, and open a pull request"
+                  : "PR creation needs gh installed and authenticated (see the GitHub section)"
+              }
+            >
+              {shipItBusy ? <Spinner className="size-3" /> : null}
+              Open PR
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={handleShipItMergeLocally}
+              disabled={busy || !shipItEnabled}
+              title={shipItTitle}
+            >
+              {shipItBusy ? <Spinner className="size-3" /> : null}
+              {isComposerShipItMergeable(status) ? "Merge locally" : "Commit"}
+            </Button>
+            {!ghReady && (
+              <p className="text-xs text-muted-foreground">Opening a pull request needs the gh CLI installed and authenticated.</p>
+            )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={rebaseOpen} onOpenChange={setRebaseOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rebase {branchRef}</AlertDialogTitle>
+            <AlertDialogDescription>
+              Replay <code className="font-mono">{branchRef}</code> onto a fresh base. A conflicted rebase is
+              aborted, leaving the branch as it was.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex flex-col gap-2">
+            <Button
+              variant="secondary"
+              onClick={handleRebaseLocal}
+              disabled={busy}
+              title={`Rebase ${branchRef} onto local main`}
+            >
+              {busyOp === "rebase" ? <Spinner className="size-3" /> : null}
+              Local main
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={handleRebaseRemote}
+              disabled={busy}
+              title={`Fetch origin, then rebase ${branchRef} onto ${remoteBaseLabel}`}
+            >
+              {busyOp === "rebase-remote" ? <Spinner className="size-3" /> : null}
+              {remoteBaseLabel}
+            </Button>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={prOpen} onOpenChange={setPrOpen}>
+        <AlertDialogContent className="max-h-[85vh] overflow-y-auto">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Create pull request</AlertDialogTitle>
+            <AlertDialogDescription>
+              From <code className="font-mono">{branchRef}</code>
+              {ghStatus?.repo ? <> in <code className="font-mono">{ghStatus.repo.nameWithOwner}</code></> : null}.
+              The branch is pushed first when needed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="pr-base">Base branch</Label>
+              <Input
+                id="pr-base"
+                value={prBase}
+                onChange={(e) => setPrBase(e.target.value)}
+                placeholder={ghStatus?.repo?.defaultBranch ?? "main"}
+                disabled={busy || prSuggestLoading}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="pr-title">Title</Label>
+              <Input
+                id="pr-title"
+                value={prTitle}
+                onChange={(e) => setPrTitle(e.target.value)}
+                placeholder="Short imperative summary"
+                disabled={busy || prSuggestLoading}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="pr-body">Description</Label>
+              <Textarea
+                id="pr-body"
+                value={prBody}
+                onChange={(e) => setPrBody(e.target.value)}
+                rows={10}
+                placeholder="Summary, changes, testing…"
+                disabled={busy || prSuggestLoading}
+              />
+            </div>
+            {prGeneratedNote && (
+              <p className="text-xs text-muted-foreground">{prGeneratedNote}</p>
+            )}
+            {prError && <Alert variant="destructive"><AlertDescription>{prError}</AlertDescription></Alert>}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                size="xs"
+                onClick={() => handlePrSuggest()}
+                disabled={busy || prSuggestLoading}
+                title="Regenerate the title and description from the branch diff"
+              >
+                {prSuggestLoading ? <Spinner className="size-3" /> : null}
+                Regenerate
+              </Button>
+              <span className="flex-1" />
+              <Button
+                variant="secondary"
+                size="xs"
+                onClick={() => handlePrCreate(true)}
+                disabled={busy || prSuggestLoading || !prTitle.trim()}
+                title="Create as a draft pull request"
+              >
+                {busyOp === "pr-create" && prDraft ? <Spinner className="size-3" /> : null}
+                Create draft
+              </Button>
+              <Button
+                size="xs"
+                onClick={() => handlePrCreate(false)}
+                disabled={busy || prSuggestLoading || !prTitle.trim()}
+                title="Create the pull request"
+              >
+                {busyOp === "pr-create" && !prDraft ? <Spinner className="size-3" /> : null}
+                Create PR
+              </Button>
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={confirmMergeOpen} onOpenChange={setConfirmMergeOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Merge locally?</AlertDialogTitle>
             <AlertDialogDescription>
               Merge <code className="font-mono">{branchRef}</code> ({ahead} commit{ahead === 1 ? "" : "s"} ahead)
               into <code className="font-mono">main</code>? The branch is rebased onto main, then main
@@ -469,7 +1012,7 @@ export function ComposerMergeButton({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmMerge}>Merge into main</AlertDialogAction>
+            <AlertDialogAction onClick={handleConfirmMerge}>Merge locally</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

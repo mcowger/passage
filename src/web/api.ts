@@ -20,7 +20,7 @@ import { filesSearchResponseSchema, directorySuggestResponseSchema } from "../sh
 import { buildInfoSchema, type BuildInfo } from "../shared/build-info.ts";
 import { daemonBlockerSchema, daemonPhaseSchema, daemonLifecycleSnapshotSchema, type DaemonLifecycleSnapshot } from "../shared/protocol/daemon.ts";
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
-import type { GitDiff, GitStatus } from "../shared/domain/git.ts";
+import type { GitDiff, GitStatus, GithubStatus } from "../shared/domain/git.ts";
 import { webPreviewSchema, type WebPreview } from "../shared/domain/previews.ts";
 import { createWorktreeResponseSchema, workspaceActionListSchema, workspaceActionRunSchema, workspaceScriptListSchema, workspaceScriptRuntimeSchema, type CreateWorktreeResponse, type WorkspaceActionList, type WorkspaceActionRun, type WorkspaceScriptList, type WorkspaceScriptRuntime } from "../shared/domain/workspace-actions.ts";
 
@@ -274,6 +274,10 @@ export function createWorkspaceApi(
     async gitMergeIntoMain(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/merge`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
     async gitRebaseOntoMain(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/rebase`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
     async gitPush(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/push`, { method: "POST", body: JSON.stringify({}) }) as GitStatus; },
+    async gitRebaseRemote(id: string, input?: { remote?: string; base?: string }): Promise<{ status: GitStatus; remote: string; base: string }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/rebase-remote`, { method: "POST", body: JSON.stringify(input ?? {}) }) as { status: GitStatus; remote: string; base: string }; },
+    async gitGithubStatus(id: string): Promise<GithubStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/github-status`) as GithubStatus; },
+    async gitPrSuggest(id: string, input?: { base?: string; agentId?: string }): Promise<{ base: string; title: string; body: string; generated: boolean; truncated: boolean }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/pr-suggest`, { method: "POST", body: JSON.stringify(input ?? {}) }) as { base: string; title: string; body: string; generated: boolean; truncated: boolean }; },
+    async gitPrCreate(id: string, input: { title: string; body?: string; base?: string; draft?: boolean }): Promise<{ pr: GithubStatus["pr"]; status: GitStatus }> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/pr-create`, { method: "POST", body: JSON.stringify(input) }) as { pr: GithubStatus["pr"]; status: GitStatus }; },
     async listFiles(id: string, path = ".", cursor?: string): Promise<FileListing> { const q = new URLSearchParams({ path }); if (cursor) q.set("cursor", cursor); return await request(`/api/workspaces/${encodeURIComponent(id)}/files?${q}`) as FileListing; },
     async readFile(id: string, path: string): Promise<FileRead> { return await request(`/api/workspaces/${encodeURIComponent(id)}/files/read?path=${encodeURIComponent(path)}`) as FileRead; },
     async writeFile(id: string, path: string, content: string, expected: FileRevision): Promise<FileWrite> { return await request(`/api/workspaces/${encodeURIComponent(id)}/files`, { method: "PUT", body: JSON.stringify({ path, content, expected }) }) as FileWrite; },

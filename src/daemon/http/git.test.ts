@@ -449,3 +449,188 @@ describe("git HTTP API", () => {
     f.store.close();
   });
 });
+
+describe("git GitHub HTTP API", () => {
+  const stubCommits = {
+    suggestCommit: async () => null as string | null,
+  };
+  const stubGh = (overrides: Record<string, unknown> = {}) => ({
+    installed: async () => true,
+    available: async () => true,
+    repoInfo: async () => ({ nameWithOwner: "o/r", defaultBranch: "main" }),
+    prForBranch: async () => null,
+    createPr: async () => ({
+      number: 7,
+      url: "https://github.com/o/r/pull/7",
+      title: "Feature work",
+      state: "OPEN",
+      base: "main",
+      head: "feature",
+      isDraft: false,
+    }),
+    ...overrides,
+  });
+
+  async function mkRepo(ghOverrides: Record<string, unknown> = {}) {
+    const root = await mkdtemp(join(tmpdir(), "passage-git-gh-"));
+    roots.push(root);
+    await runGit(root, ["init", "-b", "main"]);
+    await runGit(root, ["config", "user.email", "test@passage.dev"]);
+    await runGit(root, ["config", "user.name", "Passage Test"]);
+    await writeFile(join(root, ".gitignore"), "metadata.sqlite\n");
+    await writeFile(join(root, "README.md"), "# Init");
+    await runGit(root, ["add", ".gitignore", "README.md"]);
+    await runGit(root, ["commit", "-m", "Initial commit"]);
+    const store = new MetadataStore(join(root, "metadata.sqlite"));
+    const repos = new MetadataRepositories(store.db);
+    const workspaces = new WorkspaceService(repos);
+    const git = new GitService();
+    const events = new WorkspaceEventHub();
+    const received: EventEnvelope[] = [];
+    const app = createGitRoutes(workspaces, git, events, stubCommits, undefined, stubGh(ghOverrides) as never);
+    repos.projects.save(projectSchema.parse({
+      id: "prj_gh",
+      configuredRootPath: root,
+      canonicalRootPath: root,
+      displayLabel: "GH Project",
+      archivedAt: null,
+    }));
+    const workspace = workspaceSchema.parse({
+      id: "wsp_gh",
+      projectId: "prj_gh",
+      kind: "directory",
+      cwd: root,
+      checkoutRoot: root,
+      mainRepositoryRoot: root,
+      branchRef: "main",
+      displayLabel: "GH Workspace",
+      locationId: null,
+      ownershipState: "not-owned",
+      markerId: null,
+      markerPath: null,
+      repairDetail: null,
+      archivedAt: null,
+    });
+    repos.workspaces.save(workspace);
+    const subscription = events.subscribe(workspace.id, 0, (e) => received.push(e));
+    subscription.activate();
+    return { root, store, repos, app, workspace, events, received };
+  }
+
+  async function mkFeatureRepo(ghOverrides: Record<string, unknown> = {}) {
+    const f = await mkRepo(ghOverrides);
+    await runGit(f.root, ["checkout", "-b", "feature"]);
+    await writeFile(join(f.root, "feature.txt"), "feature\n");
+    await runGit(f.root, ["add", "feature.txt"]);
+    await runGit(f.root, ["commit", "-m", "Feature work"]);
+    return f;
+  }
+
+  test("github-status reports availability and no PR", async () => {
+    const f = await mkRepo();
+    const response = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/github-status`));
+    expect(response.status).toBe(200);
+    const body = await response.json() as { installed: boolean; available: boolean; repo: { nameWithOwner: string; defaultBranch: string } | null; pr: null };
+    expect(body).toEqual({ installed: true, available: true, repo: { nameWithOwner: "o/r", defaultBranch: "main" }, pr: null });
+    f.store.close();
+  });
+
+  test("github-status degrades when gh is missing", async () => {
+    const f = await mkRepo({ installed: async () => false, available: async () => false });
+    const response = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/github-status`));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ installed: false, available: false, repo: null, pr: null });
+    f.store.close();
+  });
+
+  test("github-status reports an existing PR", async () => {
+    const existing = { number: 9, url: "https://github.com/o/r/pull/9", title: "T", state: "OPEN", base: "main", head: "feature", isDraft: true };
+    const f = await mkRepo({ prForBranch: async () => existing });
+    const response = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/github-status`));
+    expect(response.status).toBe(200);
+    const body = await response.json() as { pr: typeof existing };
+    expect(body.pr).toEqual(existing);
+    f.store.close();
+  });
+
+  test("pr-suggest falls back to a template when the model is unavailable", async () => {
+    const f = await mkFeatureRepo();
+    const response = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/pr-suggest`, { method: "POST", body: JSON.stringify({}) }));
+    expect(response.status).toBe(200);
+    const body = await response.json() as { base: string; title: string; body: string; generated: boolean };
+    expect(body.base).toBe("main");
+    expect(body.generated).toBe(false);
+    expect(body.title.length).toBeGreaterThan(0);
+    expect(body.body).toContain("Not run.");
+    f.store.close();
+  });
+
+  test("pr-suggest rejects a branch with nothing beyond its base", async () => {
+    const f = await mkRepo();
+    const response = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/pr-suggest`, { method: "POST", body: JSON.stringify({}) }));
+    expect(response.status).toBe(422);
+    const body = await response.json() as { error: string; message?: string };
+    expect(body.error).toBe("git-failed");
+    expect(body.message).toContain("Nothing to describe");
+    f.store.close();
+  });
+
+  test("pr-create refuses a dirty tree", async () => {
+    const f = await mkFeatureRepo();
+    await writeFile(join(f.root, "dirty.txt"), "dirty\n");
+    const response = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/pr-create`, {
+      method: "POST",
+      body: JSON.stringify({ title: "Feature work", body: "Details" }),
+    }));
+    expect(response.status).toBe(422);
+    const body = await response.json() as { error: string; message?: string };
+    expect(body.error).toBe("git-failed");
+    expect(body.message).toContain("Commit or stash");
+    f.store.close();
+  });
+
+  test("pr-create validates its input", async () => {
+    const f = await mkFeatureRepo();
+    const response = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/pr-create`, {
+      method: "POST",
+      body: JSON.stringify({ title: "  " }),
+    }));
+    expect(response.status).toBe(400);
+    f.store.close();
+  });
+
+  test("pr-create pushes the branch and creates the PR", async () => {
+    const f = await mkFeatureRepo();
+    const origin = await mkdtemp(join(tmpdir(), "passage-git-gh-origin-"));
+    roots.push(origin);
+    await runGit(origin, ["init", "--bare"]);
+    await runGit(f.root, ["remote", "add", "origin", origin]);
+    const response = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/pr-create`, {
+      method: "POST",
+      body: JSON.stringify({ title: "Feature work", body: "Details", draft: true }),
+    }));
+    expect(response.status).toBe(200);
+    const body = await response.json() as { pr: { number: number }; status: { branchRef: string; hasUpstream: boolean } };
+    expect(body.pr.number).toBe(7);
+    expect(body.status.branchRef).toBe("feature");
+    expect(body.status.hasUpstream).toBe(true);
+    expect(f.received.map((e) => (e.payload as { reason: string }).reason)).toContain("pr-create");
+    f.store.close();
+  });
+
+  test("rebase-remote refuses the main checkout", async () => {
+    const f = await mkRepo();
+    const response = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/rebase-remote`, { method: "POST", body: JSON.stringify({}) }));
+    expect(response.status).toBe(422);
+    const body = await response.json() as { error: string };
+    expect(body.error).toBe("git-failed");
+    f.store.close();
+  });
+
+  test("rebase-remote validates its input", async () => {
+    const f = await mkRepo();
+    const response = await f.app.fetch(request(`/api/workspaces/${f.workspace.id}/git/rebase-remote`, { method: "POST", body: JSON.stringify({ remote: 123 }) }));
+    expect(response.status).toBe(400);
+    f.store.close();
+  });
+});

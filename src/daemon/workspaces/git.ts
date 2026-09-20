@@ -142,12 +142,110 @@ export class GitService {
     }
     const main = await this.discover(source.mainCheckoutRoot, options);
     if (main.branchRef !== "main") throw new GitError("The main checkout must be on the main branch before rebasing");
-    await this.rebaseOntoMain(source.checkoutRoot, main.branchRef, source.branchRef, options);
+    await this.rebaseOnto(source.checkoutRoot, main.branchRef, source.branchRef, options);
   }
-  /** Push the current branch to its upstream. Requires an upstream; the
-   *  composer only offers this when the local branch is ahead. */
+
+  /** Default branch of a remote (e.g. `origin` -> `main`), from the remote
+   *  HEAD symref. Falls back to `main` when the remote or symref is unknown. */
+  async remoteDefaultBranch(cwd: string, remote = "origin", options?: Options): Promise<string> {
+    const name = remote.trim() || "origin";
+    try {
+      const out = await this.run(cwd, ["symbolic-ref", `refs/remotes/${name}/HEAD`], options);
+      const ref = out.stdout.trim();
+      const prefix = `refs/remotes/${name}/`;
+      if (ref.startsWith(prefix) && ref.length > prefix.length) return ref.slice(prefix.length);
+    } catch {}
+    return "main";
+  }
+
+  /** Fetch the remote, then replay the branch onto `<remote>/<base>`.
+   *  Same worktree guards as the local rebase; conflicts abort cleanly and
+   *  are reported with the conflicting files, leaving the branch as it was. */
+  async rebaseOntoRemote(cwd: string, remote = "origin", base?: string, options?: Options): Promise<{ remote: string; base: string }> {
+    const source = await this.discover(cwd, options);
+    if (!source.branchRef) throw new GitError("Cannot rebase a detached HEAD");
+    if (!source.mainCheckoutRoot || source.checkoutRoot === source.mainCheckoutRoot || source.branchRef === "main") {
+      throw new GitError("The main worktree or branch cannot be rebased onto itself");
+    }
+    const resolvedRemote = remote.trim() || "origin";
+    await this.run(cwd, ["fetch", "--prune", resolvedRemote], { timeoutMs: 30_000, ...options });
+    const resolvedBase = base?.trim() || (await this.remoteDefaultBranch(cwd, resolvedRemote, options));
+    const ontoRef = `${resolvedRemote}/${resolvedBase}`;
+    try {
+      await this.run(cwd, ["rev-parse", "--verify", ontoRef], options);
+    } catch {
+      throw new GitError(`Remote branch "${ontoRef}" was not found after fetching. Check the remote and base name.`);
+    }
+    await this.rebaseOnto(source.checkoutRoot, ontoRef, source.branchRef, options);
+    return { remote: resolvedRemote, base: resolvedBase };
+  }
+
+  /** Committed branch diff against a base, for PR titles/descriptions.
+   *  Resolves the base to the first ref that exists (`origin/<default>`,
+   *  then local `main`/`master`), diffs from the merge-base to HEAD, and
+   *  truncates the raw diff to 100KB so prompts stay bounded. */
+  async branchDiffForPr(cwd: string, base?: string, options?: Options): Promise<{ base: string; mergeBase: string; files: Array<{ path: string; kind: string }>; diff: string; truncated: boolean }> {
+    const source = await this.discover(cwd, options);
+    if (!source.branchRef) throw new GitError("Cannot describe a detached HEAD as a pull request");
+    const candidates = base?.trim()
+      ? [base.trim()]
+      : [`origin/${await this.remoteDefaultBranch(cwd, "origin", options)}`, "main", "master"];
+    let resolved: string | undefined;
+    for (const candidate of candidates) {
+      try {
+        await this.run(cwd, ["rev-parse", "--verify", candidate], options);
+        resolved = candidate;
+        break;
+      } catch {}
+    }
+    if (!resolved) throw new GitError("No base branch was found to compare against. Fetch the remote and try again.");
+    const mergeBase = (await this.run(cwd, ["merge-base", resolved, "HEAD"], options)).stdout.trim();
+    if (!mergeBase) throw new GitError(`Could not find a merge-base with "${resolved}"`);
+    const names = await this.run(cwd, ["diff", "--name-status", "-z", mergeBase, "HEAD"], { timeoutMs: 30_000, ...options });
+    const files: Array<{ path: string; kind: string }> = [];
+    // With -z, status and paths are separate NUL-terminated fields:
+    // `A\0path\0`, renames as `R100\0old\0new\0`.
+    const parts = names.stdout.split("\0");
+    for (let i = 0; i < parts.length; i++) {
+      const token = parts[i].trim();
+      if (!token || !/^[A-Z][0-9]*$/.test(token)) continue;
+      const code = token.slice(0, 1);
+      const kind = code === "A" ? "added" : code === "D" ? "deleted" : code === "R" ? "renamed" : code === "U" ? "conflict" : "modified";
+      if (code === "R" || code === "C") {
+        const from = (parts[++i] ?? "").trim();
+        const to = (parts[++i] ?? "").trim();
+        if (from && to) files.push({ path: `${from} -> ${to}`, kind });
+        else if (to) files.push({ path: to, kind });
+      } else {
+        const path = (parts[++i] ?? "").trim();
+        if (path) files.push({ path, kind });
+      }
+    }
+    const raw = await this.run(cwd, ["diff", "--no-ext-diff", "--no-color", "--unified=3", mergeBase, "HEAD", "--"], { timeoutMs: 30_000, maxOutputBytes: 100 * 1024, ...options });
+    return { base: resolved, mergeBase, files, diff: raw.stdout, truncated: raw.truncated };
+  }
+  /** Push the current branch. When no upstream exists yet (first push),
+   *  the branch is published with `push -u origin <branch>` so Push and
+   *  "publish" stay one action; otherwise a plain `push` is used. */
   async push(cwd: string, options?: Options): Promise<void> {
-    await this.run(cwd, ["push"], { timeoutMs: 30_000, ...options });
+    const source = await this.discover(cwd, options);
+    if (!source.branchRef) throw new GitError("Cannot push a detached HEAD");
+    let hasUpstream = true;
+    try {
+      await this.run(cwd, ["rev-parse", "--verify", "--symbolic-full-name", "@{upstream}"], options);
+    } catch {
+      hasUpstream = false;
+    }
+    if (hasUpstream) {
+      await this.run(cwd, ["push"], { timeoutMs: 30_000, ...options });
+      return;
+    }
+    try {
+      await this.run(cwd, ["push", "-u", "origin", source.branchRef], { timeoutMs: 30_000, ...options });
+    } catch (cause) {
+      const detail = gitDetail(cause);
+      throw new GitError(`Could not push "${source.branchRef}" to origin${detail ? `: ${detail}` : ""}. Check the remote and try again.`);
+    }
   }
   /** Predict the conflicts a merge would produce without mutating anything:
    *  `git merge-tree --write-tree` computes the merge from the two commits and
@@ -175,7 +273,7 @@ export class GitService {
     if (conflicted) {
       throw new GitError("Merge conflicts would occur", paths.length > 0 ? `Conflicting files: ${paths.join(", ")}` : "Resolve conflicts before merging into main");
     }
-    await this.rebaseOntoMain(source.checkoutRoot, main.branchRef, source.branchRef, options);
+    await this.rebaseOnto(source.checkoutRoot, main.branchRef, source.branchRef, options);
     try {
       await this.run(source.mainCheckoutRoot, ["merge", "--ff-only", source.branchRef], { timeoutMs: 30_000, ...options });
     } catch (cause) {
@@ -184,17 +282,17 @@ export class GitService {
     }
   }
 
-  /** Replay the source branch onto main before merging so main only ever
-   *  fast-forwards. A conflicted or blocked rebase is aborted and reported,
-   *  leaving the branch exactly as it was. */
-  private async rebaseOntoMain(cwd: string, mainRef: string, branchRef: string, options?: Options): Promise<void> {
+  /** Replay the source branch onto a target ref before merging so main only
+   *  ever fast-forwards. A conflicted or blocked rebase is aborted and
+   *  reported, leaving the branch exactly as it was. */
+  private async rebaseOnto(cwd: string, ontoRef: string, branchRef: string, options?: Options): Promise<void> {
     try {
-      await this.run(cwd, ["rebase", mainRef], { timeoutMs: 30_000, ...options });
+      await this.run(cwd, ["rebase", ontoRef], { timeoutMs: 30_000, ...options });
     } catch (cause) {
       const paths = await this.unmergedPaths(cwd, options).catch(() => []);
       await this.run(cwd, ["rebase", "--abort"], { timeoutMs: 30_000, ...options }).catch(() => {});
       const detail = paths.length > 0 ? `conflicting files: ${paths.join(", ")}` : gitDetail(cause);
-      throw new GitError(`Could not rebase "${branchRef}" onto "${mainRef}"${detail ? `: ${detail}` : ""}. Resolve the branch and try again.`);
+      throw new GitError(`Could not rebase "${branchRef}" onto "${ontoRef}"${detail ? `: ${detail}` : ""}. Resolve the branch and try again.`);
     }
   }
 
