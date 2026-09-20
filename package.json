@@ -88,6 +88,6 @@
     "@types/web-push": "^3.6.4",
     "nullmodel": "github:alexcollins/NullModel",
     "shadcn": "^4.21.0",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   }
 }

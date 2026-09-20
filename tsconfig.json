@@ -10,7 +10,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "jsx": "react-jsx",
-    "baseUrl": ".",
+    "types": ["bun"],
     "paths": {
       "@/*": ["./src/*"]
     }

@@ -17,3 +17,5 @@ declare module "*.js" {
   const content: string;
   export default content;
 }
+
+declare module "*.css";
