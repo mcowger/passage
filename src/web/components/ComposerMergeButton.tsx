@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { friendlyApiError, type WorkspaceApi } from "../api.ts";
-import { commitToast, CommitToastDescription } from "./ui/sonner.tsx";
+import { CommitToastDescription } from "./ui/sonner.tsx";
+import { CommitSuccessDialog } from "./CommitSuccessDialog.tsx";
 import { subscribeWorkspace } from "../workspaceSocket.ts";
 import type { GitStatus, GithubStatus } from "../../shared/domain/git.ts";
 import {
@@ -84,6 +85,11 @@ export function ComposerMergeButton({
   const [deletePrompt, setDeletePrompt] = useState<DeleteWorkspacePrompt | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  // Commit success modal (replaces the old commit-message toast): the full
+  // subject + body rendered inside a top-center toast covered the prompt on
+  // narrow viewports. The merge-locally flow already shows the commit in an
+  // expandable modal box -- do the same for standalone commits.
+  const [commitDialog, setCommitDialog] = useState<{ title: string; message: string } | null>(null);
   // GitHub (`gh`) state for the PR section. Loaded when the menu opens and
   // refreshed after mutations; null means the check itself failed.
   const [ghStatus, setGhStatus] = useState<GithubStatus | null>(null);
@@ -176,6 +182,7 @@ export function ComposerMergeButton({
     setMenuOpen(false);
     setDeletePrompt(null);
     setDeleteError("");
+    setCommitDialog(null);
     pendingToastRef.current = null;
     void refresh();
   }, [refresh]);
@@ -335,7 +342,7 @@ export function ComposerMergeButton({
       (result) => {
         setStatus(result.status);
         setStatusState("ready");
-        toast.success("Committed changes", { description: result.message });
+        setCommitDialog({ title: "Committed changes", message: result.message });
       },
       (err: unknown) => {
         const message = friendlyApiError(err, "Could not commit changes. Try again.");
@@ -443,7 +450,7 @@ export function ComposerMergeButton({
             setDeleteError("");
             setDeletePrompt({ branch: commit.status.branchRef ?? branchRef, merged: false, commitMessage: commit.message });
           } else {
-            commitToast("Committed changes", commit.message);
+            setCommitDialog({ title: "Committed changes", message: commit.message });
           }
           return;
         }
@@ -1038,6 +1045,12 @@ export function ComposerMergeButton({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <CommitSuccessDialog
+        title={commitDialog?.title ?? "Committed changes"}
+        message={commitDialog?.message ?? ""}
+        open={commitDialog !== null}
+        onOpenChange={(open) => { if (!open) setCommitDialog(null); }}
+      />
       <AlertDialog open={deletePrompt !== null} onOpenChange={(open) => { if (!open) dismissDeletePrompt(); }}>
         <AlertDialogContent>
           <AlertDialogHeader>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { commitToast } from "./ui/sonner.tsx";
+import { CommitSuccessDialog } from "./CommitSuccessDialog.tsx";
 import type { GitChangeKind, GitFileStatus, GitStatus } from "../../shared/domain/git.ts";
 import { friendlyApiError, type WorkspaceApi } from "../api.ts";
 import { subscribeWorkspace } from "../workspaceSocket.ts";
@@ -63,6 +63,9 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
   const [mergedBranch, setMergedBranch] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  // Commit success modal (replaces the old commit-message toast): same
+  // expandable pattern as the merge-locally flow.
+  const [commitDialog, setCommitDialog] = useState<{ title: string; message: string } | null>(null);
   // The merged-workspace AlertDialog is modal: Radix disables pointer events
   // outside it, so a toast fired at the same time is visible but dead.
   // Queue it and fire once the prompt closes instead.
@@ -195,7 +198,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
     if (message === "" || bulkOp !== null || stagedFiles.length === 0) return;
     trackBulkOp("commit", () => api.gitCommit(workspaceId, message).then((r) => r.status), () => {
       handleCommitMessageChange("");
-      toast.success("Committed staged changes");
+      setCommitDialog({ title: "Committed staged changes", message });
     });
   };
 
@@ -216,7 +219,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
         setStatus(r.status);
         setError("");
         handleCommitMessageChange("");
-        commitToast("Auto-committed all changes", r.message);
+        setCommitDialog({ title: "Auto-committed all changes", message: r.message });
       },
       (err: unknown) => setError(friendlyApiError(err, "Auto-commit failed. Try again.")),
     ).finally(() => setBulkOp(null));
@@ -483,6 +486,12 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
         )}
       </div>
 
+      <CommitSuccessDialog
+        title={commitDialog?.title ?? "Committed changes"}
+        message={commitDialog?.message ?? ""}
+        open={commitDialog !== null}
+        onOpenChange={(open) => { if (!open) setCommitDialog(null); }}
+      />
       <AlertDialog open={discardTarget !== null} onOpenChange={(open) => { if (!open) setDiscardTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
