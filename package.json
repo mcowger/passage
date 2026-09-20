@@ -7,9 +7,9 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "bun --watch run src/daemon/index.ts --port \"$(bun scripts/dev-port.ts)\"",
-    "dev:stop": "bun scripts/dev-stop.ts",
-    "stop": "bun scripts/dev-stop.ts",
+    "dev": "bun scripts/run-dev.ts",
+    "dev:stop": "env -u PASSAGE_DB_PATH -u PASSAGE_SESSIONS_ROOT -u PASSAGE_PID_FILE -u PASSAGE_SHUTDOWN_TIMEOUT_MINUTES -u PASSAGE_MAX_ACTIVE_AGENTS bun scripts/dev-stop.ts",
+    "stop": "env -u PASSAGE_DB_PATH -u PASSAGE_SESSIONS_ROOT -u PASSAGE_PID_FILE -u PASSAGE_SHUTDOWN_TIMEOUT_MINUTES -u PASSAGE_MAX_ACTIVE_AGENTS bun scripts/dev-stop.ts",
     "frpc": "bun run scripts/run-frpc.ts",
     "build": "bun run scripts/build.ts",
     "start": "bun --cwd dist run ./index.js",

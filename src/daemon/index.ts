@@ -156,6 +156,26 @@ const workspaceScriptsService = new WorkspaceScriptsService(repositories, termin
 });
 const previewManager = new WebPreviewManager(repositories, workspaceService, undefined, workspaceScriptsService);
 const sessionsRoot = process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(metadataPath), "sessions");
+// Dev-mode guard: a shell descending from a staging-owned process once fed
+// a worktree daemon staging's PASSAGE_DB_PATH, which silently opened and
+// migrated production sqlite. Dev entrypoints (scripts/run-dev.ts) already
+// scrub and explicitly set worktree-local paths, so any source-run daemon
+// that still resolves data paths outside its own `.data` dir is almost
+// certainly inheriting a leak -- say so loudly instead of proceeding quietly.
+if (!isStandaloneExecutable) {
+  const expectedDbPath = join(defaultDataRoot, "passage.sqlite");
+  const expectedSessionsRoot = join(defaultDataRoot, "sessions");
+  const expectedPidPath = join(defaultDataRoot, "dev.pid");
+  if (metadataPath !== expectedDbPath || sessionsRoot !== expectedSessionsRoot || pidPath !== expectedPidPath) {
+    log.warn("Dev daemon data paths leave the worktree .data dir; inherited PASSAGE_* env from another checkout (e.g. staging) can corrupt production sqlite. Prefer `bun run dev`.", {
+      event: "daemon.dev_data_paths_outside_worktree",
+      metadataPath,
+      sessionsRoot,
+      pidPath,
+      expectedDbPath,
+    });
+  }
+}
 // DaemonLifecycle needs AgentService's blocker methods; AgentService needs
 // the lifecycle's admission gate. Bridge the cycle with a forward
 // reference the gate closure resolves lazily -- it is only ever called

@@ -61,4 +61,6 @@ bun run test:gate
 
 ## Dev server
 
-`bun run dev` hot-restarts. Ports are per-worktree — never hardcode or trust inherited `PORT`/`PASEO_PORT`. Always resolve via `bun scripts/dev-port.ts`; if it reports `CRITICAL` (port taken), stop and ask the user.
+`bun run dev` hot-restarts via `scripts/run-dev.ts`. Ports are per-worktree — never hardcode or trust inherited `PORT`/`PASEO_PORT`. Always resolve via `bun scripts/dev-port.ts`; if it reports `CRITICAL` (port taken), stop and ask the user.
+
+Dev/server env isolation: never run `src/daemon/index.ts` directly from a shell that may descend from staging — inherited `PASSAGE_DB_PATH`/`PASSAGE_SESSIONS_ROOT`/`PASSAGE_PID_FILE` once pointed a worktree daemon at production sqlite and migrated it. `bun run dev` scrubs every inherited `PASSAGE_*` var and explicitly sets worktree-local `.data` paths (`scripts/dev-env.ts`); the daemon likewise strips all `PASSAGE_*` plus `PORT`/`PASEO_PORT` from every child it spawns (Pi agents, terminals, setup actions, previews, model probes — `sanitizedSubprocessEnv()` in `src/daemon/env.ts`, canonical list `PASSAGE_ENV_VARS`). A source-run daemon whose data paths still resolve outside its own `.data` dir logs `daemon.dev_data_paths_outside_worktree` instead of proceeding quietly.
