@@ -31,11 +31,11 @@ import { Label } from "./ui/label.tsx";
 import { Textarea } from "./ui/textarea.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { Spinner } from "./ui/spinner.tsx";
+import { SiGithub } from "@icons-pack/react-simple-icons";
 import {
   ArrowDownUp,
   Download,
   ExternalLink,
-  FolderGit2,
   GitCommitHorizontal,
   GitMerge,
   GitPullRequest,
@@ -658,8 +658,7 @@ export function ComposerMergeButton({
             aria-haspopup="menu"
             aria-expanded={menuOpen}
           >
-            {busy ? <Spinner className="size-3" /> : hideIcons ? null : <FolderGit2 size={14} aria-hidden="true" />}
-            Git
+            {busy ? <Spinner className="size-3" /> : <SiGithub size={14} aria-hidden="true" />}
             {dirtyCount > 0 && statusState === "ready" && !busy ? (
               <span className="ml-1 rounded-full bg-muted px-1 text-[10px] leading-3" aria-hidden="true">
                 {dirtyCount}
