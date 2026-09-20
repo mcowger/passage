@@ -394,7 +394,7 @@ export function AgentPanel({
     : 200_000;
   const contextTokens = effectiveHistory?.contextUsage?.tokens ?? null;
   const contextPct = contextTokens !== null && contextTokens > 0 ? Math.min(100, Math.max(1, Math.round((contextTokens / maxTokens) * 100))) : 0;
-  const pieColor = contextPct >= 95 ? "var(--danger, #b91c1c)" : contextPct >= 80 ? "var(--warning, #b45309)" : "currentColor";
+  const pieColor = contextPct >= 95 ? "var(--danger, #b91c1c)" : contextPct >= 80 ? "var(--warning, #b45309)" : "var(--chip-blue-fg, currentColor)";
   const changeSummary = useMemo(() => summarizeChanges(effectiveHistory?.timeline ?? []), [effectiveHistory?.timeline]);
   const latestIds = useMemo(
     () => computeLatestTimelineIds(effectiveHistory?.timeline ?? []),

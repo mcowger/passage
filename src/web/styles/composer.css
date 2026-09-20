@@ -96,7 +96,12 @@
 .agent-change-summary svg { flex: none; }
 .agent-change-count { font-weight: 600; color: var(--foreground); }
 .agent-change-summary .add-count, .agent-change-summary .del-count { font-weight: 650; }
-.pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-running); animation: pulse 1.4s ease-in-out infinite; }
+/* Optical centering: the pill's 11px text line box centers ~1px above the
+ * glyphs' visual center, so a geometrically-centered dot reads a few px
+ * too high. Pin the dot to its own layer (flex:none + block, like the
+ * phase svg above) and nudge it down 1px. The pulse keyframes animate
+ * opacity only, so the translateY survives the animation. */
+.pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-running); animation: pulse 1.4s ease-in-out infinite; flex: none; display: block; align-self: center; transform: translateY(1px); }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
 /* Attached follow-up queue: items composed while the run is active stay

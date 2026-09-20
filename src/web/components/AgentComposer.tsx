@@ -74,7 +74,7 @@ function ContextRing({ pct, color }: { pct: number; color: string }) {
         cy="8"
         r={CONTEXT_RING_RADIUS}
         fill="none"
-        stroke="var(--chip-blue-track, rgba(127, 127, 127, 0.35))"
+        stroke="rgba(127, 127, 127, 0.35)"
         strokeWidth="2.5"
       />
       {clamped > 0 && (
