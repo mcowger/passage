@@ -98,7 +98,7 @@ export function WorkspaceScriptsButton(props: WorkspaceScriptsButtonProps) {
               ? `exit ${script.exitCode}`
               : "stopped";
           return (
-            <div key={script.name} className="flex flex-col gap-1 px-2 py-2" aria-label={`Script ${script.name}`}>
+            <div key={script.name} className="flex flex-col px-2 py-1.5" aria-label={`Script ${script.name}`}>
               <div className="flex min-h-11 items-center gap-2">
                 <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={script.name}>
@@ -107,6 +107,27 @@ export function WorkspaceScriptsButton(props: WorkspaceScriptsButtonProps) {
                 <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
                   {healthDot}{statusText}
                 </span>
+                {!isRunning ? (
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => onStart(script.name)}
+                    aria-label={`Run ${script.name}`}
+                  >
+                    <Play className="size-3" aria-hidden="true" /> Run
+                  </Button>
+                ) : (
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => onStop(script.name)}
+                    aria-label={`Stop ${script.name}`}
+                  >
+                    <Square className="size-3" aria-hidden="true" /> Stop
+                  </Button>
+                )}
               </div>
               {script.url && (
                 <div className="flex min-h-11 items-center gap-1 pl-6">
@@ -133,50 +154,29 @@ export function WorkspaceScriptsButton(props: WorkspaceScriptsButtonProps) {
                   </button>
                 </div>
               )}
-              <div className="flex items-center gap-1 pl-6">
-                {!isRunning ? (
+              {isRunning && (
+                <div className="flex items-center gap-1 pl-6">
                   <Button
                     size="xs"
                     variant="secondary"
                     disabled={busy}
-                    onClick={() => onStart(script.name)}
-                    aria-label={`Run ${script.name}`}
+                    onClick={() => onRestart(script.name)}
+                    aria-label={`Restart ${script.name}`}
                   >
-                    <Play className="size-3" aria-hidden="true" /> Run
+                    <RotateCw className="size-3" aria-hidden="true" /> Restart
                   </Button>
-                ) : (
-                  <>
+                  {script.terminalId && (
                     <Button
                       size="xs"
-                      variant="secondary"
-                      disabled={busy}
-                      onClick={() => onStop(script.name)}
-                      aria-label={`Stop ${script.name}`}
+                      variant="ghost"
+                      onClick={() => script.terminalId && onViewTerminal(script.terminalId)}
+                      aria-label={`View ${script.name} terminal`}
                     >
-                      <Square className="size-3" aria-hidden="true" /> Stop
+                      <SquareTerminal className="size-3" aria-hidden="true" /> Logs
                     </Button>
-                    <Button
-                      size="xs"
-                      variant="secondary"
-                      disabled={busy}
-                      onClick={() => onRestart(script.name)}
-                      aria-label={`Restart ${script.name}`}
-                    >
-                      <RotateCw className="size-3" aria-hidden="true" /> Restart
-                    </Button>
-                  </>
-                )}
-                {isRunning && script.terminalId && (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => script.terminalId && onViewTerminal(script.terminalId)}
-                    aria-label={`View ${script.name} terminal`}
-                  >
-                    <SquareTerminal className="size-3" aria-hidden="true" /> Logs
-                  </Button>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
