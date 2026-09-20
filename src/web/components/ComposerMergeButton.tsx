@@ -666,7 +666,7 @@ export function ComposerMergeButton({
             ) : null}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="thinking-popover w-80 max-w-[calc(100vw-2rem)] p-1" align="start" side="top" sideOffset={6}>
+        <PopoverContent className="thinking-popover w-[22rem] max-w-[calc(100vw-2rem)] p-1" align="start" side="top" sideOffset={6}>
           <div className="popover-header-title px-2 py-1.5">
             Git{status?.branchRef ? ` · ${status.branchRef}` : ""}
           </div>
@@ -753,8 +753,8 @@ export function ComposerMergeButton({
                 <span className="thinking-option-name">Fetch</span>
                 <span className="ml-auto text-xs text-muted-foreground">Refresh remote</span>
               </div>
-              <div className="flex items-center justify-between px-2 py-1.5">
-                <span className="popover-header-title">{ghSectionTitle}</span>
+              <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+                <span className="popover-header-title min-w-0 flex-1 truncate">{ghSectionTitle}</span>
                 <Button
                   variant="ghost"
                   size="icon-xs"
@@ -848,7 +848,7 @@ export function ComposerMergeButton({
                 >
                   <GitPullRequest size={14} aria-hidden="true" />
                   <span className="thinking-option-name">Create PR...</span>
-                  <span className="ml-auto text-xs text-muted-foreground">Generate description</span>
+                  <span className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">Generate description</span>
                 </div>
               )}
             </div>
@@ -868,7 +868,7 @@ export function ComposerMergeButton({
             <Button
               variant="default"
               size="default"
-              className="max-sm:min-h-11"
+              className="min-h-11 w-full"
               onClick={handleShipItToPr}
               disabled={busy || !ghReady}
               title={
@@ -883,7 +883,7 @@ export function ComposerMergeButton({
             <Button
               variant="secondary"
               size="default"
-              className="max-sm:min-h-11"
+              className="min-h-11 w-full"
               onClick={handleShipItMergeLocally}
               disabled={busy || !shipItEnabled}
               title={shipItTitle}
@@ -895,8 +895,8 @@ export function ComposerMergeButton({
               <p className="text-xs text-muted-foreground">Opening a pull request needs the gh CLI installed and authenticated.</p>
             )}
           </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogFooter className="sm:flex-col sm:justify-stretch">
+            <AlertDialogCancel className="min-h-11 w-full">Cancel</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
