@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { opaqueDomainIdSchema, MAX_DOMAIN_LABEL_LENGTH, MAX_DOMAIN_PATH_LENGTH } from "../../shared/domain/workspaces.ts";
+import { opaqueDomainIdSchema, MAX_DOMAIN_LABEL_LENGTH, MAX_DOMAIN_PATH_LENGTH, PROJECT_ICON_NAMES } from "../../shared/domain/workspaces.ts";
 import { workspaceLayoutSchema } from "../../shared/domain/layout.ts";
 import { workspaceSettingsSchema } from "../../shared/domain/settings.ts";
 import { BUILTIN_THEMES, AVAILABLE_FONTS, BUILTIN_TOOL_RENDERERS } from "../../shared/domain/customization.ts";
@@ -9,7 +9,10 @@ import type { WorkspaceEventHub } from "../workspaces/events.ts";
 import type { WorkspacesChangedReason } from "../../shared/protocol/index.ts";
 import { HttpInputError, readJsonBody } from "./body.ts";
 
-const projectInput = z.object({ configuredRootPath: z.string().min(1).max(MAX_DOMAIN_PATH_LENGTH), displayLabel: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH) }).strict();
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const projectIcon = z.enum(PROJECT_ICON_NAMES as unknown as [string, ...string[]]);
+const projectInput = z.object({ configuredRootPath: z.string().min(1).max(MAX_DOMAIN_PATH_LENGTH), displayLabel: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH), iconName: projectIcon.nullish(), iconColor: hexColor.nullish() }).strict();
+const projectUpdateInput = z.object({ displayLabel: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH).optional(), iconName: projectIcon.nullable().optional(), iconColor: hexColor.nullable().optional() }).strict().refine((v) => v.displayLabel !== undefined || v.iconName !== undefined || v.iconColor !== undefined, { message: "Nothing to update" });
 const workspaceInput = z.object({ cwd: z.string().min(1).max(MAX_DOMAIN_PATH_LENGTH).optional(), displayLabel: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH) }).strict();
 const locationInput = z.object({ projectId: opaqueDomainIdSchema.optional(), displayLabel: z.string().trim().min(1).max(MAX_DOMAIN_LABEL_LENGTH), configuredRootPath: z.string().min(1).max(MAX_DOMAIN_PATH_LENGTH), enabled: z.boolean().optional() }).strict();
 const locationEnabledInput = z.object({ enabled: z.boolean() }).strict();
@@ -46,7 +49,8 @@ export const createWorkspaceRoutes = (service: WorkspaceService, hooks?: { onArc
   };
   app.use("*", async (context, next) => { context.header("Cache-Control", "no-store"); return next(); });
   app.get("/api/workspaces/snapshot", async (context) => { try { await service.ensureAllDefaults(); } catch {} return success(service.snapshot()); });
-  app.post("/api/projects", async (context) => { try { const input = projectInput.parse(await readJsonBody(context.req.raw)); const project = await service.registerProject(input.configuredRootPath, input.displayLabel); changed("create", { projectId: project.id }); return success(project, 201); } catch (error) { return errorResponse(error); } });
+  app.post("/api/projects", async (context) => { try { const input = projectInput.parse(await readJsonBody(context.req.raw)); const project = await service.registerProject(input.configuredRootPath, input.displayLabel, { iconName: input.iconName ?? null, iconColor: input.iconColor ?? null }); changed("create", { projectId: project.id }); return success(project, 201); } catch (error) { return errorResponse(error); } });
+  app.patch("/api/projects/:projectId", async (context) => { try { const input = projectUpdateInput.parse(await readJsonBody(context.req.raw)); const project = service.updateProject(id(context, "projectId"), input); changed("update", { projectId: project.id }); return success(project); } catch (error) { return errorResponse(error); } });
   app.post("/api/projects/:projectId/archive", (context) => { try { const projectId = id(context, "projectId"); service.archiveProject(projectId); changed("archive", { projectId }); return success({ ok: true }); } catch (error) { return errorResponse(error); } });
   app.post("/api/projects/:projectId/reopen", (context) => { try { const project = service.reopenProject(id(context, "projectId")); changed("reopen", { projectId: project.id }); return success(project); } catch (error) { return errorResponse(error); } });
   app.post("/api/projects/:projectId/workspaces", async (context) => { try { const projectId = id(context, "projectId"); const input = workspaceInput.parse(await readJsonBody(context.req.raw)); const workspace = await service.createDirectoryWorkspace(projectId, input); changed("create", { workspaceId: workspace.id, projectId }); return success(workspace, 201); } catch (error) { return errorResponse(error); } });

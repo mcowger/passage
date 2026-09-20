@@ -174,8 +174,11 @@ export function createWorkspaceApi(
     async snapshot(): Promise<WorkspaceSnapshot> {
       return workspaceSnapshotSchema.parse(await request("/api/workspaces/snapshot"));
     },
-    async registerProject(input: { configuredRootPath: string; displayLabel: string }): Promise<Project> {
+    async registerProject(input: { configuredRootPath: string; displayLabel: string; iconName?: string | null; iconColor?: string | null }): Promise<Project> {
       return projectSchema.parse(await request("/api/projects", { method: "POST", body: JSON.stringify(input) }));
+    },
+    async updateProject(id: string, input: { displayLabel?: string; iconName?: string | null; iconColor?: string | null }): Promise<Project> {
+      return projectSchema.parse(await request(`/api/projects/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }));
     },
     async archiveProject(id: string): Promise<void> {
       await request(`/api/projects/${encodeURIComponent(id)}/archive`, { method: "POST" });

@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 
-export type Project = { id: string; configuredRootPath: string; canonicalRootPath: string; displayLabel: string; archivedAt: string | null };
+export type Project = { id: string; configuredRootPath: string; canonicalRootPath: string; displayLabel: string; iconName?: string | null; iconColor?: string | null; archivedAt: string | null };
 export type WorktreeLocation = { id: string; projectId: string | null; scope: "global" | "project"; displayLabel: string; configuredRootPath: string; canonicalRootPath: string; enabled: boolean };
 export type Workspace = { id: string; projectId: string; kind: string; cwd: string; checkoutRoot: string | null; mainRepositoryRoot: string | null; branchRef: string | null; displayLabel: string; locationId: string | null; ownershipState: string; markerId?: string | null; markerPath?: string | null; repairDetail?: string | null; archivedAt: string | null };
 export type Agent = { id: string; workspaceId: string; piSessionId: string; piSessionPath: string | null; title: string; titleOverridden: boolean; modelPreference: string | null; thinkingPreference: string | null; lastKnownStatus: string; archivedAt: string | null };
@@ -10,19 +10,19 @@ const encode = (value: unknown) => JSON.stringify(value);
 const decode = <T>(value: string): T => JSON.parse(value) as T;
 const integer = (value: boolean) => value ? 1 : 0;
 
-type ProjectRow = { id: string; configured_root_path: string; canonical_root_path: string; display_label: string; archived_at: string | null };
+type ProjectRow = { id: string; configured_root_path: string; canonical_root_path: string; display_label: string; icon_name: string | null; icon_color: string | null; archived_at: string | null };
 type LocationRow = { id: string; project_id: string | null; scope: "global" | "project"; display_label: string; configured_root_path: string; canonical_root_path: string; enabled: number };
 type WorkspaceRow = { id: string; project_id: string; kind: string; cwd: string; checkout_root: string | null; main_repository_root: string | null; branch_ref: string | null; display_label: string; location_id: string | null; ownership_state: string; marker_id: string | null; marker_path: string | null; repair_detail: string | null; archived_at: string | null; layout_json: string | null; preferences_json: string | null };
 type AgentRow = { id: string; workspace_id: string; pi_session_id: string; pi_session_path: string | null; title: string; title_overridden: number; model_preference: string | null; thinking_preference: string | null; last_known_status: string; archived_at: string | null };
 
-const projectFromRow = (row: ProjectRow | null | undefined): Project | undefined => row ? { id: row.id, configuredRootPath: row.configured_root_path, canonicalRootPath: row.canonical_root_path, displayLabel: row.display_label, archivedAt: row.archived_at } : undefined;
+const projectFromRow = (row: ProjectRow | null | undefined): Project | undefined => row ? { id: row.id, configuredRootPath: row.configured_root_path, canonicalRootPath: row.canonical_root_path, displayLabel: row.display_label, iconName: row.icon_name ?? null, iconColor: row.icon_color ?? null, archivedAt: row.archived_at } : undefined;
 const locationFromRow = (row: LocationRow | null | undefined): WorktreeLocation | undefined => row ? { id: row.id, projectId: row.project_id, scope: row.scope, displayLabel: row.display_label, configuredRootPath: row.configured_root_path, canonicalRootPath: row.canonical_root_path, enabled: row.enabled === 1 } : undefined;
 const workspaceFromRow = (row: WorkspaceRow | null | undefined): Workspace | undefined => row ? { id: row.id, projectId: row.project_id, kind: row.kind, cwd: row.cwd, checkoutRoot: row.checkout_root, mainRepositoryRoot: row.main_repository_root, branchRef: row.branch_ref, displayLabel: row.display_label, locationId: row.location_id, ownershipState: row.ownership_state, markerId: row.marker_id ?? null, markerPath: row.marker_path ?? null, repairDetail: row.repair_detail ?? null, archivedAt: row.archived_at } : undefined;
 const agentFromRow = (row: AgentRow | null | undefined): Agent | undefined => row ? { id: row.id, workspaceId: row.workspace_id, piSessionId: row.pi_session_id, piSessionPath: row.pi_session_path, title: row.title, titleOverridden: row.title_overridden === 1, modelPreference: row.model_preference, thinkingPreference: row.thinking_preference, lastKnownStatus: row.last_known_status, archivedAt: row.archived_at } : undefined;
 
 export class ProjectRepository {
   constructor(private readonly db: Database) {}
-  save(value: Project): void { this.db.query("INSERT INTO projects VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET configured_root_path=excluded.configured_root_path, canonical_root_path=excluded.canonical_root_path, display_label=excluded.display_label, archived_at=excluded.archived_at").run(value.id, value.configuredRootPath, value.canonicalRootPath, value.displayLabel, value.archivedAt); }
+  save(value: Project): void { this.db.query("INSERT INTO projects (id, configured_root_path, canonical_root_path, display_label, icon_name, icon_color, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET configured_root_path=excluded.configured_root_path, canonical_root_path=excluded.canonical_root_path, display_label=excluded.display_label, icon_name=excluded.icon_name, icon_color=excluded.icon_color, archived_at=excluded.archived_at").run(value.id, value.configuredRootPath, value.canonicalRootPath, value.displayLabel, value.iconName ?? null, value.iconColor ?? null, value.archivedAt); }
   get(id: string): Project | undefined { return projectFromRow(this.db.query<ProjectRow, [string]>("SELECT * FROM projects WHERE id=?").get(id)); }
   archive(id: string, archivedAt: string): void { this.db.query("UPDATE projects SET archived_at=? WHERE id=?").run(archivedAt, id); }
   list(limit: number, archived: boolean): Project[] { return this.db.query<ProjectRow, [number]>(`SELECT * FROM projects WHERE archived_at IS ${archived ? "NOT NULL" : "NULL"} ORDER BY id LIMIT ?`).all(limit).map((row) => projectFromRow(row)!); }

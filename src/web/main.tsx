@@ -7,6 +7,8 @@ import { createWorkspaceApi, friendlyApiError } from "./api.ts";
 import { MobileContextBar, MobileSessionSheet, type MobileReturn } from "./components/MobileNav.tsx";
 import { getWorkspaceStatusKind } from "./components/agentStatus.ts";
 import { Sidebar } from "./components/Sidebar.tsx";
+import { ProjectEditModal } from "./components/ProjectEditModal.tsx";
+import { ProjectAppearanceField } from "./components/ProjectAppearanceField.tsx";
 import { WsHealthIndicator } from "./components/WsHealthIndicator.tsx";
 import { WorkspaceDetailsModal } from "./components/WorkspaceDetailsModal.tsx";
 import { NewWorktreeModal } from "./components/NewWorktreeModal.tsx";
@@ -126,6 +128,9 @@ function App() {
   const [openDiffPath, setOpenDiffPath] = useState<string>();
   const [form, setForm] = useState<FormKind>();
   const [dirSuggestOpen, setDirSuggestOpen] = useState(false);
+  const [newProjectIcon, setNewProjectIcon] = useState<string | null>(null);
+  const [newProjectColor, setNewProjectColor] = useState<string | null>(null);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
@@ -431,7 +436,8 @@ function App() {
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
           onSelect={handleSelectWorkspace}
-          onNewProject={() => { setFormError(""); setForm("project"); }}
+          onNewProject={() => { setFormError(""); setNewProjectIcon(null); setNewProjectColor(null); setForm("project"); }}
+          onEditProject={(project) => { setEditingProjectId(project.id); }}
           onNewWorktree={(projectId) => {
             setFormError("");
             setWorktreeModalTab("create");
@@ -790,7 +796,7 @@ function App() {
           title="Register a project"
           submitLabel="Register project"
           error={formError}
-          onCancel={() => { setFormError(""); setForm(undefined); }}
+          onCancel={() => { setFormError(""); setNewProjectIcon(null); setNewProjectColor(null); setForm(undefined); }}
           // While directory suggestions are visible, Escape dismisses only
           // the suggestion list (see DirectoryPicker), not the dialog.
           onEscapeKeyDown={(event) => { if (dirSuggestOpen) event.preventDefault(); }}
@@ -809,6 +815,8 @@ function App() {
                 const project = await api.registerProject({
                   configuredRootPath,
                   displayLabel,
+                  iconName: newProjectIcon,
+                  iconColor: newProjectColor,
                 });
                 // The new project's Default workspace is brand-new: mark it
                 // eligible for the automatic first agent before selecting it.
@@ -824,6 +832,8 @@ function App() {
                     setSelectedWorkspaceId(fresh.id);
                     setActiveTab("agent");
                   }
+                  setNewProjectIcon(null);
+                  setNewProjectColor(null);
                   setForm(undefined);
                 } catch {
                   if (await refreshWorkspaces()) setForm(undefined);
@@ -837,6 +847,13 @@ function App() {
         >
           <label>Project name<Input name="label" required placeholder="Payments platform" /></label>
           <label>Directory path<DirectoryPicker api={api} name="path" placeholder="/home/user/code/payments" onOpenChange={setDirSuggestOpen} /></label>
+          <ProjectAppearanceField
+            icon={newProjectIcon}
+            color={newProjectColor}
+            onIconChange={setNewProjectIcon}
+            onColorChange={setNewProjectColor}
+            idPrefix="new-project"
+          />
           <p className="form-help">The daemon resolves and verifies this directory before registering it.</p>
         </FormDialog>
       )}
@@ -875,6 +892,19 @@ function App() {
           onLocationsChanged={async () => { await refreshWorkspaces(); }}
         />
       )}
+
+      {editingProjectId && snapshot && (() => {
+        const editing = snapshot.projects.find((p) => p.id === editingProjectId);
+        if (!editing) return null;
+        return (
+          <ProjectEditModal
+            project={editing}
+            api={api}
+            onClose={() => setEditingProjectId(null)}
+            onSaved={async () => { await refreshWorkspaces(); }}
+          />
+        );
+      })()}
     </div>
   );
 }

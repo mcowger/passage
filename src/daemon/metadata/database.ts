@@ -63,6 +63,14 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 4,
+    name: "project_appearance",
+    sql: `
+      ALTER TABLE projects ADD COLUMN icon_name TEXT;
+      ALTER TABLE projects ADD COLUMN icon_color TEXT;
+    `,
+  },
 ];
 
 export class MetadataStore {

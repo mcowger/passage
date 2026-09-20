@@ -11,9 +11,11 @@ import {
   ChevronRight,
   MoreHorizontal,
   Trash2,
+  Pencil,
   Plus,
   PauseCircle,
 } from "lucide-react";
+import { ProjectIconBadge } from "./ProjectIcon.tsx";
 import { cn } from "../lib/utils.ts";
 import type { BuildInfo } from "../../shared/build-info.ts";
 import { formatBuildDetail, formatBuildLabel } from "../../shared/build-info.ts";
@@ -51,6 +53,7 @@ export type SidebarProps = {
   onManageWorkspace?: (workspace: Workspace) => void;
   onDiscoverWorktrees?: (projectId?: string) => void;
   onArchiveProject?: (id: string) => void;
+  onEditProject?: (project: Project) => void;
   build?: BuildInfo | null;
   /** Absent/null hides the drain control entirely rather than showing a misleading default phase. */
   daemon?: DaemonLifecycleSnapshot | null;
@@ -130,6 +133,7 @@ export function Sidebar({
   onManageWorkspace,
   onDiscoverWorktrees,
   onArchiveProject,
+  onEditProject,
   build,
   daemon,
   daemonBusy,
@@ -160,6 +164,7 @@ export function Sidebar({
             onNewWorktree={onNewWorktree}
             onDiscoverWorktrees={onDiscoverWorktrees}
             onRequestRemoveProject={onArchiveProject ? setPendingRemove : undefined}
+            onEditProject={onEditProject}
             workspaceStatuses={workspaceStatuses}
           />
         ))}
@@ -222,6 +227,7 @@ function ProjectRow({
   onNewWorktree,
   onDiscoverWorktrees,
   onRequestRemoveProject,
+  onEditProject,
 }: {
   project: Project;
   workspaces: Workspace[];
@@ -233,6 +239,7 @@ function ProjectRow({
   onNewWorktree?: (projectId: string) => void;
   onDiscoverWorktrees?: (projectId?: string) => void;
   onRequestRemoveProject?: (project: Project) => void;
+  onEditProject?: (project: Project) => void;
 }) {
   const collapsedKey = `passage:project-collapsed:${project.id}`;
   const [collapsedOverride, setCollapsedOverride] = useState<boolean | null>(() => {
@@ -287,8 +294,22 @@ function ProjectRow({
         <span className="project-chevron shrink-0" aria-hidden="true">
           {collapsed ? <ChevronRight className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}
         </span>
-        <Folder className="w-3.5 h-3.5 text-muted-foreground/80 shrink-0" />
+        <ProjectIconBadge iconName={project.iconName} color={project.iconColor} size={14} className={!project.iconColor ? "text-muted-foreground/80" : undefined} />
         <strong className="min-w-0 flex-1 truncate" title={project.displayLabel}>{project.displayLabel}</strong>
+        {onEditProject && (
+          <button
+            type="button"
+            className="opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 touch-visible p-0.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground transition-opacity ml-1 shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEditProject(project);
+            }}
+            title="Edit project"
+            aria-label={`Edit project ${project.displayLabel}`}
+          >
+            <Pencil className="w-3 h-3" />
+          </button>
+        )}
         {onNewWorktree && (
           <button
             type="button"

@@ -48,6 +48,8 @@ const project: Project = {
   configuredRootPath: "/tmp/project",
   canonicalRootPath: "/tmp/project",
   displayLabel: "Project",
+  iconName: null,
+  iconColor: null,
   archivedAt: null,
 };
 

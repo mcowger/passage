@@ -1,6 +1,6 @@
 import { realpath, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
-import { projectSchema, locationSchema, workspaceSchema, type Project, type WorktreeLocation, type Workspace, type WorkspaceSnapshot } from "../../shared/domain/workspaces.ts";
+import { projectSchema, locationSchema, workspaceSchema, projectIconSchema, projectColorSchema, type Project, type WorktreeLocation, type Workspace, type WorkspaceSnapshot } from "../../shared/domain/workspaces.ts";
 import { workspaceLayoutSchema, createDefaultLayout, type WorkspaceLayout } from "../../shared/domain/layout.ts";
 import { appearanceSettingsSchema, workspaceSettingsSchema, DEFAULT_APPEARANCE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, type AppearanceSettings, type WorkspaceSettings } from "../../shared/domain/settings.ts";
 import { MetadataRepositories } from "../metadata/repositories.ts";
@@ -23,12 +23,29 @@ export class WorkspaceService {
   }
   private readonly listLimit: number;
 
-  async registerProject(configuredRootPath: string, displayLabel: string): Promise<Project> {
+  async registerProject(configuredRootPath: string, displayLabel: string, appearance?: { iconName?: string | null; iconColor?: string | null }): Promise<Project> {
     const canonical = await this.directory(configuredRootPath, "invalid-root");
-    const project = projectSchema.parse({ id: id("prj"), configuredRootPath, canonicalRootPath: canonical, displayLabel, archivedAt: null });
+    const iconName = appearance?.iconName ?? null;
+    const iconColor = appearance?.iconColor ?? null;
+    if (iconName !== null) projectIconSchema.parse(iconName);
+    if (iconColor !== null) projectColorSchema.parse(iconColor);
+    const project = projectSchema.parse({ id: id("prj"), configuredRootPath, canonicalRootPath: canonical, displayLabel, iconName, iconColor, archivedAt: null });
     this.repositories.projects.save(project);
     await this.ensureDefaultWorkspace(project.id);
     return project;
+  }
+
+  updateProject(projectId: string, input: { displayLabel?: string; iconName?: string | null; iconColor?: string | null }): Project {
+    const existing = this.requireProject(projectId);
+    if (existing.archivedAt) throw new WorkspaceError("archived", "Project is archived");
+    const next = projectSchema.parse({
+      ...existing,
+      displayLabel: input.displayLabel ?? existing.displayLabel,
+      iconName: input.iconName !== undefined ? input.iconName : (existing.iconName ?? null),
+      iconColor: input.iconColor !== undefined ? input.iconColor : (existing.iconColor ?? null),
+    });
+    this.repositories.projects.save(next);
+    return next;
   }
 
   /** The Default workspace is the virtual worktree for the project root itself:

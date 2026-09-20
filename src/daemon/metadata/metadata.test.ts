@@ -20,6 +20,8 @@ function seed(repositories: MetadataRepositories): void {
     configuredRootPath: "~/src/app",
     canonicalRootPath: "/home/user/src/app",
     displayLabel: "App",
+    iconName: null,
+    iconColor: null,
     archivedAt: null,
   });
   repositories.worktreeLocations.save({
@@ -65,10 +67,10 @@ afterEach(async () => {
 describe("metadata persistence", () => {
   test("migrates an empty database and reopens idempotently", async () => {
     const { path, store } = await open();
-    expect(store.schemaVersion).toBe(3);
+    expect(store.schemaVersion).toBe(4);
     store.close();
     const reopened = new MetadataStore(path);
-    expect(reopened.schemaVersion).toBe(3);
+    expect(reopened.schemaVersion).toBe(4);
     reopened.close();
   });
 

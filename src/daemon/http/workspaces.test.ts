@@ -41,4 +41,20 @@ describe("workspace HTTP API", () => {
     expect(replay.events.map((e) => e.type)).toEqual(["workspaces-changed", "workspaces-changed"]);
     store.close();
   });
+  test("registers and updates project icon and color", async () => {
+    const f = await fixture();
+    const created = await (await f.app.fetch(request("/api/projects", { method: "POST", body: JSON.stringify({ configuredRootPath: f.root, displayLabel: "P", iconName: "Rocket", iconColor: "#3b82f6" }) }))).json();
+    expect(created.iconName).toBe("Rocket");
+    expect(created.iconColor).toBe("#3b82f6");
+    const updated = await (await f.app.fetch(request(`/api/projects/${created.id}`, { method: "PATCH", body: JSON.stringify({ iconName: "Bot", iconColor: "#ef4444" }) }))).json();
+    expect(updated.iconName).toBe("Bot");
+    expect(updated.iconColor).toBe("#ef4444");
+    // Invalid icon/color rejected; empty patch rejected.
+    expect((await f.app.fetch(request(`/api/projects/${created.id}`, { method: "PATCH", body: JSON.stringify({ iconName: "NotAnIcon" }) }))).status).toBe(400);
+    expect((await f.app.fetch(request(`/api/projects/${created.id}`, { method: "PATCH", body: JSON.stringify({ iconColor: "red" }) }))).status).toBe(400);
+    expect((await f.app.fetch(request(`/api/projects/${created.id}`, { method: "PATCH", body: JSON.stringify({}) }))).status).toBe(400);
+    const snapshot = await (await f.app.fetch(request("/api/workspaces/snapshot"))).json();
+    expect(snapshot.projects.find((p: { id: string }) => p.id === created.id).iconName).toBe("Bot");
+    f.store.close();
+  });
 });

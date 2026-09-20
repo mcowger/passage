@@ -26,6 +26,8 @@ const snapshot: WorkspaceSnapshot = {
       configuredRootPath: "/tmp/project",
       canonicalRootPath: "/tmp/project",
       displayLabel: "Project",
+      iconName: null,
+      iconColor: null,
       archivedAt: null,
     },
   ],
@@ -62,13 +64,14 @@ describe("Sidebar", () => {
         agents: [],
         onDiscoverWorktrees: () => {},
         onArchiveProject: () => {},
+        onEditProject: () => {},
         onManageWorkspace: () => {},
       })
     );
 
     const touchVisibleCount = html.split("touch-visible").length - 1;
-    // Discover worktrees, remove project, and workspace manage actions.
-    expect(touchVisibleCount).toBe(3);
+    // Edit project, discover worktrees, remove project, and workspace manage actions.
+    expect(touchVisibleCount).toBe(4);
   });
 
   test("footer shows the build date and commit", () => {
@@ -174,6 +177,8 @@ describe("Sidebar", () => {
           configuredRootPath: "/tmp/project",
           canonicalRootPath: "/tmp/project",
           displayLabel: "Project",
+          iconName: null,
+          iconColor: null,
           archivedAt: null,
         },
       ],
