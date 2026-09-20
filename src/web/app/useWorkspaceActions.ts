@@ -60,6 +60,7 @@ export type WorkspaceActionDeps = {
   setTerminals: React.Dispatch<React.SetStateAction<TerminalSummary[]>>;
   editorSaveHandlers: React.RefObject<Map<string, () => Promise<boolean>>>;
   autoAgentAttempted: React.RefObject<Set<string>>;
+  autoAgentRequested: React.RefObject<Set<string>>;
   captureMobileReturnRef: React.RefObject<() => void>;
   loadAgents: (workspaceId: string, selectFirst?: boolean) => Promise<void>;
   loadTerminals: (workspaceId: string, selectFirst?: boolean) => Promise<void>;
@@ -114,6 +115,7 @@ export function useWorkspaceActions(deps: WorkspaceActionDeps) {
     setTerminals,
     editorSaveHandlers,
     autoAgentAttempted,
+    autoAgentRequested,
     captureMobileReturnRef,
     loadAgents,
     loadTerminals,
@@ -357,15 +359,22 @@ export function useWorkspaceActions(deps: WorkspaceActionDeps) {
     } catch {}
   };
 
-  // Opening a workspace with no agents starts one right away so a new
-  // workspace lands on a live agent session instead of an empty canvas.
-  // Attempted once per workspace so closing the last agent does not loop.
+  // Only a brand-new workspace (explicitly marked at creation time)
+  // starts its first agent automatically, so it lands on a live session
+  // instead of an empty canvas. Switching to an existing workspace that
+  // happens to have no agents leaves it empty on purpose. Consumed once
+  // per workspace so closing the last agent does not loop.
   useEffect(() => {
     if (!workspaceId || !workspace || workspace.archivedAt) return;
     if (!agentsLoaded || !layout) return;
     if (agents.length > 0 || autoAgentPending) return;
-    if (autoAgentAttempted.current.has(workspaceId)) return;
+    if (!autoAgentRequested.current.has(workspaceId)) return;
+    if (autoAgentAttempted.current.has(workspaceId)) {
+      autoAgentRequested.current.delete(workspaceId);
+      return;
+    }
     autoAgentAttempted.current.add(workspaceId);
+    autoAgentRequested.current.delete(workspaceId);
     setAutoAgentPending(true);
     setAgentError("");
     void api.createAgent(workspaceId)

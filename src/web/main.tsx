@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { Workspace } from "../shared/domain/workspaces.ts";
 import type { PaneTab } from "../shared/domain/layout.ts";
 import { countTabsOfKind, createDefaultLayout } from "../shared/domain/layout.ts";
-import { createWorkspaceApi } from "./api.ts";
+import { createWorkspaceApi, friendlyApiError } from "./api.ts";
 import { MobileContextBar, MobileSessionSheet, type MobileReturn } from "./components/MobileNav.tsx";
 import { getWorkspaceStatusKind } from "./components/agentStatus.ts";
 import { Sidebar } from "./components/Sidebar.tsx";
@@ -99,6 +99,7 @@ function App() {
     autoAgentPending,
     setAutoAgentPending,
     autoAgentAttempted,
+    autoAgentRequested,
     terminals,
     setTerminals,
     terminalsLoaded,
@@ -310,6 +311,7 @@ function App() {
     setTerminals,
     editorSaveHandlers,
     autoAgentAttempted,
+    autoAgentRequested,
     captureMobileReturnRef,
     loadAgents,
     loadTerminals,
@@ -321,7 +323,6 @@ function App() {
     openDiffFile,
     handleExplorerRenamed,
     handleExplorerDeleted,
-    runWorkspaceMutation,
     createAgent,
     handleTerminalAttached,
     createTerminal,
@@ -802,10 +803,36 @@ function App() {
               setFormError("Project name and directory path cannot be empty.");
               return;
             }
-            void runWorkspaceMutation(() => api.registerProject({
-              configuredRootPath,
-              displayLabel,
-            }));
+            void (async () => {
+              try {
+                setFormError("");
+                const project = await api.registerProject({
+                  configuredRootPath,
+                  displayLabel,
+                });
+                // The new project's Default workspace is brand-new: mark it
+                // eligible for the automatic first agent before selecting it.
+                try {
+                  const snap = await api.snapshot();
+                  const fresh = snap.workspaces
+                    .filter((w) => w.projectId === project.id && !w.archivedAt)
+                    .find((w) => w.displayLabel === "Default")
+                    ?? snap.workspaces.find((w) => w.projectId === project.id && !w.archivedAt);
+                  if (fresh) autoAgentRequested.current.add(fresh.id);
+                  await refreshWorkspaces();
+                  if (fresh) {
+                    setSelectedWorkspaceId(fresh.id);
+                    setActiveTab("agent");
+                  }
+                  setForm(undefined);
+                } catch {
+                  if (await refreshWorkspaces()) setForm(undefined);
+                  else setFormError("Saved, but Passage could not refresh the workspace list. Retry the refresh above.");
+                }
+              } catch (cause) {
+                setFormError(friendlyApiError(cause, "Request failed. Try again."));
+              }
+            })();
           }}
         >
           <label>Project name<Input name="label" required placeholder="Payments platform" /></label>
@@ -830,6 +857,8 @@ function App() {
             setWorktreeModalProjectId(undefined);
           }}
           onCreated={(created) => {
+            // Brand-new worktree: eligible for the automatic first agent.
+            autoAgentRequested.current.add(created.workspace.id);
             if (created.setup) {
               pendingSetupRuns.current.set(created.workspace.id, created.setup.id);
               toast.loading("Setting up workspace", {

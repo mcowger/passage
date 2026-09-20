@@ -37,6 +37,11 @@ export function useWorkspaceResources(
   const [agentError, setAgentError] = useState("");
   const pendingSetupRuns = useRef(new Map<string, string>());
   const autoAgentAttempted = useRef(new Set<string>());
+  // Workspaces explicitly marked as brand-new at creation time. Only these
+  // are eligible for the automatic first-agent creation below; switching
+  // to an existing workspace that happens to have no agents must not
+  // start one on its own.
+  const autoAgentRequested = useRef(new Set<string>());
   const announcedSetupRuns = useRef(new Set<string>());
   const agentsLoadGeneration = useRef(0);
   const terminalsLoadGeneration = useRef(0);
@@ -191,6 +196,7 @@ export function useWorkspaceResources(
     autoAgentPending,
     setAutoAgentPending,
     autoAgentAttempted,
+    autoAgentRequested,
     terminals,
     setTerminals,
     terminalsLoaded,
