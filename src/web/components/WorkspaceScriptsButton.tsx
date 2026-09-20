@@ -18,6 +18,10 @@ export type WorkspaceScriptsButtonProps = {
   onStop: (name: string) => void;
   onRestart: (name: string) => void;
   onViewTerminal: (terminalId: string) => void;
+  /** Compact play-glyph trigger (no "Scripts" text) for the mobile
+   *  context bar, where title space wins over labels. */
+  iconOnly?: boolean;
+  className?: string;
 };
 
 /** Header Actions button for `paseo.json` scripts/services. Hidden when the
@@ -26,7 +30,7 @@ export type WorkspaceScriptsButtonProps = {
  *  Rows use 44px touch targets so the same menu works as a bottom-sheet
  *  equivalent on phones. */
 export function WorkspaceScriptsButton(props: WorkspaceScriptsButtonProps) {
-  const { scripts, busyName, onStart, onStop, onRestart, onViewTerminal } = props;
+  const { scripts, busyName, onStart, onStop, onRestart, onViewTerminal, iconOnly = false, className } = props;
   if (scripts.length === 0) return null;
   const running = scripts.filter((s) => s.lifecycle === "running").length;
 
@@ -44,6 +48,19 @@ export function WorkspaceScriptsButton(props: WorkspaceScriptsButtonProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
+        {iconOnly ? (
+          <button
+            type="button"
+            className={`mobile-context-icon-btn mobile-scripts-btn${className ? ` ${className}` : ""}`}
+            aria-label={`Workspace scripts, ${running} of ${scripts.length} running`}
+            title="Workspace scripts"
+          >
+            <Play className="size-5" aria-hidden="true" />
+            {running > 0 && (
+              <span className="mobile-scripts-badge" aria-hidden="true">{running}</span>
+            )}
+          </button>
+        ) : (
         <Button
           size="sm"
           variant="secondary"
@@ -54,6 +71,7 @@ export function WorkspaceScriptsButton(props: WorkspaceScriptsButtonProps) {
           Scripts
           {running > 0 && <span className="tab-badge">{running}</span>}
         </Button>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80 max-w-[90vw]">
         <DropdownMenuLabel>Workspace scripts</DropdownMenuLabel>

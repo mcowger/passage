@@ -455,7 +455,7 @@ function App() {
         {/* The sidebar footer's indicator is inside a drawer, hidden by
          *  default on mobile -- this is the always-visible mobile home for
          *  the same real WS heartbeat status (docs/IOSWEBSOCKETS.md). */}
-        <WsHealthIndicator health={wsHealth} />
+        <WsHealthIndicator health={wsHealth} hideLabel />
       </div>
       )}
 
@@ -536,6 +536,12 @@ function App() {
                 onOpenWorkspaceDetails={() => setWorkspaceDetailsOpen(true)}
                 onCloseCurrent={mobileCloseAction?.action}
                 closeLabel={mobileCloseAction?.label}
+                scripts={scripts}
+                scriptBusyName={scriptBusyName}
+                onStartScript={(name) => void handleStartScript(name)}
+                onStopScript={(name) => void stopScript(name)}
+                onRestartScript={(name) => void restartScript(name)}
+                onViewScriptTerminal={handleViewScriptTerminal}
               />
             ) : (
             <nav className="workspace-nav-bar" aria-label="Workspace views">

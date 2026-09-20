@@ -5,6 +5,7 @@ import type { WorkspaceScriptRuntime } from "../../shared/domain/workspace-actio
 import type { ConnectionHealth } from "../socketLifecycle.ts";
 import { AGENT_STATUS_LABEL, getAgentStatusKind, type AgentStatusKind } from "./agentStatus.ts";
 import { WsHealthIndicator } from "./WsHealthIndicator.tsx";
+import { WorkspaceScriptsButton } from "./WorkspaceScriptsButton.tsx";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog.tsx";
 import {
   DropdownMenu,
@@ -14,7 +15,6 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu.tsx";
 import { ArrowLeft, ChevronDown, Menu, MoreHorizontal, Plus, X } from "lucide-react";
-
 export type MobileDestinationKind =
   | "overview"
   | "agent"
@@ -76,6 +76,15 @@ interface MobileContextBarProps {
    *  strip, which mobile does not render. */
   onCloseCurrent?: () => void;
   closeLabel?: string;
+  /** paseo.json services/tasks for the top-bar play-button menu.
+   *  Absent (or empty) hides the button; the session sheet keeps its own
+   *  Services/Tasks sections regardless. */
+  scripts?: WorkspaceScriptRuntime[];
+  scriptBusyName?: string | null;
+  onStartScript?: (name: string) => void;
+  onStopScript?: (name: string) => void;
+  onRestartScript?: (name: string) => void;
+  onViewScriptTerminal?: (terminalId: string) => void;
 }
 
 export function MobileContextBar(props: MobileContextBarProps) {
@@ -97,6 +106,12 @@ export function MobileContextBar(props: MobileContextBarProps) {
     onOpenWorkspaceDetails,
     onCloseCurrent,
     closeLabel,
+    scripts = [],
+    scriptBusyName = null,
+    onStartScript,
+    onStopScript,
+    onRestartScript,
+    onViewScriptTerminal,
   } = props;
   return (
     <div className="mobile-context-wrap">
@@ -124,7 +139,18 @@ export function MobileContextBar(props: MobileContextBarProps) {
             <ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden="true" />
           </span>
         </button>
-        <WsHealthIndicator health={wsHealth} className="mobile-context-health" />
+        <WsHealthIndicator health={wsHealth} hideLabel className="mobile-context-health" />
+        {(onStartScript || onStopScript) && scripts.length > 0 && (
+          <WorkspaceScriptsButton
+            iconOnly
+            scripts={scripts}
+            busyName={scriptBusyName}
+            onStart={(name) => onStartScript?.(name)}
+            onStop={(name) => onStopScript?.(name)}
+            onRestart={(name) => onRestartScript?.(name)}
+            onViewTerminal={(terminalId) => onViewScriptTerminal?.(terminalId)}
+          />
+        )}
         {onCloseCurrent && (
           <button
             type="button"
