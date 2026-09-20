@@ -912,6 +912,8 @@ export function ComposerMergeButton({
           <div className="flex flex-col gap-2">
             <Button
               variant="secondary"
+              size="default"
+              className="min-h-11 w-full"
               onClick={handleRebaseLocal}
               disabled={busy}
               title={`Rebase ${branchRef} onto local main`}
@@ -921,6 +923,8 @@ export function ComposerMergeButton({
             </Button>
             <Button
               variant="secondary"
+              size="default"
+              className="min-h-11 w-full"
               onClick={handleRebaseRemote}
               disabled={busy}
               title={`Fetch origin, then rebase ${branchRef} onto ${remoteBaseLabel}`}
@@ -929,8 +933,8 @@ export function ComposerMergeButton({
               {remoteBaseLabel}
             </Button>
           </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogFooter className="sm:flex-col sm:justify-stretch">
+            <AlertDialogCancel className="min-h-11 w-full">Cancel</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
