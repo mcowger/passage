@@ -24,7 +24,6 @@ import {
 } from "./ui/select.tsx";
 import { Button } from "./ui/button.tsx";
 import { Label } from "./ui/label.tsx";
-import { ScrollArea } from "./ui/scroll-area.tsx";
 
 const TOOL_LABELS: Record<BaselineTool, string> = {
   read: "Read",
@@ -114,10 +113,13 @@ export const DisplayOptionsPopover = memo(function DisplayOptionsPopover({
         </button>
       </PopoverTrigger>
       <PopoverContent
+        side="top"
         align="end"
-        className="w-80 p-0 shadow-lg border border-border bg-popover"
+        sideOffset={8}
+        collisionPadding={12}
+        className="w-80 max-w-[calc(100vw-2rem)] max-h-[min(28rem,calc(100dvh-8rem))] p-0 shadow-lg border border-border bg-popover flex flex-col overflow-hidden"
       >
-        <PopoverHeader className="px-3 pt-3 pb-2 border-b border-border">
+        <PopoverHeader className="flex-none px-3 pt-3 pb-2 border-b border-border">
           <div className="flex items-center justify-between">
             <PopoverTitle className="text-sm font-semibold">
               Display Options
@@ -140,7 +142,7 @@ export const DisplayOptionsPopover = memo(function DisplayOptionsPopover({
           </PopoverDescription>
         </PopoverHeader>
 
-        <ScrollArea className="max-h-80 p-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
           <div className="flex flex-col gap-3 text-xs">
             {/* Thinking */}
             <div className="flex items-center justify-between gap-2">
@@ -279,7 +281,7 @@ export const DisplayOptionsPopover = memo(function DisplayOptionsPopover({
               </Select>
             </div>
           </div>
-        </ScrollArea>
+        </div>
       </PopoverContent>
     </Popover>
   );
