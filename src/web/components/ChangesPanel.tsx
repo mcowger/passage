@@ -22,6 +22,7 @@ import { Textarea } from "./ui/textarea.tsx";
 import { Label } from "./ui/label.tsx";
 import { Kbd } from "./ui/kbd.tsx";
 import { Spinner } from "./ui/spinner.tsx";
+import { Checkbox } from "./ui/checkbox.tsx";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty.tsx";
 
 type ChangesProps = {
@@ -63,6 +64,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
   const [mergedBranch, setMergedBranch] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [deleteBranch, setDeleteBranch] = useState(true);
   // Commit success modal (replaces the old commit-message toast): same
   // expandable pattern as the merge-locally flow.
   const [commitDialog, setCommitDialog] = useState<{ title: string; message: string } | null>(null);
@@ -247,6 +249,7 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
         setStatus(s);
         setError("");
         setDeleteError("");
+        setDeleteBranch(true);
         setMergedBranch(s.branchRef ?? status?.branchRef ?? "branch");
         pendingToastRef.current = () => toast.success(`Merged ${s.branchRef ?? status?.branchRef ?? "branch"} into main`);
       },
@@ -258,11 +261,13 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
     ).finally(() => setBulkOp(null));
   };
 
+  const canDeleteMergedBranch = Boolean(mergedBranch) && mergedBranch !== "main" && mergedBranch !== "master";
+
   const handleDeleteWorkspace = () => {
     if (mergedBranch === null || deleting) return;
     setDeleting(true);
     setDeleteError("");
-    void api.removeWorktree(workspaceId).then(
+    void api.removeWorktree(workspaceId, false, canDeleteMergedBranch && deleteBranch).then(
       async () => {
         setDeleting(false);
         setMergedBranch(null);
@@ -529,10 +534,23 @@ export function ChangesPanel({ workspaceId, api, onOpenFile, onOpenDiff, onWorks
             <AlertDialogTitle>Merged into main</AlertDialogTitle>
             <AlertDialogDescription>
               <code className="font-mono">{mergedBranch}</code> was merged into main. Delete this workspace?
-              The branch is kept; the worktree directory is removed.
+              The worktree directory is removed{canDeleteMergedBranch && deleteBranch ? " and the branch is deleted" : ""}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>}
+          {canDeleteMergedBranch && (
+            <label className="flex items-start gap-2 cursor-pointer text-sm min-w-0">
+              <Checkbox
+                checked={deleteBranch}
+                onCheckedChange={(v) => setDeleteBranch(v === true)}
+                aria-label="Delete local branch"
+                className="mt-0.5"
+              />
+              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                Delete local branch <code className="font-mono">{mergedBranch}</code>
+              </span>
+            </label>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Keep workspace</AlertDialogCancel>
             <AlertDialogAction

@@ -32,6 +32,7 @@ import { Label } from "./ui/label.tsx";
 import { Textarea } from "./ui/textarea.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { Spinner } from "./ui/spinner.tsx";
+import { Checkbox } from "./ui/checkbox.tsx";
 import { SiGithub } from "@icons-pack/react-simple-icons";
 import {
   ArrowDownUp,
@@ -82,6 +83,7 @@ export function ComposerMergeButton({
   const [deletePrompt, setDeletePrompt] = useState<DeleteWorkspacePrompt | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [deleteBranch, setDeleteBranch] = useState(true);
   // Commit success modal (replaces the old commit-message toast): the full
   // subject + body rendered inside a top-center toast covered the prompt on
   // narrow viewports. The merge-locally flow already shows the commit in an
@@ -244,8 +246,7 @@ export function ComposerMergeButton({
       (next) => {
         setStatus(next);
         setStatusState("ready");
-        setDeleteError("");
-        setDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true });
+        showDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true });
         pendingToastRef.current = () => toast.success(`Merged ${next.branchRef ?? branchRef} into main`);
       },
       (err: unknown) => {
@@ -444,8 +445,7 @@ export function ComposerMergeButton({
           // workspace prompt -- except on the main checkout, which the
           // daemon refuses to remove.
           if (isWorkspaceDeletable(commit.status)) {
-            setDeleteError("");
-            setDeletePrompt({ branch: commit.status.branchRef ?? branchRef, merged: false, commitMessage: commit.message });
+            showDeletePrompt({ branch: commit.status.branchRef ?? branchRef, merged: false, commitMessage: commit.message });
           } else {
             setCommitDialog({ title: "Committed changes", message: commit.message });
           }
@@ -454,8 +454,7 @@ export function ComposerMergeButton({
         const next = await api.gitMergeIntoMain(workspaceId);
         setStatus(next);
         setStatusState("ready");
-        setDeleteError("");
-        setDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true, commitMessage: commit.message });
+        showDeletePrompt({ branch: next.branchRef ?? branchRef, merged: true, commitMessage: commit.message });
       } catch (err: unknown) {
         const message = friendlyApiError(err, "Could not ship changes. Resolve any conflicts and try again.");
         toast.error("Ship It failed", { description: message });
@@ -523,11 +522,19 @@ export function ComposerMergeButton({
     })();
   };
 
+  const showDeletePrompt = (prompt: DeleteWorkspacePrompt) => {
+    setDeleteBranch(true);
+    setDeleteError("");
+    setDeletePrompt(prompt);
+  };
+
+  const canDeletePromptBranch = Boolean(deletePrompt?.branch) && deletePrompt?.branch !== "main" && deletePrompt?.branch !== "master";
+
   const handleDeleteWorkspace = () => {
     if (deletePrompt === null || deleting) return;
     setDeleting(true);
     setDeleteError("");
-    void api.removeWorktree(workspaceId).then(
+    void api.removeWorktree(workspaceId, false, canDeletePromptBranch && deleteBranch).then(
       async () => {
         setDeleting(false);
         setDeletePrompt(null);
@@ -1056,12 +1063,12 @@ export function ComposerMergeButton({
               {deletePrompt?.merged === false ? (
                 <>
                   <code className="font-mono">{deletePrompt?.branch}</code> was committed. Delete this workspace?
-                  The branch is kept; the worktree directory is removed.
+                  The worktree directory is removed{canDeletePromptBranch && deleteBranch ? " and the branch is deleted" : ""}.
                 </>
               ) : (
                 <>
                   <code className="font-mono">{deletePrompt?.branch}</code> was merged into main. Delete this workspace?
-                  The branch is kept; the worktree directory is removed.
+                  The worktree directory is removed{canDeletePromptBranch && deleteBranch ? " and the branch is deleted" : ""}.
                 </>
               )}
             </AlertDialogDescription>
@@ -1080,6 +1087,19 @@ export function ComposerMergeButton({
             </div>
           ) : null}
           {deleteError && <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>}
+          {canDeletePromptBranch && (
+            <label className="flex items-start gap-2 cursor-pointer text-sm min-w-0">
+              <Checkbox
+                checked={deleteBranch}
+                onCheckedChange={(v) => setDeleteBranch(v === true)}
+                aria-label="Delete local branch"
+                className="mt-0.5"
+              />
+              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                Delete local branch <code className="font-mono">{deletePrompt?.branch}</code>
+              </span>
+            </label>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Keep workspace</AlertDialogCancel>
             <AlertDialogAction

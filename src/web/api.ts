@@ -27,6 +27,7 @@ import { createWorktreeResponseSchema, workspaceActionListSchema, workspaceActio
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 const acceptedResponseSchema = z.object({ accepted: z.literal(true) }).strict();
 const okResponseSchema = z.object({ ok: z.literal(true) }).strict();
+const removeWorktreeResponseSchema = z.object({ ok: z.literal(true), branchDeleted: z.boolean().optional() }).strip();
 
 /** A read that never resolves leaves the view on a spinner forever because
  *  nothing retries it. Mutations (worktree setup, Git network ops, Pi
@@ -257,8 +258,9 @@ export function createWorkspaceApi(
     async repairWorktree(workspaceId: string): Promise<Workspace> {
       return workspaceSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/worktree/repair`, { method: "POST" }));
     },
-    async removeWorktree(workspaceId: string, force = false): Promise<void> {
-      okResponseSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/worktree/remove`, { method: "POST", body: JSON.stringify(force ? { force: true } : {}) }));
+    async removeWorktree(workspaceId: string, force = false, deleteBranch = false): Promise<{ branchDeleted: boolean }> {
+      const res = removeWorktreeResponseSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/worktree/remove`, { method: "POST", body: JSON.stringify({ ...(force ? { force: true } : {}), ...(deleteBranch ? { deleteBranch: true } : {}) }) }));
+      return { branchDeleted: res.branchDeleted ?? false };
     },
     async gitStatus(id: string): Promise<GitStatus> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/status`) as GitStatus; },
     async gitDiff(id: string, target: "staged" | "working-tree" = "working-tree"): Promise<GitDiff[]> { return await request(`/api/workspaces/${encodeURIComponent(id)}/git/diff?target=${target}`) as GitDiff[]; },

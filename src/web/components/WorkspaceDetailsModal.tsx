@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "./ui/dialog.tsx";
 import { Alert, AlertDescription } from "./ui/alert.tsx";
+import { Checkbox } from "./ui/checkbox.tsx";
 
 export interface WorkspaceDetailsModalProps {
   open: boolean;
@@ -41,6 +42,7 @@ export function WorkspaceDetailsModal({
   const [forceAvailable, setForceAvailable] = useState(false);
   const [removeStatus, setRemoveStatus] = useState<GitStatus | null>(null);
   const [removeStatusLoading, setRemoveStatusLoading] = useState(false);
+  const [deleteBranch, setDeleteBranch] = useState(true);
 
   const resetRemoveDialog = () => {
     setRemoveError("");
@@ -108,11 +110,19 @@ export function WorkspaceDetailsModal({
     }
   };
 
+  const canDeleteBranch = Boolean(workspace.branchRef) && workspace.branchRef !== "main" && workspace.branchRef !== "master";
+
+  const openRemoveDialog = () => {
+    resetRemoveDialog();
+    setDeleteBranch(true);
+    setConfirmRemove(true);
+  };
+
   const handleRemoveWorktree = async (force: boolean) => {
     try {
       setBusy(true);
       setRemoveError("");
-      await api.removeWorktree(workspace.id, force);
+      await api.removeWorktree(workspace.id, force, canDeleteBranch && deleteBranch);
       setConfirmRemove(false);
       resetRemoveDialog();
       await onRefresh();
@@ -218,7 +228,7 @@ export function WorkspaceDetailsModal({
               <Button
                 size="xs"
                 variant="destructive"
-                onClick={() => { resetRemoveDialog(); setConfirmRemove(true); }}
+                onClick={openRemoveDialog}
                 disabled={busy}
               >
                 Delete Worktree
@@ -277,6 +287,19 @@ export function WorkspaceDetailsModal({
               </Alert>
             )}
             {forceAvailable && <RemoveDirtyFiles status={removeStatus} loading={removeStatusLoading} />}
+            {canDeleteBranch && (
+              <label className="flex items-start gap-2 my-2 cursor-pointer text-xs min-w-0">
+                <Checkbox
+                  checked={deleteBranch}
+                  onCheckedChange={(v) => setDeleteBranch(v === true)}
+                  aria-label="Delete local branch"
+                  className="mt-0.5"
+                />
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                  Delete local branch <code className="font-mono text-xs [overflow-wrap:anywhere]">{workspace.branchRef}</code>
+                </span>
+              </label>
+            )}
             <div className="flex justify-end gap-2 pt-2 flex-wrap">
               <Button size="xs" variant="secondary" onClick={() => { setConfirmRemove(false); resetRemoveDialog(); }}>Cancel</Button>
               {forceAvailable && (

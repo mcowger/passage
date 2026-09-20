@@ -241,7 +241,7 @@ describe("WorktreeService removal and reconciliation", () => {
     });
 
     // Non-existent ID with force succeeds cleanly
-    await expect(f.worktreeService.remove("wsp_nonexistent", true)).resolves.toBeUndefined();
+    await expect(f.worktreeService.remove("wsp_nonexistent", true)).resolves.toMatchObject({ branchDeleted: false });
   });
 
   test("refuses to delete main checkout even with force", async () => {
@@ -279,6 +279,50 @@ describe("WorktreeService removal and reconciliation", () => {
     // Should gracefully clean up without throwing
     await f.worktreeService.remove(workspace.id);
     expect(f.repositories.workspaces.get(workspace.id)).toBeUndefined();
+  });
+
+  test("deletes the local branch when requested", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "branch-delete-me");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "branch-delete-me", "Delete Me", "wt-delete-me");
+
+    const result = await f.worktreeService.remove(workspace.id, false, true);
+    expect(result.branchDeleted).toBe(true);
+    expect(f.repositories.workspaces.get(workspace.id)).toBeUndefined();
+    const branchCheck = Bun.spawn(["git", "-C", f.repo, "show-ref", "--verify", "--quiet", "refs/heads/branch-delete-me"], { stdout: "ignore", stderr: "ignore" });
+    expect(await branchCheck.exited).not.toBe(0);
+  });
+
+  test("keeps the local branch by default", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "branch-keep-me");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "branch-keep-me", "Keep Me", "wt-keep-me");
+
+    const result = await f.worktreeService.remove(workspace.id);
+    expect(result.branchDeleted).toBe(false);
+    const branchCheck = Bun.spawn(["git", "-C", f.repo, "show-ref", "--verify", "--quiet", "refs/heads/branch-keep-me"], { stdout: "ignore", stderr: "ignore" });
+    expect(await branchCheck.exited).toBe(0);
+  });
+
+  test("never deletes main via the branch cleanup", async () => {
+    const f = await fixture();
+    await git(f.repo, "branch", "branch-main-guard");
+    const locations = join(f.root, "locations");
+    await mkdir(locations);
+    const location = await f.workspaceService.configureLocation({ displayLabel: "Test", configuredRootPath: locations });
+    const { workspace } = await f.worktreeService.create(f.project.id, location.id, "branch-main-guard", "Main Guard", "wt-main-guard");
+    // Simulate a worktree record pointing at main; removal must not delete main.
+    f.repositories.workspaces.save({ ...workspace, branchRef: "main" });
+    const result = await f.worktreeService.remove(workspace.id, true, true);
+    expect(result.branchDeleted).toBe(false);
+    const branchCheck = Bun.spawn(["git", "-C", f.repo, "show-ref", "--verify", "--quiet", "refs/heads/main"], { stdout: "ignore", stderr: "ignore" });
+    expect(await branchCheck.exited).toBe(0);
   });
 });
 

@@ -149,10 +149,10 @@ export class WorktreeService {
     this.repositories.workspaces.save(fixed);
     return fixed;
   }
-  async remove(workspaceId: string, force = false): Promise<void> {
+  async remove(workspaceId: string, force = false, deleteBranch = false): Promise<{ branchDeleted: boolean }> {
     const w = this.repositories.workspaces.get(workspaceId);
     if (!w) {
-      if (force) return;
+      if (force) return { branchDeleted: false };
       throw new WorktreeError("not-found", "Workspace not found");
     }
     if (w.kind === "main-checkout" || resolve(w.cwd) === resolve(w.mainRepositoryRoot ?? "")) {
@@ -168,11 +168,32 @@ export class WorktreeService {
       await rm(w.markerPath, { force: true }).catch(() => {});
     }
     await rm(join(w.cwd, markerName), { force: true }).catch(() => {});
+    const branchRef = w.branchRef;
+    const repoRoot = w.mainRepositoryRoot ?? process.cwd();
+    // Delete the local branch after the worktree is gone. Git refuses to
+    // delete a branch that is checked out in a worktree, so this must run
+    // after `worktree remove`. Uses -D unconditionally: a non-force removal
+    // only succeeds on a clean, merged tree (so -D is safe), while a force
+    // removal implies the user already accepted discarding work. Protected
+    // refs (main/master, detached, missing) are never deleted. Failures are
+    // swallowed -- the worktree itself is already gone, and there is no
+    // retry path once the workspace record is deleted.
+    const deleteBranchIfRequested = async (): Promise<boolean> => {
+      if (!deleteBranch || !branchRef) return false;
+      if (branchRef === "main" || branchRef === "master") return false;
+      try {
+        if (!(await this.branchExists(repoRoot, branchRef))) return false;
+        const deleted = await this.command(repoRoot, ["branch", "-D", branchRef]);
+        return deleted.code === 0;
+      } catch {
+        return false;
+      }
+    };
     const cwdExists = await realpath(w.cwd).then(() => true, () => false);
     if (!cwdExists) {
       await this.command(w.mainRepositoryRoot ?? process.cwd(), ["worktree", "prune"]).catch(() => {});
       this.repositories.workspaces.delete(workspaceId);
-      return;
+      return { branchDeleted: await deleteBranchIfRequested() };
     }
     const result = await this.command(w.mainRepositoryRoot ?? w.cwd, ["worktree", "remove", ...(force ? ["--force"] : []), w.cwd]);
     if (result.code !== 0) {
@@ -194,6 +215,7 @@ export class WorktreeService {
       }
     }
     this.repositories.workspaces.delete(workspaceId);
+    return { branchDeleted: await deleteBranchIfRequested() };
   }
 
   async discover(projectId: string): Promise<DiscoveredWorktree[]> {
