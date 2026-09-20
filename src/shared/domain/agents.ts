@@ -20,6 +20,10 @@ export const agentSummarySchema = z.object({
   pendingUiRequest: z.record(z.string(), z.unknown()).optional(),
   /** Epoch ms when Passage observed the current run start; absent when no run is active. */
   runStartedAt: z.number().int().nonnegative().safe().optional(),
+  /** Present and true only when `status` is `interrupted` because a daemon
+   *  restart ended the Pi process (expected, grey dot). Absent otherwise --
+   *  a genuine mid-life interruption stays red. */
+  interruptedByRestart: z.boolean().optional(),
 }).strict();
 export type AgentSummary = z.infer<typeof agentSummarySchema>;
 

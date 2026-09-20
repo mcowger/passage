@@ -2,20 +2,24 @@ import type { AgentSummary } from "../../shared/domain/agents.ts";
 
 export type AgentStatusKind = "empty" | "idle" | "active" | "attention";
 
-type StatusInput = Pick<AgentSummary, "status"> & {
+type StatusInput = Pick<AgentSummary, "status" | "interruptedByRestart"> & {
   pendingUiRequest?: unknown;
 };
 
 /**
  * Maps an agent to its dot color kind:
- * - attention (red, pulsing): waiting on the user (needs-attention status or a pending UI request) or errored
+ * - attention (red, pulsing): waiting on the user (needs-attention status or a pending UI request), errored,
+ *   or genuinely interrupted mid-life (process lost while the daemon was up)
  * - active (orange, pulsing): currently working (running, stopping)
  * - idle (blue): ready with prior work (idle, archived, no work in flight)
- * - empty (gray): nothing happening yet (initializing)
+ * - empty (gray): nothing happening yet (initializing) or interrupted by a
+ *   daemon restart (expected process loss; resuming needs a manual retry,
+ *   not urgent attention)
  */
 export function getAgentStatusKind(agent: StatusInput): AgentStatusKind {
   if (agent.pendingUiRequest != null) return "attention";
-  if (agent.status === "needs-attention" || agent.status === "error" || agent.status === "interrupted") return "attention";
+  if (agent.status === "needs-attention" || agent.status === "error") return "attention";
+  if (agent.status === "interrupted") return agent.interruptedByRestart === true ? "empty" : "attention";
   if (agent.status === "running" || agent.status === "stopping") {
     return "active";
   }
@@ -25,7 +29,7 @@ export function getAgentStatusKind(agent: StatusInput): AgentStatusKind {
 
 /**
  * Workspace dot aggregates its agents with attention > active > idle > empty priority.
- * Empty (no agents, or only initializing agents) is empty/gray.
+ * Empty (no agents, or only initializing / restart-interrupted agents) is empty/gray.
  */
 export function getWorkspaceStatusKind(agents: StatusInput[]): AgentStatusKind {
   let sawActive = false;

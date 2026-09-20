@@ -76,6 +76,10 @@ export type AgentSnapshot = Agent & {
   pendingUiRequest?: Record<string, unknown>;
   /** Epoch ms when Passage observed the current run start; absent when no run is active. */
   runStartedAt?: number;
+  /** Present and true only when `lastKnownStatus` is `interrupted` because
+   *  a daemon restart ended the Pi process (expected, grey dot). Absent
+   *  otherwise -- a genuine mid-life interruption stays red. */
+  interruptedByRestart?: boolean;
 };
 
 
@@ -299,6 +303,8 @@ export class AgentService {
         return;
       }
       this.runtime.diagnostics.delete(agent.id);
+      // A fresh boot supersedes any restart attribution from a past life.
+      this.runtime.restartInterrupted.delete(agent.id);
       this.attach(agent.id, process);
       await this.reconcile(agent.id);
     } catch (cause) {
@@ -635,6 +641,7 @@ export class AgentService {
     const archivedAt = new Date().toISOString();
     this.repositories.agents.archive(agentId, archivedAt);
     this.repositories.agents.updateStatus(agentId, "archived");
+    this.runtime.restartInterrupted.delete(agentId);
     this.runtime.previousRevisions.delete(agentId);
     this.runtime.leaves.delete(agentId);
     this.runtime.diagnostics.delete(agentId);
@@ -661,6 +668,7 @@ export class AgentService {
     this.requireWorkspace(agent.workspaceId);
     this.repositories.agents.unarchive(agentId);
     this.repositories.agents.updateStatus(agentId, "idle");
+    this.runtime.restartInterrupted.delete(agentId);
     this.emit({ agentId, type: "status", status: "idle" });
     return this.snapshot(agentId);
   }
@@ -1054,6 +1062,11 @@ export class AgentService {
 
   private updateStatus(agentId: string, status: AgentStatus, type: AgentServiceEvent["type"], generation?: number, error?: string, payload?: Record<string, unknown>): void {
     if (status === "idle" || status === "error" || status === "interrupted" || status === "archived") this.endRun(agentId);
+    // Leaving `interrupted` retires the restart attribution: a later
+    // interruption will be re-classified on its own merits. (`interrupted`
+    // itself is only ever persisted by the views' markInterrupted, which
+    // maintains the set directly.)
+    if (status !== "interrupted") this.runtime.restartInterrupted.delete(agentId);
     this.repositories.agents.updateStatus(agentId, status);
     const runStartedAt = this.runtime.runStartedAt.get(agentId);
     const eventPayload = { ...(payload ?? {}), ...(runStartedAt !== undefined ? { runStartedAt } : {}) };

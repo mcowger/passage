@@ -53,12 +53,16 @@ export class AgentViews {
     // pending questions) is gone after a daemon restart, and no further
     // socket event will ever correct it. Whatever the agent was doing was
     // interrupted, not completed and not a Pi/process error, so report
-    // (and persist) the dedicated `interrupted` attention state rather than
-    // inventing an idle, still-active, or genuinely-erroring state. While a
-    // boot is pending the status is genuinely unknown, so leave it alone.
+    // (and persist) the dedicated `interrupted` state rather than
+    // inventing an idle, still-active, or genuinely-erroring state. The dot
+    // color splits by cause (see classifyStaleInterruption): a restart
+    // leftover renders neutral grey, a mid-life process loss stays red.
+    // While a boot is pending the status is genuinely unknown, so leave it
+    // alone.
     let baseStatus = agent.lastKnownStatus;
     if (!process && !this.runtime.pendingStarts.has(agentId) && this.isStaleActiveStatus(baseStatus)) {
-      this.markInterrupted(agentId, baseStatus);
+      const cause = this.classifyStaleInterruption(agentId);
+      this.markInterrupted(agentId, baseStatus, cause);
       baseStatus = "interrupted";
     }
     const diagnostic = this.runtime.diagnostics.get(agentId);
@@ -69,9 +73,12 @@ export class AgentViews {
           return pending ? parsePiExtensionUiDialog(pending) : undefined;
         })() ?? this.runtime.pendingUiRequests.get(agentId);
     const lastKnownStatus = pendingUiRequest ? "needs-attention" : baseStatus;
+    const interruptedByRestart = lastKnownStatus === "interrupted" && this.runtime.restartInterrupted.has(agentId) ? true : undefined;
+    if (lastKnownStatus !== "interrupted") this.runtime.restartInterrupted.delete(agentId);
     return {
       ...agent,
       lastKnownStatus,
+      ...(interruptedByRestart === undefined ? {} : { interruptedByRestart }),
       live: process !== undefined,
       persisted: agent.piSessionPath !== null,
       ...(pendingUiRequest ? { pendingUiRequest } : {}),
@@ -92,12 +99,16 @@ export class AgentViews {
       let lastKnownStatus = agent.lastKnownStatus;
       const process = this.manager.get(agent.id);
       if (!process && !this.runtime.pendingStarts.has(agent.id) && this.isStaleActiveStatus(lastKnownStatus)) {
-        this.markInterrupted(agent.id, lastKnownStatus);
+        const cause = this.classifyStaleInterruption(agent.id);
+        this.markInterrupted(agent.id, lastKnownStatus, cause);
         lastKnownStatus = "interrupted";
       }
+      const interruptedByRestart = lastKnownStatus === "interrupted" && this.runtime.restartInterrupted.has(agent.id) ? true : undefined;
+      if (lastKnownStatus !== "interrupted") this.runtime.restartInterrupted.delete(agent.id);
       return {
         ...agent,
         lastKnownStatus,
+        ...(interruptedByRestart === undefined ? {} : { interruptedByRestart }),
         live: process !== undefined,
         persisted: agent.piSessionPath !== null,
         ...(this.runtime.runStartedAt.has(agent.id) ? { runStartedAt: this.runtime.runStartedAt.get(agent.id)! } : {}),
@@ -132,15 +143,24 @@ export class AgentViews {
           } catch {}
         } else if (!this.runtime.pendingStarts.has(row.id) && this.isStaleActiveStatus(status)) {
           try {
-            this.markInterrupted(row.id, status);
+            this.markInterrupted(row.id, status, this.classifyStaleInterruption(row.id));
           } catch {}
           status = "interrupted";
         }
       }
+      if (status !== "interrupted") this.runtime.restartInterrupted.delete(row.id);
       const bucket = (seen[row.workspaceId] ??= { attention: false, active: false, idle: false });
-      if (status === "needs-attention" || status === "error" || status === "interrupted") bucket.attention = true;
+      if (status === "needs-attention" || status === "error") bucket.attention = true;
       else if (status === "running" || status === "stopping") bucket.active = true;
+      // `initializing` is neutral/grey: nothing is live yet. `interrupted`
+      // splits by cause: a daemon restart ended the process (expected, not
+      // urgent), so it renders grey like `initializing`; a genuine mid-life
+      // interruption keeps the red attention dot.
       else if (status === "initializing") { /* empty -- no bucket flag */ }
+      else if (status === "interrupted") {
+        if (this.runtime.restartInterrupted.has(row.id)) { /* empty -- no bucket flag */ }
+        else bucket.attention = true;
+      }
       else bucket.idle = true;
     }
     const out: Record<string, "attention" | "active" | "idle" | "empty"> = {};
@@ -153,17 +173,47 @@ export class AgentViews {
     return out;
   }
 
+  /** Decides whether a stale active status with no live process is a daemon-
+   *  restart leftover (neutral grey) or a genuine mid-life process loss
+   *  (red attention). A fresh daemon never owned a process for the agent,
+   *  so any stale it finds is restart fallout -- including lazy sweeps that
+   *  raced the boot reconciliation. Once this daemon has tracked live work
+   *  for the agent (subscription, run, boot, cancellation, compaction, or
+   *  an observed process exit), losing the process is unexpected. */
+  private classifyStaleInterruption(agentId: string): "restart" | "process-lost" {
+    if (this.runtime.restartInterrupted.has(agentId)) return "restart";
+    if (this.runtime.diagnostics.get(agentId)?.generation !== undefined) return "process-lost";
+    if (
+      this.runtime.subscriptions.has(agentId) ||
+      this.runtime.runStartedAt.has(agentId) ||
+      this.runtime.eventChains.has(agentId) ||
+      this.runtime.pendingStarts.has(agentId) ||
+      this.runtime.cancellations.has(agentId) ||
+      this.runtime.compacting.has(agentId) ||
+      this.runtime.pendingUiRequests.has(agentId)
+    ) return "process-lost";
+    return "restart";
+  }
+
   /** Persists `interrupted` -- distinct from `error`: Pi reported nothing
    *  wrong, Passage simply lost track of in-flight work (no live process,
    *  no boot in flight), most commonly because of a daemon restart. Records
    *  why without touching the Pi transcript: nothing this honest can say Pi
    *  itself produced that row. Never overwrites an already-recorded
    *  diagnostic (e.g. a real crash reported by onLifecycle earlier in this
-   *  daemon's life). */
-  private markInterrupted(agentId: string, previousStatus: string): void {
+   *  daemon's life). A `"restart"` cause marks the agent in
+   *  `restartInterrupted` (grey dot); `"process-lost"` clears it (red).
+   *  The set is bounded like the diagnostics map. */
+  private markInterrupted(agentId: string, previousStatus: string, cause: "restart" | "process-lost"): void {
     if (!this.runtime.diagnostics.has(agentId)) {
       this.runtime.diagnostics.set(agentId, { exitStatus: `interrupted (${previousStatus})`, stderr: [], stderrTruncated: false });
       while (this.runtime.diagnostics.size > MAX_RUNTIME_DIAGNOSTICS) this.runtime.diagnostics.delete(this.runtime.diagnostics.keys().next().value!);
+    }
+    if (cause === "restart") {
+      this.runtime.restartInterrupted.add(agentId);
+      while (this.runtime.restartInterrupted.size > MAX_RUNTIME_DIAGNOSTICS) this.runtime.restartInterrupted.delete(this.runtime.restartInterrupted.values().next().value!);
+    } else {
+      this.runtime.restartInterrupted.delete(agentId);
     }
     this.runtime.runStartedAt.delete(agentId);
     try { this.repositories.agents.updateStatus(agentId, "interrupted"); } catch {}
@@ -186,7 +236,7 @@ export class AgentViews {
     }
     for (const agent of agents) {
       try {
-        this.markInterrupted(agent.id, agent.lastKnownStatus);
+        this.markInterrupted(agent.id, agent.lastKnownStatus, "restart");
         interrupted.push(agent.id);
       } catch (error) {
         logger("agent").warn("Restart reconciliation failed for agent", { event: "agent.restart_reconcile_failed", agentId: agent.id, ...errorFields(error) });

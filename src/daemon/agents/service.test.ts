@@ -183,6 +183,58 @@ test("reconcileAfterRestart normalizes stale-active agents on boot without touch
   f.store.close();
 });
 
+test("restart-interrupted agents flag the cause and roll up grey, not red", async () => {
+  const f = await make();
+  const agent = await f.service.create("w");
+  await f.service.capabilities(agent.id);
+  await f.service.stop(agent.id);
+  f.repos.agents.updateStatus(agent.id, "running");
+  // Fresh service instance: same DB, no in-memory runtime state -- this is
+  // what a real daemon restart looks like.
+  const restarted = new AgentService(f.repos, { sessionsRoot: join(f.root, "sessions"), manager: new PiRpcManager(4), pi: { executable: process.execPath, executableArgs: ["-e", script] } });
+  const result = await restarted.reconcileAfterRestart();
+  expect(result.interrupted).toEqual([agent.id]);
+  expect(restarted.snapshot(agent.id).interruptedByRestart).toBe(true);
+  expect(restarted.list("w").find((row) => row.id === agent.id)?.interruptedByRestart).toBe(true);
+  expect(restarted.statusByWorkspace()["w"]).toBe("empty");
+  await restarted.shutdown();
+  await f.service.shutdown();
+  f.store.close();
+});
+
+test("genuine mid-life interruptions keep the red attention rollup", async () => {
+  const f = await make();
+  const agent = await f.service.create("w");
+  await f.service.capabilities(agent.id);
+  await f.service.stop(agent.id);
+  // `interrupted` persisted without any boot sweep (a process lost while
+  // the daemon was up) carries no restart attribution.
+  f.repos.agents.updateStatus(agent.id, "interrupted");
+  expect(f.service.snapshot(agent.id).interruptedByRestart).toBeUndefined();
+  expect(f.service.list("w").find((row) => row.id === agent.id)?.interruptedByRestart).toBeUndefined();
+  expect(f.service.statusByWorkspace()["w"]).toBe("attention");
+  await f.service.shutdown();
+  f.store.close();
+});
+
+test("retrying a restart-interrupted agent clears the restart attribution", async () => {
+  const f = await make();
+  const agent = await f.service.create("w");
+  await f.service.capabilities(agent.id);
+  await f.service.stop(agent.id);
+  f.repos.agents.updateStatus(agent.id, "running");
+  const restarted = new AgentService(f.repos, { sessionsRoot: join(f.root, "sessions"), manager: new PiRpcManager(4), pi: { executable: process.execPath, executableArgs: ["-e", script] } });
+  await restarted.reconcileAfterRestart();
+  expect(restarted.snapshot(agent.id).interruptedByRestart).toBe(true);
+  await restarted.prompt(agent.id, "hello again");
+  await Bun.sleep(20);
+  expect(restarted.snapshot(agent.id).interruptedByRestart).toBeUndefined();
+  expect(["running", "idle"]).toContain(restarted.snapshot(agent.id).lastKnownStatus);
+  await restarted.shutdown();
+  await f.service.shutdown();
+  f.store.close();
+});
+
 test("anchors an active run to one stable start timestamp and clears it on settlement", async () => {
   const f = await make();
   const runSpanScript = `let streaming=false;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'){streaming=true;process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n');setTimeout(()=>{streaming=false;process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n')},40)}const data=r.type==='get_state'?{isStreaming:streaming,sessionFile:null}:r.type==='get_entries'?{leafId:null}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;

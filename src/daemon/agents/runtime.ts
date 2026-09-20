@@ -64,6 +64,16 @@ export class AgentRuntime {
    *  giving later per-agent operations something to wait on so they keep
    *  the old start-then-operate ordering. Never rejects. */
   readonly pendingStarts = new Map<string, Promise<void>>();
+  /** Agents whose current `interrupted` status was caused by a daemon
+   *  restart (boot sweep), not by losing a live process mid-life. The
+   *  status string alone cannot tell those apart, but the sidebar dot can:
+   *  a restart is expected, so it renders neutral grey, while a genuine
+   *  mid-life interruption keeps the red attention dot. Populated by
+   *  `reconcileAfterRestart` (and by the lazy stale-status sweep when this
+   *  daemon never owned a process for the agent); cleared the moment the
+   *  agent leaves `interrupted`. In-memory only -- a fresh daemon rebuilds
+   *  it from its own boot sweep. */
+  readonly restartInterrupted = new Set<string>();
   /** Agents with an auto-title suggestion currently in flight. Guards the
    *  fire-and-forget `maybeAutoTitle` so rapid consecutive user messages
    *  cannot spawn duplicate suggestion runs for the same agent. */

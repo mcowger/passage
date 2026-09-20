@@ -74,6 +74,7 @@ function publicSnapshot(snapshot: AgentSnapshot): AgentSummary {
     ...(snapshot.generation === undefined ? {} : { generation: snapshot.generation }),
     ...(snapshot.pendingUiRequest === undefined ? {} : { pendingUiRequest: snapshot.pendingUiRequest }),
     ...(snapshot.runStartedAt === undefined ? {} : { runStartedAt: snapshot.runStartedAt }),
+    ...(snapshot.interruptedByRestart === undefined ? {} : { interruptedByRestart: snapshot.interruptedByRestart }),
   };
 }
 
