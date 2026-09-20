@@ -9,6 +9,9 @@ export const CURRENT_SETTINGS_SCHEMA_VERSION = 1;
 export const expandModeSchema = z.enum(["always", "latest", "none"]);
 export type ExpandMode = z.infer<typeof expandModeSchema>;
 
+export const shellOutputModeSchema = z.enum(["preview", "full"]);
+export type ShellOutputMode = z.infer<typeof shellOutputModeSchema>;
+
 export const baselineTools = ["read", "write", "edit", "bash", "find", "grep", "ls", "ask"] as const;
 export type BaselineTool = (typeof baselineTools)[number];
 
@@ -37,6 +40,9 @@ export const timelineExpansionSchema = z.object({
     ask: "none",
   }),
   otherTools: expandModeSchema.default("latest"),
+  /** Default shell (`bash`) output in open rows: the last-lines preview
+   *  or the full text. Per-row Show all/less still overrides. */
+  shellOutput: shellOutputModeSchema.default("preview"),
 });
 export type TimelineExpansionSettings = z.infer<typeof timelineExpansionSchema>;
 
@@ -53,6 +59,7 @@ export const DEFAULT_TIMELINE_EXPANSION: TimelineExpansionSettings = {
     ask: "none",
   },
   otherTools: "latest",
+  shellOutput: "preview",
 };
 
 /** Default worktree metadata prompt. `{{purpose}}` is replaced with the

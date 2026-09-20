@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import type { ThemePack, FontMapping, FontOption, FontRole } from "../../shared/domain/customization.ts";
 import { BUILTIN_THEMES, AVAILABLE_FONTS, fontOptionsForRole, resolveFontFamilies } from "../../shared/domain/customization.ts";
-import type { WorkspaceSettings, BaselineTool, ExpandMode, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
+import type { WorkspaceSettings, BaselineTool, ExpandMode, ShellOutputMode, TimelineExpansionSettings } from "../../shared/domain/settings.ts";
 import { baselineTools, DEFAULT_TIMELINE_EXPANSION, DEFAULT_WORKTREE_PROMPT, DEFAULT_TITLE_PROMPT, DEFAULT_COMMIT_PROMPT } from "../../shared/domain/settings.ts";
 import type { AgentCapabilities } from "../../shared/domain/agents.ts";
 import type { Project, WorktreeLocation } from "../../shared/domain/workspaces.ts";
@@ -194,6 +194,29 @@ export function OutputExpansionSection({
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/30">
+        <Label htmlFor="settings-shell-output" className="text-xs font-medium" title="Default bash output in open rows: last-lines preview or full text. Per-row Show all/less still overrides.">
+          Shell output (bash)
+        </Label>
+        <Select
+          value={expansion.shellOutput ?? "preview"}
+          onValueChange={(val) =>
+            onExpansionChange({
+              ...expansion,
+              shellOutput: val as ShellOutputMode,
+            })
+          }
+        >
+          <SelectTrigger id="settings-shell-output" className="h-7 w-32 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="preview">Preview</SelectItem>
+            <SelectItem value="full">Full</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/30">

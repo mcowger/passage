@@ -289,6 +289,23 @@ button.tool-row-summary {
 .tool-output-wrap { position: relative; margin-top: 6px; }
 .tool-output-label { display: block; margin: 0 0 2px; color: var(--muted); font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; }
 
+/* Shell output preview (bash): preview shows the last ~5 lines, expanded
+ * shows the full output scrolled to the end by default. */
+.shell-output-block { min-width: 0; }
+.shell-output-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.shell-output-truncated-note {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  margin-right: auto;
+}
+
 /* Tool Path Segment Formatting */
 .tool-path-wrap {
   display: inline-flex;

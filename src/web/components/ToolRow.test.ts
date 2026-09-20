@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { ToolRow, getReadToolImagePath, getToolSummary } from "./ToolRow.tsx";
+import { ToolRow, getReadToolImagePath, getShellOutputPreview, getToolSummary } from "./ToolRow.tsx";
 import type { TimelineItem } from "../../shared/domain/agents.ts";
 
 describe("getToolSummary", () => {
@@ -399,5 +399,90 @@ describe("ToolRow component", () => {
     );
 
     expect(html).not.toContain("[object Object]");
+  });
+});
+
+describe("getShellOutputPreview", () => {
+  test("returns full text when output fits in the preview", () => {
+    const preview = getShellOutputPreview("a\nb\nc");
+    expect(preview.totalLines).toBe(3);
+    expect(preview.truncatedLines).toBe(0);
+    expect(preview.previewText).toBe("a\nb\nc");
+  });
+
+  test("slices long output down to its last lines", () => {
+    const text = ["l1", "l2", "l3", "l4", "l5", "l6", "l7"].join("\n");
+    const preview = getShellOutputPreview(text);
+    expect(preview.totalLines).toBe(7);
+    expect(preview.truncatedLines).toBe(2);
+    expect(preview.previewText).toBe(["l3", "l4", "l5", "l6", "l7"].join("\n"));
+  });
+
+  test("trailing newline does not count as an extra line", () => {
+    const preview = getShellOutputPreview("a\nb\n");
+    expect(preview.totalLines).toBe(2);
+    expect(preview.truncatedLines).toBe(0);
+  });
+});
+
+describe("ToolRow shell output preview", () => {
+  test("long bash output previews the tail with a show-all toggle", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-long-bash",
+      kind: "tool",
+      name: "bash",
+      input: { command: "npm test" },
+      result: ["line1", "line2", "line3", "line4", "line5", "line6", "line7"].join("\n"),
+      status: "complete",
+    };
+
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(ToolRow, { item })
+    );
+
+    expect(html).toContain("shell-output-block");
+    expect(html).toContain("Showing last 5 of 7 lines");
+    expect(html).toContain("Show all 7 lines");
+    // Tail is visible; the head is truncated away.
+    expect(html).toContain("line7");
+    expect(html).not.toContain("line1");
+  });
+
+  test("short bash output renders without a toggle", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-short-bash",
+      kind: "tool",
+      name: "bash",
+      input: { command: "echo hi" },
+      result: "hi",
+      status: "complete",
+    };
+
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(ToolRow, { item })
+    );
+
+    expect(html).toContain("shell-output-block");
+    expect(html).not.toContain("Show all");
+  });
+
+  test("shellOutputMode full renders the complete output", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-full-bash",
+      kind: "tool",
+      name: "bash",
+      input: { command: "npm test" },
+      result: ["line1", "line2", "line3", "line4", "line5", "line6", "line7"].join("\n"),
+      status: "complete",
+    };
+
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(ToolRow, { item, shellOutputMode: "full" })
+    );
+
+    expect(html).toContain("line1");
+    expect(html).toContain("line7");
+    expect(html).toContain("Show less");
+    expect(html).not.toContain("Showing last");
   });
 });

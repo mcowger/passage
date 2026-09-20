@@ -1,8 +1,9 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils.ts";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible.tsx";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group.tsx";
 import type { TimelineItem } from "../../shared/domain/agents.ts";
+import type { ShellOutputMode } from "../../shared/domain/settings.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { GenericImageLightbox, UserImageThumb } from "./UserImages.tsx";
 import { FileTypeIcon } from "./FileTypeIcon.tsx";
@@ -35,6 +36,32 @@ import {
 } from "lucide-react";
 
 export const MAX_INLINE_DIFF_LINES = 120;
+
+/** Lines of shell output shown before the preview truncates with a
+ *  "Show all" toggle. Keeps long `bash` results to roughly 4-5 lines
+ *  worth of vertical space while still showing the tail (exit status and
+ *  final lines) by default. */
+export const SHELL_OUTPUT_PREVIEW_LINES = 5;
+
+export type ShellOutputPreview = {
+  totalLines: number;
+  previewText: string;
+  truncatedLines: number;
+};
+
+/** Slice shell output down to its last `maxLines` lines. A trailing newline
+ *  does not count as a phantom extra line. */
+export function getShellOutputPreview(text: string, maxLines = SHELL_OUTPUT_PREVIEW_LINES): ShellOutputPreview {
+  const lines = text.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  const totalLines = lines.length;
+  if (totalLines <= maxLines) return { totalLines, previewText: text, truncatedLines: 0 };
+  return {
+    totalLines,
+    previewText: lines.slice(totalLines - maxLines).join("\n"),
+    truncatedLines: totalLines - maxLines,
+  };
+}
 
 /** Workspace image extensions the model can read with the `read` tool. */
 const READ_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
@@ -405,12 +432,102 @@ function ViewToggle<T extends string>({
   );
 }
 
+/** Shell (`bash`) output with three display states: the row itself
+ *  collapses (handled by the outer `Collapsible`), the output preview shows
+ *  the last {@link SHELL_OUTPUT_PREVIEW_LINES} lines, and "Show all"
+ *  expands to the full text. Preview is a tail slice so it shows the end
+ *  by construction; the expanded view scrolls its `pre` to the bottom on
+ *  expand and follows the tail while the command is still running (until
+ *  the user scrolls up). Copy buttons elsewhere keep the full text. */
+function ShellOutputCode({
+  code,
+  language,
+  filePath,
+  className,
+  followTail,
+  defaultShowAll,
+}: {
+  code: string;
+  language?: string;
+  filePath?: string;
+  className?: string;
+  followTail?: boolean;
+  defaultShowAll?: boolean;
+}) {
+  const preview = useMemo(() => getShellOutputPreview(code), [code]);
+  const needsTruncation = preview.truncatedLines > 0;
+  const [showAll, setShowAll] = useState(defaultShowAll ?? false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  // False once the user scrolls up in the expanded view -- tail-following
+  // pauses until they scroll back to the bottom.
+  const stickToEndRef = useRef(true);
+
+  const scrollToEnd = useCallback(() => {
+    const pre = containerRef.current?.querySelector("pre");
+    if (pre && stickToEndRef.current) pre.scrollTop = pre.scrollHeight;
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const pre = containerRef.current?.querySelector("pre");
+    if (!pre) return;
+    stickToEndRef.current = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+  }, []);
+
+  // Show the end by default when expanding (covers the async syntax
+  // highlighting pass, which settles just after the first paint).
+  useEffect(() => {
+    if (!showAll) return;
+    stickToEndRef.current = true;
+    scrollToEnd();
+    const timer = setTimeout(scrollToEnd, 60);
+    return () => clearTimeout(timer);
+  }, [showAll, scrollToEnd]);
+
+  // Follow the tail while streaming.
+  useEffect(() => {
+    if (showAll && followTail) scrollToEnd();
+  }, [code, showAll, followTail, scrollToEnd]);
+
+  const displayCode = needsTruncation && !showAll ? preview.previewText : code;
+
+  return (
+    <div className="shell-output-block" ref={containerRef} onScroll={handleScroll}>
+      <HighlightedCode
+        code={displayCode}
+        language={language}
+        filePath={filePath}
+        className={className}
+      />
+      {needsTruncation && (
+        <div className="shell-output-toggle-row">
+          {!showAll && (
+            <span className="shell-output-truncated-note">
+              Showing last {SHELL_OUTPUT_PREVIEW_LINES} of {preview.totalLines} lines
+            </span>
+          )}
+          <button
+            type="button"
+            className="tool-view-toggle-btn"
+            aria-expanded={showAll}
+            aria-label={showAll ? "Collapse shell output to preview" : `Expand shell output to all ${preview.totalLines} lines`}
+            onClick={() => setShowAll((v) => !v)}
+          >
+            {showAll ? "Show less" : `Show all ${preview.totalLines} lines`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToolOutputDisplay({
   item,
   filePath,
+  shellOutputMode,
 }: {
   item: Extract<TimelineItem, { kind: "tool" }>;
   filePath?: string;
+  shellOutputMode?: ShellOutputMode;
 }) {
   const rawResult = item.result ?? "";
   const result =
@@ -423,6 +540,8 @@ function ToolOutputDisplay({
   const isRead = item.name === "read" || item.name === "readFile";
   const isGlobLike = item.name === "find" || item.name === "glob" || item.name === "ls" || item.name === "list" || item.name === "list_dir";
   const normalizedBash = useMemo(() => (isBash ? renderTerminalOutput(result) : result), [isBash, result]);
+  const followTail = item.status === "running";
+  const defaultShowAll = (shellOutputMode ?? "preview") === "full";
   const jsonCheck = useMemo(() => tryParseJson(normalizedBash), [normalizedBash]);
   const grepData = useMemo(() => (item.name === "grep" ? parseGrepOutput(result) : null), [item.name, result]);
   const globData = useMemo(() => (isGlobLike ? parseGlobOutput(result) : null), [isGlobLike, result]);
@@ -518,7 +637,13 @@ function ToolOutputDisplay({
           </div>
         </div>
         {viewMode === "formatted" ? (
-          <HighlightedCode code={formattedJson} language="json" className="tool-output-pre" />
+          isBash ? (
+            <ShellOutputCode key={`${item.id}-json-${defaultShowAll ? "full" : "preview"}`} code={formattedJson} language="json" className="tool-output-pre" followTail={followTail} defaultShowAll={defaultShowAll} />
+          ) : (
+            <HighlightedCode code={formattedJson} language="json" className="tool-output-pre" />
+          )
+        ) : isBash ? (
+          <ShellOutputCode key={`${item.id}-raw-${defaultShowAll ? "full" : "preview"}`} code={normalizedBash} language="bash" className="tool-output-pre" followTail={followTail} defaultShowAll={defaultShowAll} />
         ) : (
           <HighlightedCode code={normalizedBash} language={isBash ? "bash" : "text"} className="tool-output-pre" />
         )}
@@ -528,12 +653,23 @@ function ToolOutputDisplay({
 
   return (
     <div className="tool-output-wrap">
-      <HighlightedCode
-        code={normalizedBash}
-        language={isBash ? "bash" : undefined}
-        filePath={isBash ? undefined : filePath}
-        className="tool-output-pre"
-      />
+      {isBash ? (
+        <ShellOutputCode
+          key={`${item.id}-${defaultShowAll ? "full" : "preview"}`}
+          code={normalizedBash}
+          language="bash"
+          className="tool-output-pre"
+          followTail={followTail}
+          defaultShowAll={defaultShowAll}
+        />
+      ) : (
+        <HighlightedCode
+          code={normalizedBash}
+          language={undefined}
+          filePath={filePath}
+          className="tool-output-pre"
+        />
+      )}
       <div className="tool-floating-copy">
         <CopyButton text={normalizedBash} title="Copy output" />
       </div>
@@ -599,12 +735,14 @@ function ToolExpandedBodyInner({
   filePath,
   workspaceId,
   api,
+  shellOutputMode,
 }: {
   item: Extract<TimelineItem, { kind: "tool" }>;
   diff?: ToolDiff | null;
   filePath?: string;
   workspaceId?: string;
   api?: Pick<WorkspaceApi, "workspaceImageUrl">;
+  shellOutputMode?: ShellOutputMode;
 }) {
   const input = getEffectiveToolInput(item);
   const isBash = item.name === "bash";
@@ -725,7 +863,7 @@ function ToolExpandedBodyInner({
         </div>
       ) : hasOutput ? (
         <>
-          <ToolOutputDisplay item={item} filePath={filePath} />
+          <ToolOutputDisplay item={item} filePath={filePath} shellOutputMode={shellOutputMode} />
           {isRunning ? <ToolRunningFooter item={item} /> : null}
         </>
       ) : isRunning ? (
@@ -794,9 +932,12 @@ export interface ToolRowProps {
   onOpenChange?: (open: boolean) => void;
   workspaceId?: string;
   api?: Pick<WorkspaceApi, "workspaceImageUrl">;
+  /** Default shell output fullness for open bash rows. Per-row
+   *  Show all/less still overrides. */
+  shellOutputMode?: ShellOutputMode;
 }
 
-function ToolRowInner({ item, open, onOpenChange, workspaceId, api }: ToolRowProps) {
+function ToolRowInner({ item, open, onOpenChange, workspaceId, api, shellOutputMode }: ToolRowProps) {
   const { icon, title, subtitle, isPath } = getToolSummary(item);
   const effectiveInput = getEffectiveToolInput(item);
   const diff = getToolDiff({ name: item.name, input: effectiveInput }) ?? getToolDiff(item);
@@ -839,7 +980,7 @@ function ToolRowInner({ item, open, onOpenChange, workspaceId, api }: ToolRowPro
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent forceMount>
-        <ToolExpandedBody item={item} diff={diff} filePath={filePath} workspaceId={workspaceId} api={api} />
+        <ToolExpandedBody item={item} diff={diff} filePath={filePath} workspaceId={workspaceId} api={api} shellOutputMode={shellOutputMode} />
       </CollapsibleContent>
     </Collapsible>
   );

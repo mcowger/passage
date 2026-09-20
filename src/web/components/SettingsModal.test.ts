@@ -49,6 +49,8 @@ describe("OutputExpansionSection", () => {
     expect(html).toContain("settings-tool-grep");
     expect(html).toContain("settings-tool-ls");
     expect(html).toContain("settings-tool-ask");
+    expect(html).toContain("settings-shell-output");
+    expect(html).toContain("Shell output (bash)");
   });
 });
 

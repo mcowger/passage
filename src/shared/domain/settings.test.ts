@@ -111,4 +111,15 @@ describe("workspace font mapping", () => {
     });
     expect(parsed.timelineExpansion.tools.ask).toBe("none");
   });
+
+  test("defaults shell output to preview and backfills legacy expansion", () => {
+    expect(DEFAULT_WORKSPACE_SETTINGS.timelineExpansion.shellOutput).toBe("preview");
+    const { shellOutput: _dropped, ...legacyExpansion } = DEFAULT_WORKSPACE_SETTINGS.timelineExpansion;
+    void _dropped;
+    const parsed = workspaceSettingsSchema.parse({
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      timelineExpansion: legacyExpansion,
+    });
+    expect(parsed.timelineExpansion.shellOutput).toBe("preview");
+  });
 });

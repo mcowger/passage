@@ -3,6 +3,7 @@ import { SlidersHorizontal, RotateCcw } from "lucide-react";
 import type {
   BaselineTool,
   ExpandMode,
+  ShellOutputMode,
   TimelineExpansionSettings,
 } from "../../shared/domain/settings.ts";
 import { baselineTools } from "../../shared/domain/settings.ts";
@@ -84,6 +85,13 @@ export const DisplayOptionsPopover = memo(function DisplayOptionsPopover({
     onExpansionChange({
       ...expansion,
       otherTools: mode,
+    });
+  };
+
+  const handleShellOutputChange = (mode: ShellOutputMode) => {
+    onExpansionChange({
+      ...expansion,
+      shellOutput: mode,
     });
   };
 
@@ -217,6 +225,32 @@ export const DisplayOptionsPopover = memo(function DisplayOptionsPopover({
                   </Select>
                 </div>
               ))}
+            </div>
+
+            {/* Shell output default */}
+            <div className="pt-2 border-t border-border flex items-center justify-between gap-2">
+              <Label
+                htmlFor="session-shell-output"
+                className="text-xs font-medium"
+                title="Default bash output in open rows: last-lines preview or full text. Per-row Show all/less still overrides."
+              >
+                Shell output
+              </Label>
+              <Select
+                value={expansion.shellOutput ?? "preview"}
+                onValueChange={(val) => handleShellOutputChange(val as ShellOutputMode)}
+              >
+                <SelectTrigger
+                  id="session-shell-output"
+                  className="h-7 w-28 text-xs"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="preview">Preview</SelectItem>
+                  <SelectItem value="full">Full</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Other tools */}

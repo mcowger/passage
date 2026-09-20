@@ -233,6 +233,7 @@ export const TimelineRow = memo(function TimelineRow({
         onOpenChange={(open) => onToggleManual?.(item.id, open)}
         workspaceId={workspaceId}
         api={api}
+        shellOutputMode={expansion.shellOutput ?? "preview"}
       />
     );
   }
