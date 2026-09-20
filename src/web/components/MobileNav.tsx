@@ -206,6 +206,9 @@ interface MobileSessionSheetProps {
   onStopScript?: (name: string) => void;
   onRestartScript?: (name: string) => void;
   onViewScriptTerminal?: (terminalId: string) => void;
+  /** Name of the script with a start/stop/restart in flight. Disables its
+   *  row actions so a double-tap cannot issue a duplicate mutation. */
+  scriptBusyName?: string | null;
 }
 
 function SectionLabel({ children }: { children: string }) {
@@ -240,6 +243,7 @@ export function MobileSessionSheet(props: MobileSessionSheetProps) {
     onStopScript,
     onRestartScript,
     onViewScriptTerminal,
+    scriptBusyName = null,
   } = props;
 
   const pick = (fn: () => void) => () => {
@@ -394,85 +398,110 @@ export function MobileSessionSheet(props: MobileSessionSheetProps) {
             </>
           )}
 
-          {scripts.length > 0 && (onStartScript || onStopScript) && (
-            <>
-              <SectionLabel>{`Scripts (${scripts.length})`}</SectionLabel>
-              {scripts.map((script) => {
-                const running = script.lifecycle === "running";
-                const healthSuffix =
-                  running && script.health === "healthy"
-                    ? " · listening"
-                    : running && script.health === "unhealthy"
-                      ? " · not listening"
-                      : "";
-                const meta = running
-                  ? `running${healthSuffix}${script.url ? ` · ${script.url}` : ""}`
-                  : script.exitCode !== null
-                    ? `exit ${script.exitCode}`
-                    : "stopped";
-                const dotKind: "idle" | "empty" | "active" =
-                  running && script.health === "healthy"
-                    ? "idle"
-                    : running && script.health === "unhealthy"
-                      ? "empty"
-                      : running
-                        ? "active"
-                        : "idle";
-                return (
-                  <div key={script.name} role="listitem" className="mobile-sheet-row">
-                    <span className={statusDotClass(dotKind)} aria-hidden="true" />
-                    <span className="mobile-sheet-row-main">
-                      <span className="mobile-sheet-row-title">▶ {script.name}</span>
-                      <span className="mobile-sheet-row-meta">{meta}</span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1">
-                      {!running ? (
-                        <button
-                          type="button"
-                          className="mobile-sheet-action"
-                          aria-label={`Run script ${script.name}`}
-                          onClick={() => onStartScript?.(script.name)}
-                        >
-                          Run
-                        </button>
-                      ) : (
-                        <>
-                          {script.terminalId && onViewScriptTerminal && (
-                            <button
-                              type="button"
-                              className="mobile-sheet-action"
-                              aria-label={`View ${script.name} logs`}
-                              onClick={pick(() => onViewScriptTerminal(script.terminalId as string))}
-                            >
-                              Logs
-                            </button>
-                          )}
-                          {onRestartScript && (
-                            <button
-                              type="button"
-                              className="mobile-sheet-action"
-                              aria-label={`Restart script ${script.name}`}
-                              onClick={() => onRestartScript(script.name)}
-                            >
-                              Restart
-                            </button>
-                          )}
+          {scripts.length > 0 && (onStartScript || onStopScript) && (() => {
+            // Services are long-running (port, health, restart); tasks run
+            // once and report an exit code. Separate sections keep the
+            // two from reading as one flat list of identical rows.
+            const services = scripts.filter((script) => script.type === "service");
+            const tasks = scripts.filter((script) => script.type !== "service");
+            const renderScriptRow = (script: WorkspaceScriptRuntime, kindLabel: "service" | "task") => {
+              const running = script.lifecycle === "running";
+              // Single-line status: the dot + action buttons already carry
+              // running/stopped, so this stays short (port, not full URL).
+              const status = running
+                ? script.health === "healthy" && script.port !== null
+                  ? `running \u00b7 :${script.port}`
+                  : script.health === "healthy"
+                    ? "running \u00b7 listening"
+                    : script.health === "unhealthy"
+                      ? "not listening"
+                      : "running"
+                : script.exitCode !== null
+                  ? `exit ${script.exitCode}`
+                  : "stopped";
+              const dotKind: "idle" | "empty" | "active" =
+                running && script.health === "healthy"
+                  ? "idle"
+                  : running && script.health === "unhealthy"
+                    ? "empty"
+                    : running
+                      ? "active"
+                      : "idle";
+              const busy = scriptBusyName === script.name;
+              const glyph = kindLabel === "service" ? "\u25c9" : "\u25b6";
+              return (
+                <div key={script.name} role="listitem" className="mobile-sheet-row mobile-script-row">
+                  <span className={statusDotClass(dotKind)} aria-hidden="true" />
+                  <span className="mobile-script-name" title={`${script.name} (${status})`}>
+                    <span aria-hidden="true" className="mobile-script-glyph">{glyph} </span>{script.name}
+                  </span>
+                  <span className="mobile-script-status">{status}</span>
+                  <span className="mobile-script-actions">
+                    {!running ? (
+                      <button
+                        type="button"
+                        className="mobile-sheet-action"
+                        aria-label={`Run ${kindLabel} ${script.name}, ${status}`}
+                        disabled={busy}
+                        onClick={() => onStartScript?.(script.name)}
+                      >
+                        Run
+                      </button>
+                    ) : (
+                      <>
+                        {script.terminalId && onViewScriptTerminal && (
                           <button
                             type="button"
                             className="mobile-sheet-action"
-                            aria-label={`Stop script ${script.name}`}
-                            onClick={() => onStopScript?.(script.name)}
+                            aria-label={`View ${script.name} logs`}
+                            onClick={pick(() => onViewScriptTerminal(script.terminalId as string))}
                           >
-                            Stop
+                            Logs
                           </button>
-                        </>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
-            </>
-          )}
+                        )}
+                        {onRestartScript && (
+                          <button
+                            type="button"
+                            className="mobile-sheet-action"
+                            aria-label={`Restart ${kindLabel} ${script.name}`}
+                            disabled={busy}
+                            onClick={() => onRestartScript(script.name)}
+                          >
+                            Restart
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="mobile-sheet-action"
+                          aria-label={`Stop ${kindLabel} ${script.name}`}
+                          disabled={busy}
+                          onClick={() => onStopScript?.(script.name)}
+                        >
+                          Stop
+                        </button>
+                      </>
+                    )}
+                  </span>
+                </div>
+              );
+            };
+            return (
+              <>
+                {services.length > 0 && (
+                  <>
+                    <SectionLabel>{`Services (${services.length})`}</SectionLabel>
+                    {services.map((script) => renderScriptRow(script, "service"))}
+                  </>
+                )}
+                {tasks.length > 0 && (
+                  <>
+                    <SectionLabel>{`Tasks (${tasks.length})`}</SectionLabel>
+                    {tasks.map((script) => renderScriptRow(script, "task"))}
+                  </>
+                )}
+              </>
+            );
+          })()}
 
           <SectionLabel>Views</SectionLabel>          <button
             type="button"

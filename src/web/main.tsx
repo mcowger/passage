@@ -718,6 +718,7 @@ function App() {
         onCloseTerminal={closeTerminalOnMobile}
         onClosePreview={closePreviewOnMobile}
         scripts={scripts}
+        scriptBusyName={scriptBusyName}
         onStartScript={(name) => void handleStartScript(name)}
         onStopScript={(name) => void stopScript(name)}
         onRestartScript={(name) => void restartScript(name)}

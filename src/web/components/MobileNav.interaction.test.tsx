@@ -3,6 +3,7 @@ import React, { act } from "react";
 import { fireEvent, render } from "@testing-library/react";
 import type { AgentSummary } from "../../shared/domain/agents.ts";
 import type { TerminalSummary } from "../../shared/domain/terminals.ts";
+import type { WorkspaceScriptRuntime } from "../../shared/domain/workspace-actions.ts";
 import { setupDomTests } from "../test-utils/dom.ts";
 
 // Client-rendered proof that mobile can close sessions: the desktop close
@@ -117,6 +118,72 @@ describe("MobileSessionSheet close controls", () => {
     const { queryByRole } = render(React.createElement(MobileSessionSheet, sheetProps()));
     expect(queryByRole("button", { name: /close agent/i })).toBeNull();
     expect(queryByRole("button", { name: /close terminal/i })).toBeNull();
+  });
+});
+
+describe("MobileSessionSheet scripts", () => {
+  function script(overrides: Partial<WorkspaceScriptRuntime> & { name: string }): WorkspaceScriptRuntime {
+    return {
+      type: "script",
+      lifecycle: "stopped",
+      terminalId: null,
+      exitCode: null,
+      port: null,
+      url: null,
+      health: null,
+      ...overrides,
+    };
+  }
+
+  test("groups services and tasks with compact single-line status", () => {
+    const { getByText, getByRole, queryByText } = render(
+      React.createElement(
+        MobileSessionSheet,
+        sheetProps({
+          agents: [],
+          terminals: [],
+          scripts: [
+            script({ name: "dev", type: "service", lifecycle: "running", port: 5123, url: "http://127.0.0.1:5123", health: "healthy", terminalId: "term-1" }),
+            script({ name: "typecheck" }),
+            script({ name: "test", exitCode: 1 }),
+          ],
+          onStartScript: () => {},
+          onStopScript: () => {},
+          onRestartScript: () => {},
+          onViewScriptTerminal: () => {},
+        }),
+      ),
+    );
+
+    // No more single flat "Scripts (3)" bucket.
+    expect(queryByText(/Scripts \(3\)/)).toBeNull();
+    expect(getByText("Services (1)")).not.toBeNull();
+    expect(getByText("Tasks (2)")).not.toBeNull();
+    // Compact status: port only, never the full loopback URL.
+    expect(getByText("running \u00b7 :5123")).not.toBeNull();
+    expect(queryByText(/http:\/\/127\.0\.0\.1/)).toBeNull();
+    expect(getByText("stopped")).not.toBeNull();
+    expect(getByText("exit 1")).not.toBeNull();
+    // Actions stay reachable per row.
+    expect(getByRole("button", { name: "Run task typecheck, stopped" })).not.toBeNull();
+    expect(getByRole("button", { name: "Stop service dev" })).not.toBeNull();
+  });
+
+  test("busy script disables its row actions", () => {
+    const { getByRole } = render(
+      React.createElement(
+        MobileSessionSheet,
+        sheetProps({
+          agents: [],
+          terminals: [],
+          scripts: [script({ name: "typecheck" })],
+          onStartScript: () => {},
+          onStopScript: () => {},
+          scriptBusyName: "typecheck",
+        }),
+      ),
+    );
+    expect(getByRole("button", { name: "Run task typecheck, stopped" }).hasAttribute("disabled")).toBe(true);
   });
 });
 
