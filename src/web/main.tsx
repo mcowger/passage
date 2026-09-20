@@ -18,7 +18,7 @@ import { initKeyboardInset } from "./lib/keyboard-inset.ts";
 import { useEdgeSwipeDrawer } from "./components/useEdgeSwipeDrawer.ts";
 import { Button } from "./components/ui/button.tsx";
 import { Input } from "./components/ui/input.tsx";
-import { MoreHorizontal, Plus } from "lucide-react";
+import { MoreHorizontal, Plus, Settings } from "lucide-react";
 import {
   Empty,
   EmptyHeader,
@@ -580,18 +580,11 @@ function App() {
                 <button
                   type="button"
                   className="nav-action-btn"
-                  title="Command Palette (Ctrl+K)"
-                  onClick={() => setCommandPaletteOpen(true)}
-                >
-                  🔍 Commands <kbd>⌘K</kbd>
-                </button>
-                <button
-                  type="button"
-                  className="nav-action-btn"
                   title="Settings & Themes"
+                  aria-label="Settings & Themes"
                   onClick={() => setSettingsModalOpen(true)}
                 >
-                  ⚙ Settings
+                  <Settings className="w-5 h-5" aria-hidden="true" />
                 </button>
               </div>
             </nav>
