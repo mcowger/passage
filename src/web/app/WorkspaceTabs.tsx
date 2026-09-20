@@ -157,6 +157,7 @@ export function WorkspaceTabContent(props: WorkspaceTabContentProps): ReactNode 
             agent={currentAgent}
             api={api}
             settings={settings}
+            workspaceRoot={workspace.cwd}
             onAgentChanged={(updatedAgent) => {
               const previous = agents.find((agent) => agent.id === updatedAgent.id);
               setAgents((current) => current.map((agent) => agent.id === updatedAgent.id ? updatedAgent : agent));

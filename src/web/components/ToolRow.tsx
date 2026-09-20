@@ -167,20 +167,35 @@ export function getRunningToolLabel(name: string): string {
   return `Running ${name}…`;
 }
 
-export function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): ToolSummary {
+/** Strip the workspace root from an absolute tool path for display.
+ *  Returns the workspace-relative path when `path` is inside
+ *  `workspaceRoot`, otherwise returns `path` unchanged. */
+export function toWorkspaceRelativePath(path: string, workspaceRoot?: string): string {
+  if (!path || !workspaceRoot) return path;
+  if (!path.startsWith("/")) return path;
+  const normalize = (p: string) => (p.length > 1 ? p.replace(/\/+$/, "") : p);
+  const root = normalize(workspaceRoot);
+  if (!root || !root.startsWith("/")) return path;
+  if (path === root) return path;
+  if (root === "/") return path.replace(/^\/+/, "");
+  if (path.startsWith(`${root}/`)) return path.slice(root.length + 1);
+  return path;
+}
+
+export function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>, workspaceRoot?: string): ToolSummary {
   const input = getEffectiveToolInput(item);
   switch (item.name) {
     case "read":
     case "readFile":
-      return fileToolSummary("read", "Read", input);
+      return fileToolSummary("read", "Read", input, workspaceRoot);
     case "edit":
     case "editFile":
     case "multiedit":
     case "apply_patch":
-      return fileToolSummary("edit", "Edit", input);
+      return fileToolSummary("edit", "Edit", input, workspaceRoot);
     case "write":
     case "writeFile":
-      return fileToolSummary("write", "Write", input);
+      return fileToolSummary("write", "Write", input, workspaceRoot);
     case "bash":
       return { icon: "command", title: "Shell", subtitle: String(input.command ?? "") };
     case "find":
@@ -201,9 +216,9 @@ export function getToolSummary(item: Extract<TimelineItem, { kind: "tool" }>): T
   }
 }
 
-function fileToolSummary(icon: ToolIconKind, title: string, input: Record<string, unknown>): ToolSummary {
+function fileToolSummary(icon: ToolIconKind, title: string, input: Record<string, unknown>, workspaceRoot?: string): ToolSummary {
   const path = String(input.path ?? input.filePath ?? input.filename ?? "");
-  return { icon, title, subtitle: path, isPath: Boolean(path) };
+  return { icon, title, subtitle: toWorkspaceRelativePath(path, workspaceRoot), isPath: Boolean(path) };
 }
 
 export function ToolIcon({ kind }: { kind: ToolIconKind }) {
@@ -218,12 +233,13 @@ export function ToolIcon({ kind }: { kind: ToolIconKind }) {
   }
 }
 
-export function renderPathWithIcon(path: string, showFileIcon = true) {
+export function renderPathWithIcon(path: string, showFileIcon = true, title?: string) {
   if (!path) return null;
+  const tooltip = title ?? path;
   const lastSlash = path.lastIndexOf("/");
   if (lastSlash === -1) {
     return (
-      <span className="tool-path-wrap" title={path}>
+      <span className="tool-path-wrap" title={tooltip}>
         {showFileIcon && <FileTypeIcon path={path} size={13} />}
         <span className="tool-path-name">{path}</span>
       </span>
@@ -232,7 +248,7 @@ export function renderPathWithIcon(path: string, showFileIcon = true) {
   const dir = path.slice(0, lastSlash);
   const name = path.slice(lastSlash + 1);
   return (
-    <span className="tool-path-wrap" title={path}>
+    <span className="tool-path-wrap" title={tooltip}>
       {showFileIcon && <FileTypeIcon path={path} size={13} />}
       <span className="tool-path-dir">{dir}/</span>
       <span className="tool-path-name">{name}</span>
@@ -240,7 +256,8 @@ export function renderPathWithIcon(path: string, showFileIcon = true) {
   );
 }
 
-function ToolDiffPreviewInner({ diff }: { diff: ToolDiff }) {
+function ToolDiffPreviewInner({ diff, workspaceRoot }: { diff: ToolDiff; workspaceRoot?: string }) {
+  const displayPath = toWorkspaceRelativePath(diff.path, workspaceRoot);
   const visibleLines = diff.lines.slice(0, MAX_INLINE_DIFF_LINES);
   const omittedLines = diff.lines.length - visibleLines.length;
   const rawPatch = useMemo(
@@ -252,10 +269,10 @@ function ToolDiffPreviewInner({ diff }: { diff: ToolDiff }) {
   );
 
   return (
-    <div className="tool-diff-card" aria-label={`Inline diff for ${diff.path || "changed file"}`}>
+    <div className="tool-diff-card" aria-label={`Inline diff for ${displayPath || "changed file"}`}>
       <div className="tool-diff-header">
         <div className="tool-diff-file">
-          {renderPathWithIcon(diff.path || "Changed content")}
+          {renderPathWithIcon(displayPath || "Changed content", true, diff.path || undefined)}
         </div>
         <div className="tool-diff-actions">
           <span className="tool-diff-stats">
@@ -291,10 +308,13 @@ export const ToolDiffPreview = memo(ToolDiffPreviewInner);
 function ReadFileView({
   content,
   filePath,
+  workspaceRoot,
 }: {
   content: string;
   filePath?: string;
+  workspaceRoot?: string;
 }) {
+  const displayPath = filePath ? toWorkspaceRelativePath(filePath, workspaceRoot) : undefined;
   const parsed = useMemo(() => parseReadToolOutput(content), [content]);
   const codeText = useMemo(() => parsed.lines.map((l) => l.text).join("\n"), [parsed]);
   const hasLineNumbers = parsed.lines.some((l) => l.lineNumber !== null);
@@ -305,7 +325,7 @@ function ReadFileView({
     <div className="tool-read-card">
       <div className="tool-read-header">
         <div className="tool-read-file-info">
-          {renderPathWithIcon(filePath || "file")}
+          {renderPathWithIcon(displayPath || "file", true, filePath || undefined)}
           {lang && <span className="tool-read-lang-badge">{lang}</span>}
           <span className="tool-read-line-count">{totalLines} line{totalLines === 1 ? "" : "s"}</span>
         </div>
@@ -522,10 +542,12 @@ function ShellOutputCode({
 function ToolOutputDisplay({
   item,
   filePath,
+  workspaceRoot,
   shellOutputMode,
 }: {
   item: Extract<TimelineItem, { kind: "tool" }>;
   filePath?: string;
+  workspaceRoot?: string;
   shellOutputMode?: ShellOutputMode;
 }) {
   const rawResult = item.result ?? "";
@@ -554,7 +576,7 @@ function ToolOutputDisplay({
   if (isRead) {
     return (
       <div className="tool-output-wrap">
-        <ReadFileView content={result} filePath={filePath} />
+        <ReadFileView content={result} filePath={filePath} workspaceRoot={workspaceRoot} />
       </div>
     );
   }
@@ -733,6 +755,7 @@ function ToolExpandedBodyInner({
   diff,
   filePath,
   workspaceId,
+  workspaceRoot,
   api,
   shellOutputMode,
 }: {
@@ -740,9 +763,11 @@ function ToolExpandedBodyInner({
   diff?: ToolDiff | null;
   filePath?: string;
   workspaceId?: string;
+  workspaceRoot?: string;
   api?: Pick<WorkspaceApi, "workspaceImageUrl">;
   shellOutputMode?: ShellOutputMode;
 }) {
+  const displayFilePath = filePath ? toWorkspaceRelativePath(filePath, workspaceRoot) : filePath;
   const input = getEffectiveToolInput(item);
   const isBash = item.name === "bash";
   const isRead = item.name === "read" || item.name === "readFile";
@@ -758,7 +783,8 @@ function ToolExpandedBodyInner({
   // no output yet also shows the skeleton here; once partial output
   // arrives it falls through to the progressive output below.
   if (isRunning && !renderable && !hasOutput && !item.error) {
-    const hint = String(input.path ?? input.filePath ?? input.filename ?? input.command ?? input.pattern ?? "");
+    const rawHint = String(input.path ?? input.filePath ?? input.filename ?? input.command ?? input.pattern ?? "");
+    const hint = toWorkspaceRelativePath(rawHint, workspaceRoot);
     return (
       <div className="tool-expanded-body">
         <ToolPendingBody item={item} hint={hint || undefined} />
@@ -772,7 +798,7 @@ function ToolExpandedBodyInner({
         <ReadToolImagePreview workspaceId={workspaceId} api={api} path={imagePath} />
       ) : null}
       {diff ? (
-        <ToolDiffPreview diff={diff} />
+        <ToolDiffPreview diff={diff} workspaceRoot={workspaceRoot} />
       ) : isBash && command ? (
         <div className="tool-command-block">
           <HighlightedCode
@@ -862,7 +888,7 @@ function ToolExpandedBodyInner({
         </div>
       ) : hasOutput ? (
         <>
-          <ToolOutputDisplay item={item} filePath={filePath} shellOutputMode={shellOutputMode} />
+          <ToolOutputDisplay item={item} filePath={displayFilePath} workspaceRoot={workspaceRoot} shellOutputMode={shellOutputMode} />
           {isRunning ? <ToolRunningFooter item={item} /> : null}
         </>
       ) : isRunning ? (
@@ -930,18 +956,21 @@ export interface ToolRowProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   workspaceId?: string;
+  /** Absolute workspace root used to relativize absolute file paths in the row. */
+  workspaceRoot?: string;
   api?: Pick<WorkspaceApi, "workspaceImageUrl">;
   /** Default shell output fullness for open bash rows. Per-row
    *  Show all/less still overrides. */
   shellOutputMode?: ShellOutputMode;
 }
 
-function ToolRowInner({ item, open, onOpenChange, workspaceId, api, shellOutputMode }: ToolRowProps) {
-  const { icon, title, subtitle, isPath } = getToolSummary(item);
+function ToolRowInner({ item, open, onOpenChange, workspaceId, workspaceRoot, api, shellOutputMode }: ToolRowProps) {
+  const { icon, title, subtitle, isPath } = getToolSummary(item, workspaceRoot);
   const effectiveInput = getEffectiveToolInput(item);
   const diff = getToolDiff({ name: item.name, input: effectiveInput }) ?? getToolDiff(item);
-  const effectivePath = String(effectiveInput.path ?? effectiveInput.filePath ?? effectiveInput.filename ?? "");
-  const filePath = subtitle || effectivePath || undefined;
+  const rawPath = String(effectiveInput.path ?? effectiveInput.filePath ?? effectiveInput.filename ?? "");
+  const filePath = subtitle || toWorkspaceRelativePath(rawPath, workspaceRoot) || undefined;
+  const fullPathForTitle = rawPath && filePath !== rawPath ? rawPath : undefined;
   const isRunning = item.status === "running";
 
   return (
@@ -956,7 +985,7 @@ function ToolRowInner({ item, open, onOpenChange, workspaceId, api, shellOutputM
           <span className="tool-row-icon">{isRunning ? <Spinner className="size-3.5 text-muted-foreground" /> : <ToolIcon kind={icon} />}</span>
           <span className="tool-row-title">{title}</span>
           {subtitle && isPath ? (
-            renderPathWithIcon(subtitle)
+            renderPathWithIcon(subtitle, true, fullPathForTitle ?? subtitle)
           ) : subtitle ? (
             <span className="tool-row-target-text" title={subtitle}>{subtitle}</span>
           ) : null}
@@ -979,7 +1008,7 @@ function ToolRowInner({ item, open, onOpenChange, workspaceId, api, shellOutputM
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent forceMount>
-        <ToolExpandedBody item={item} diff={diff} filePath={filePath} workspaceId={workspaceId} api={api} shellOutputMode={shellOutputMode} />
+        <ToolExpandedBody item={item} diff={diff} filePath={rawPath || filePath} workspaceId={workspaceId} workspaceRoot={workspaceRoot} api={api} shellOutputMode={shellOutputMode} />
       </CollapsibleContent>
     </Collapsible>
   );

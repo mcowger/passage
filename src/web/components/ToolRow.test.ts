@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { ToolRow, getReadToolImagePath, getShellOutputPreview, getToolSummary } from "./ToolRow.tsx";
+import { ToolRow, getReadToolImagePath, getShellOutputPreview, getToolSummary, toWorkspaceRelativePath } from "./ToolRow.tsx";
 import type { TimelineItem } from "../../shared/domain/agents.ts";
 
 describe("getToolSummary", () => {
@@ -76,6 +76,125 @@ describe("getToolSummary", () => {
     expect(summary.subtitle).toBe("src/web/components/*.tsx");
   });
 });
+
+describe("toWorkspaceRelativePath", () => {
+    test("strips the workspace root from absolute paths", () => {
+      expect(toWorkspaceRelativePath("/work/wt/packages/backend/src/routes/mcp/plexus/index.ts", "/work/wt")).toBe(
+        "packages/backend/src/routes/mcp/plexus/index.ts"
+      );
+    });
+
+    test("leaves paths outside the workspace unchanged", () => {
+      expect(toWorkspaceRelativePath("/tmp/test.ts", "/work/wt")).toBe("/tmp/test.ts");
+    });
+
+    test("leaves relative paths unchanged", () => {
+      expect(toWorkspaceRelativePath("src/a.ts", "/work/wt")).toBe("src/a.ts");
+    });
+
+    test("ignores a prefix that is not a path segment boundary", () => {
+      expect(toWorkspaceRelativePath("/work/wt-other/a.ts", "/work/wt")).toBe("/work/wt-other/a.ts");
+    });
+
+    test("tolerates a trailing slash on the workspace root", () => {
+      expect(toWorkspaceRelativePath("/work/wt/a.ts", "/work/wt/")).toBe("a.ts");
+    });
+  });
+
+describe("getToolSummary with workspaceRoot", () => {
+    test("relativizes absolute read/edit/write paths inside the workspace", () => {
+      const root = "/work/wt";
+      for (const name of ["read", "edit", "write"] as const) {
+        const item: Extract<TimelineItem, { kind: "tool" }> = {
+          id: `tool-${name}`,
+          kind: "tool",
+          name,
+          input: { path: `${root}/packages/backend/src/index.ts` },
+          status: "complete",
+        };
+        expect(getToolSummary(item, root).subtitle).toBe("packages/backend/src/index.ts");
+      }
+    });
+
+    test("keeps absolute paths outside the workspace", () => {
+      const item: Extract<TimelineItem, { kind: "tool" }> = {
+        id: "tool-outside",
+        kind: "tool",
+        name: "read",
+        input: { path: "/tmp/test.ts" },
+        status: "complete",
+      };
+      expect(getToolSummary(item, "/work/wt").subtitle).toBe("/tmp/test.ts");
+    });
+  });
+
+describe("ToolRow with workspaceRoot", () => {
+    const root = "/work/wt";
+    const abs = `${root}/packages/backend/src/index.ts`;
+
+    test("row shows the relative path with the absolute path as tooltip", () => {
+      const item: Extract<TimelineItem, { kind: "tool" }> = {
+        id: "tool-row-rel",
+        kind: "tool",
+        name: "read",
+        input: { path: abs },
+        result: "1: hello\n",
+        status: "complete",
+      };
+      const html = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(ToolRow, { item, workspaceRoot: root })
+      );
+      expect(html).toContain("packages/backend/src/index.ts");
+      expect(html).toContain(`title="${abs}"`);
+      expect(html).toContain('class="tool-path-dir">packages/backend/src/');
+    });
+
+    test("edit diff preview shows the relative path", () => {
+      const item: Extract<TimelineItem, { kind: "tool" }> = {
+        id: "tool-diff-rel",
+        kind: "tool",
+        name: "edit",
+        input: { filePath: abs, oldString: "a", newString: "b" },
+        status: "complete",
+      };
+      const html = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(ToolRow, { item, workspaceRoot: root, open: true })
+      );
+      expect(html).toContain("tool-diff-card");
+      expect(html).toContain("packages/backend/src/index.ts");
+    });
+
+    test("read output card shows the relative path", () => {
+      const item: Extract<TimelineItem, { kind: "tool" }> = {
+        id: "tool-read-rel",
+        kind: "tool",
+        name: "read",
+        input: { path: abs },
+        result: "1: hello\n",
+        status: "complete",
+      };
+      const html = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(ToolRow, { item, workspaceRoot: root, open: true })
+      );
+      expect(html).toContain("tool-read-card");
+      expect(html).toContain("packages/backend/src/index.ts");
+    });
+
+    test("row shows the relative path while args are still streaming", () => {
+      const streaming: Extract<TimelineItem, { kind: "tool" }> = {
+        id: "tool-pending-rel",
+        kind: "tool",
+        name: "edit",
+        input: { rawInput: `{"path":"${abs}"` },
+        status: "running",
+      } as any;
+      const html = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(ToolRow, { item: streaming, workspaceRoot: root, open: true })
+      );
+      expect(html).toContain("packages/backend/src/index.ts");
+      expect(html).toContain('class="tool-path-dir">packages/backend/src/');
+    });
+  });
 
 describe("ToolRow component", () => {
   test("recognizes absolute image paths from model reads", () => {

@@ -91,6 +91,8 @@ export type AgentPanelProps = {
    *  buttons re-check status even when live WS invalidations were missed
    *  (e.g. after a browser refresh). */
   gitStatusRefreshKey?: number;
+  /** Absolute workspace root used to relativize absolute tool paths. */
+  workspaceRoot?: string;
 };
 
 // Re-exported for existing importers; new code should import from the
@@ -117,6 +119,7 @@ export function AgentPanel({
   streamActivityRef,
   onWorkspaceDeleted,
   gitStatusRefreshKey,
+  workspaceRoot,
 }: AgentPanelProps) {
   const effectiveHistory = previewHistory ?? history;
   // Distinct from `error` (a failed agent/history fetch): this is the agent
@@ -450,6 +453,7 @@ export function AgentPanel({
                   agentId={agent.id}
                   api={api}
                   workspaceId={agent.workspaceId}
+                  workspaceRoot={workspaceRoot}
                   expansion={sessionExpansion}
                   latestIds={latestIds}
                   manualToggles={manualToggles}

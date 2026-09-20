@@ -207,6 +207,7 @@ export interface TimelineRowProps {
   agentId: string;
   api: WorkspaceApi;
   workspaceId?: string;
+  workspaceRoot?: string;
   expansion?: TimelineExpansionSettings;
   latestIds?: LatestTimelineIds;
   manualToggles?: Record<string, boolean>;
@@ -218,6 +219,7 @@ export const TimelineRow = memo(function TimelineRow({
   agentId,
   api,
   workspaceId,
+  workspaceRoot,
   expansion = DEFAULT_TIMELINE_EXPANSION,
   latestIds = { latestToolIds: {} },
   manualToggles = {},
@@ -232,6 +234,7 @@ export const TimelineRow = memo(function TimelineRow({
         open={isExpanded}
         onOpenChange={(open) => onToggleManual?.(item.id, open)}
         workspaceId={workspaceId}
+        workspaceRoot={workspaceRoot}
         api={api}
         shellOutputMode={expansion.shellOutput ?? "preview"}
       />

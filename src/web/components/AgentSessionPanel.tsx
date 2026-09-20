@@ -21,6 +21,8 @@ export type AgentSessionPanelProps = {
   previewHistory?: AgentHistory;
   settings?: WorkspaceSettings;
   onWorkspaceDeleted?: () => void | Promise<void>;
+  /** Absolute workspace root used to relativize absolute tool paths. */
+  workspaceRoot?: string;
 };
 
 /** Timeline rows fetched for the initial render and on every full reload.
@@ -199,7 +201,7 @@ export function prependOlderHistory(current: AgentHistory | undefined, older: Ag
   return { ...current, timeline: [...olderRows, ...current.timeline] };
 }
 
-export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, previewHistory, settings, onWorkspaceDeleted }: AgentSessionPanelProps) {
+export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, previewHistory, settings, onWorkspaceDeleted, workspaceRoot }: AgentSessionPanelProps) {
   // Hydrate instantly from the background keep-alive when this agent was
   // recently visible: the cached timeline paints on the first frame and the
   // mount load below reconciles silently instead of flashing a spinner.
@@ -423,6 +425,7 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       }}
       previewHistory={previewHistory}
       gitStatusRefreshKey={gitStatusRefreshKey}
+      workspaceRoot={workspaceRoot}
       hasMoreHistory={nextBefore !== undefined}
       loadingMoreHistory={loadingOlder}
       onLoadMoreHistory={loadOlder}
