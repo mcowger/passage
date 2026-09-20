@@ -1,6 +1,7 @@
 import { memo, useEffect, useState, type CSSProperties } from "react";
 import { createHighlighterCore, type HighlighterCore, type ThemedToken } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import { recordHighlight } from "../diagnostics/flightRecorder.ts";
 
 import bashLang from "shiki/langs/bash.mjs";
 import jsonLang from "shiki/langs/json.mjs";
@@ -104,17 +105,32 @@ function getCachedTokens(
   const key = `${lang}:${theme}:${code.length}:${fastHash(code)}`;
   const cached = tokenCache.get(key);
   if (cached) {
+    // Cache hit: no highlight work. Reported with zero duration so the
+    // flight recorder can distinguish hit rate from real pass cost.
+    recordHighlight(0, true);
     return cached;
   }
 
   const loadedLangs = highlighter.getLoadedLanguages();
   const targetLang = loadedLangs.includes(lang) ? lang : "text";
+  let startedAt = 0;
+  try {
+    startedAt = typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+  } catch {
+    startedAt = 0;
+  }
   try {
     const result = highlighter.codeToTokens(code.trimEnd(), {
       lang: targetLang,
       theme,
     });
     tokenCache.set(key, result.tokens);
+    try {
+      const endedAt = typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+      recordHighlight(Math.max(0, endedAt - startedAt), false);
+    } catch {
+      // Timing must never break rendering.
+    }
     return result.tokens;
   } catch {
     return null;

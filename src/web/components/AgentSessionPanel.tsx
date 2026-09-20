@@ -4,6 +4,13 @@ import { timelineItemPayloadSchema } from "../../shared/domain/agents.ts";
 import type { WorkspaceSettings } from "../../shared/domain/settings.ts";
 import { subscribeAgent } from "../agentSocket.ts";
 import { AgentKeepAliveStore, type KeepAliveSnapshot } from "../agentKeepAlive.ts";
+import {
+  estimateHistoryChars,
+  estimateTimelineRowChars,
+  noteHistoryBaseline,
+  noteTranscriptRow,
+  setForegroundAgent,
+} from "../diagnostics/flightRecorder.ts";
 
 /** Process-wide background keep-alive for recently viewed agents (see
  *  `agentKeepAlive.ts`). Built with this module's own `subscribeAgent`
@@ -261,6 +268,11 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       isCurrent: () => currentGeneration === generation.current,
       onSummary: updateAgent,
       onHistory: (loaded, loadedNextBefore) => {
+        // Flight recorder: a replaced timeline re-baselines the incremental
+        // size counters (one walk at this mutation point, never per snapshot).
+        if (historyReplaced(historyRef.current, loaded) && loaded) {
+          noteHistoryBaseline(initialAgent.id, loaded.timeline.length, estimateHistoryChars(loaded.timeline));
+        }
         if (historyReplaced(historyRef.current, loaded)) setNextBefore(loadedNextBefore);
         setHistory((current) => mergeLoadedHistory(current, loaded));
       },
@@ -294,6 +306,11 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
       const result = await api.history(initialAgent.id, nextBefore, HISTORY_PAGE_LIMIT);
       if (currentGeneration !== generation.current) return;
       const older = "unpersisted" in result ? undefined : result.history;
+      // Flight recorder: backfilled rows genuinely grow the retained
+      // transcript, so each counts once toward the incremental totals.
+      if (older) {
+        for (const row of older.timeline) noteTranscriptRow(initialAgent.id, estimateTimelineRowChars(row));
+      }
       setHistory((current) => prependOlderHistory(current, older));
       setNextBefore("unpersisted" in result ? undefined : result.nextBefore);
     } catch {
@@ -309,6 +326,13 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
     // paints the cached timeline immediately; the load below still runs
     // (non-initial, no spinner) to reconcile summary/usage/capabilities.
     const hydration = selectTakeHydration(agentKeepAlive.take(initialAgent.id));
+    // Flight recorder: this panel owns the foreground socket from here.
+    // Baseline the incremental counters from the hydrated timeline (one
+    // walk at this mutation point); live row_upserts accumulate from there.
+    setForegroundAgent(initialAgent.id, true);
+    if (hydration.history) {
+      noteHistoryBaseline(initialAgent.id, hydration.history.timeline.length, estimateHistoryChars(hydration.history.timeline));
+    }
     setAgent(initialAgent);
     setHistory(hydration.history);
     setCapabilities(hydration.capabilities);
@@ -381,7 +405,12 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
           }
           if (type === "row_upsert" && payload) {
             const parsed = timelineItemPayloadSchema.safeParse(payload.row);
-            if (parsed.success) setHistory((current) => applyRowUpsert(current, parsed.data));
+            if (parsed.success) {
+              // Flight recorder: incremental size accounting at the mutation
+              // point (no history walking); payload text stays local.
+              noteTranscriptRow(initialAgent.id, estimateTimelineRowChars(parsed.data));
+              setHistory((current) => applyRowUpsert(current, parsed.data));
+            }
           } else {
             setHistory((current) => applyUsageEvent(current, payload));
           }
@@ -393,6 +422,9 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
     );
     return () => {
       subscription.close();
+      // Flight recorder: the foreground socket is gone; the keep-alive
+      // below may restart a background one from the same sequence.
+      setForegroundAgent(initialAgent.id, false);
       // Park this agent in the background keep-alive (subject to the
       // desktop/mobile budget) so a revisit repaints from cache instead of
       // paying a full reload. Summary transitions keep flowing to the

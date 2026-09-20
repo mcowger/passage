@@ -9,6 +9,11 @@ import type { AgentSocket, AgentSocketState } from "./agentSocket.ts";
 import type { ConnectionHealth } from "./socketLifecycle.ts";
 import { computeIsMobile } from "./app/appHelpers.tsx";
 import { applyRowUpsert, applyUsageEvent } from "./lib/transcript-apply.ts";
+import {
+  estimateTimelineRowChars,
+  noteTranscriptRow,
+  reportBackgroundAgents,
+} from "./diagnostics/flightRecorder.ts";
 
 /**
  * Background keep-alive for recently viewed agents.
@@ -159,7 +164,18 @@ export class AgentKeepAliveStore {
     if (!entry) return undefined;
     entry.socket?.close();
     this.entries.delete(agentId);
+    this.reportBackground();
     return entry.snapshot;
+  }
+
+  /** Flight recorder: background-owned agent ids (row/byte totals live in
+   *  the recorder's incremental counters, so this stays O(entries)). */
+  private reportBackground(): void {
+    try {
+      reportBackgroundAgents([...this.entries.keys()]);
+    } catch {
+      // Diagnostics must never break the keep-alive.
+    }
   }
 
   /**
@@ -219,6 +235,7 @@ export class AgentKeepAliveStore {
       this.entries.get(victim)?.socket?.close();
       this.entries.delete(victim);
     }
+    this.reportBackground();
   }
 
   /** Drop every entry from other workspaces (workspace switch) and arm the
@@ -232,6 +249,7 @@ export class AgentKeepAliveStore {
         this.entries.delete(id);
       }
     }
+    this.reportBackground();
   }
 
   clear(): void {
@@ -239,6 +257,7 @@ export class AgentKeepAliveStore {
     this.activeWorkspace = undefined;
     for (const entry of this.entries.values()) entry.socket?.close();
     this.entries.clear();
+    this.reportBackground();
   }
 
   private onGap(agentId: string): Promise<void> {
@@ -312,6 +331,13 @@ export class AgentKeepAliveStore {
         if (type === "row_upsert" && payload) {
           const parsed = timelineItemPayloadSchema.safeParse(payload.row);
           if (parsed.success) {
+            // Flight recorder: incremental background size accounting at
+            // the mutation point; payload text stays local.
+            try {
+              noteTranscriptRow(agentId, estimateTimelineRowChars(parsed.data));
+            } catch {
+              // Diagnostics must never break the keep-alive.
+            }
             entry.snapshot.history = applyRowUpsert(entry.snapshot.history, parsed.data);
           }
         } else {

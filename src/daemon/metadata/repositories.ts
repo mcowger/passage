@@ -158,7 +158,46 @@ export class WebPreviewRepository {
   delete(id: string): void { this.db.query("DELETE FROM web_previews WHERE id=?").run(id); }
 }
 
+export type DiagnosticEventRow = { pageInstanceId: string; seq: number; clientTsMs: number; receivedAtMs: number; kind: string; payloadJson: string };
+
+/**
+ * Bounded flight-recorder history for blank-screen forensics.
+ *
+ * Insert + prune run in one transaction so concurrent browser tabs cannot
+ * interleave into unbounded growth, and `INSERT OR IGNORE` on
+ * (page_instance_id, seq) makes duplicate deliveries idempotent. Retention
+ * is row-count + age based (defaults below); per-row byte-size accounting
+ * is deliberately not implemented -- the wire size limit bounds individual
+ * events instead.
+ */
+export class DiagnosticRepository {
+  constructor(private readonly db: Database) {}
+  /** Newest rows retained; older rows are pruned on every insert. */
+  static readonly MAX_ROWS = 10_000;
+  /** Rows older than this are pruned on every insert. */
+  static readonly RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+  insertBatch(events: DiagnosticEventRow[], options?: { maxRows?: number; retentionMs?: number }): number {
+    const maxRows = options?.maxRows ?? DiagnosticRepository.MAX_ROWS;
+    const cutoff = Date.now() - (options?.retentionMs ?? DiagnosticRepository.RETENTION_MS);
+    const insert = this.db.query("INSERT OR IGNORE INTO diagnostic_events (page_instance_id, seq, client_ts_ms, received_at_ms, kind, payload_json) VALUES (?, ?, ?, ?, ?, ?)");
+    const prune = this.db.query("DELETE FROM diagnostic_events WHERE received_at_ms < ? OR id NOT IN (SELECT id FROM diagnostic_events ORDER BY id DESC LIMIT ?)");
+    const transaction = this.db.transaction(() => {
+      let stored = 0;
+      for (const event of events) {
+        const result = insert.run(event.pageInstanceId, event.seq, event.clientTsMs, event.receivedAtMs, event.kind, event.payloadJson);
+        stored += Number(result.changes);
+      }
+      prune.run(cutoff, maxRows);
+      return stored;
+    });
+    return transaction() as number;
+  }
+  count(): number {
+    return this.db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM diagnostic_events").get()?.count ?? 0;
+  }
+}
+
 export class MetadataRepositories {
-  readonly projects: ProjectRepository; readonly worktreeLocations: WorktreeLocationRepository; readonly workspaces: WorkspaceRepository; readonly agents: AgentRepository; readonly webPreviews: WebPreviewRepository; readonly appSettings: AppSettingsRepository; readonly pushSubscriptions: PushSubscriptionRepository; readonly scriptRuntimes: ScriptRuntimeRepository;
-  constructor(db: Database) { this.projects = new ProjectRepository(db); this.worktreeLocations = new WorktreeLocationRepository(db); this.workspaces = new WorkspaceRepository(db); this.agents = new AgentRepository(db); this.webPreviews = new WebPreviewRepository(db); this.appSettings = new AppSettingsRepository(db); this.pushSubscriptions = new PushSubscriptionRepository(db); this.scriptRuntimes = new ScriptRuntimeRepository(db); }
+  readonly projects: ProjectRepository; readonly worktreeLocations: WorktreeLocationRepository; readonly workspaces: WorkspaceRepository; readonly agents: AgentRepository; readonly webPreviews: WebPreviewRepository; readonly appSettings: AppSettingsRepository; readonly pushSubscriptions: PushSubscriptionRepository; readonly scriptRuntimes: ScriptRuntimeRepository; readonly diagnostics: DiagnosticRepository;
+  constructor(db: Database) { this.projects = new ProjectRepository(db); this.worktreeLocations = new WorktreeLocationRepository(db); this.workspaces = new WorkspaceRepository(db); this.agents = new AgentRepository(db); this.webPreviews = new WebPreviewRepository(db); this.appSettings = new AppSettingsRepository(db); this.pushSubscriptions = new PushSubscriptionRepository(db); this.scriptRuntimes = new ScriptRuntimeRepository(db); this.diagnostics = new DiagnosticRepository(db); }
 }

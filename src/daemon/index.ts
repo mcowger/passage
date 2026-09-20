@@ -34,6 +34,7 @@ import { isAllowedPreviewRequest } from "./previews/relay.ts";
 import { createPreviewRoutes } from "./http/previews.ts";
 import { PushService } from "./push/service.ts";
 import { createPushRoutes } from "./push/routes.ts";
+import { createDiagnosticRoutes } from "./http/diagnostics.ts";
 import { wireAgentPushNotifications } from "./push/notifier.ts";
 import { configureLogging, errorFields, logger } from "./logging.ts";
 import {
@@ -344,6 +345,7 @@ app.route("/", createWorkspaceScriptRoutes(workspaceScriptsService));
 app.route("/", createTerminalRoutes(terminalManager));
 app.route("/", createPreviewRoutes(previewManager, workspaceEvents, { serverPort: port }));
 app.route("/", createPushRoutes(pushService));
+app.route("/", createDiagnosticRoutes(repositories.diagnostics));
 app.route("/", createAgentRoutes(agentService));
 app.route("/", createModelRoutes());
 app.route("/", createTranscriptPreviewRoutes());

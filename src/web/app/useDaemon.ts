@@ -4,6 +4,7 @@ import { setRootBuildIdentifier } from "../root-error.ts";
 import type { ConnectionHealth } from "../socketLifecycle.ts";
 import type { WorkspaceApi } from "../api.ts";
 import { subscribeDaemon } from "../daemonSocket.ts";
+import { setFlightBuildIdentifier } from "../diagnostics/flightRecorder.ts";
 
 /**
  * Daemon build identity and WS transport health.
@@ -23,10 +24,13 @@ export function useDaemon(api: WorkspaceApi) {
       setBuild(daemon.build);
       // Feed the root-error diagnostics with the same build identity the
       // sidebar shows; falls back to "unknown" until this resolves.
-      setRootBuildIdentifier(formatBuildLabel(daemon.build));
+      const label = formatBuildLabel(daemon.build);
+      setRootBuildIdentifier(label);
+      setFlightBuildIdentifier(label);
     } catch {
       setBuild(null);
       setRootBuildIdentifier(undefined);
+      setFlightBuildIdentifier(null);
     }
   }, [api]);
 

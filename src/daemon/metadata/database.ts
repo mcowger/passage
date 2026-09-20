@@ -98,6 +98,24 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE agents ADD COLUMN stop_reason TEXT NULL CHECK (stop_reason IS NULL OR stop_reason IN ('shutdown', 'user_abort', 'crash'));
     `,
   },
+  {
+    version: 8,
+    name: "diagnostic_events",
+    sql: `
+      CREATE TABLE diagnostic_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        page_instance_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        client_ts_ms INTEGER NOT NULL,
+        received_at_ms INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('page_started', 'snapshot', 'lifecycle')),
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        UNIQUE (page_instance_id, seq)
+      );
+      CREATE INDEX idx_diagnostic_events_page ON diagnostic_events(page_instance_id, seq);
+      CREATE INDEX idx_diagnostic_events_received ON diagnostic_events(received_at_ms);
+    `,
+  },
 ];
 
 export class MetadataStore {

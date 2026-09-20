@@ -15,6 +15,7 @@ import {
   webSocketUrl,
   type ConnectionHealth,
 } from "./socketLifecycle.ts";
+import { noteSocketEvent } from "./diagnostics/flightRecorder.ts";
 
 const RECONNECT_DELAY_MS = 800;
 
@@ -118,6 +119,7 @@ export function subscribeAgent(
       state = { ...state, connected: true, snapshotRequired: false };
       current.send(JSON.stringify(subscribeEnvelope(agentId, state.sequence)));
       heartbeat.start();
+      noteSocketEvent("agent", "open");
     });
     current.addEventListener("message", (message) => {
       if (generation !== myGeneration) return;
@@ -145,6 +147,7 @@ export function subscribeAgent(
       heartbeat.stop();
       state = { ...state, connected: false };
       socket = undefined;
+      noteSocketEvent("agent", "close");
       setHealth("offline");
       if (!stopped) {
         void onReconcile().catch(() => undefined);
@@ -160,6 +163,7 @@ export function subscribeAgent(
    *  its close is requested but never awaited. */
   const forceReconnect = () => {
     if (stopped) return;
+    noteSocketEvent("agent", "reconnect");
     heartbeat.stop();
     const stale = socket;
     socket = undefined;

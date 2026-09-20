@@ -48,6 +48,7 @@ import { Toaster } from "./components/ui/sonner.tsx";
 import { toast } from "sonner";
 import { RootErrorBoundary } from "./components/RootErrorBoundary.tsx";
 import { createRootErrorCallbacks, installGlobalRootErrorListeners } from "./root-error.ts";
+import { initFlightRecorder } from "./diagnostics/flightRecorder.ts";
 import "./styles.css";
 
 import {
@@ -964,6 +965,9 @@ if (!root) throw new Error("Passage root element is missing");
 // diagnostics without disturbing a healthy tree. Install-once guarded so
 // development hot reload re-runs don't stack duplicate listeners.
 installGlobalRootErrorListeners();
+// Always-on diagnostic flight recorder: compact snapshots to the daemon's
+// SQLite for blank-screen forensics. Install-once guarded for hot reload.
+initFlightRecorder();
 // createRoot error callbacks share the boundary's reporting helper (with
 // dedupe); they only record diagnostics and never touch React state. Note:
 // no try/catch around render() here — it cannot catch React rendering

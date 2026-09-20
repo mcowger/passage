@@ -15,6 +15,7 @@ import {
   webSocketUrl,
   type ConnectionHealth,
 } from "./socketLifecycle.ts";
+import { noteSocketEvent } from "./diagnostics/flightRecorder.ts";
 
 const RECONNECT_DELAY_MS = 800;
 
@@ -112,6 +113,7 @@ export function subscribeDaemon(
       state = { ...state, connected: true, snapshotRequired: false };
       current.send(JSON.stringify(subscribeEnvelope(state.sequence)));
       heartbeat.start();
+      noteSocketEvent("daemon", "open");
     });
     current.addEventListener("message", (message) => {
       if (generation !== myGeneration) return;
@@ -142,6 +144,7 @@ export function subscribeDaemon(
       heartbeat.stop();
       state = { ...state, connected: false };
       socket = undefined;
+      noteSocketEvent("daemon", "close");
       setHealth("offline");
       if (!stopped) {
         void onReconcile().catch(() => undefined);
@@ -152,6 +155,7 @@ export function subscribeDaemon(
 
   const forceReconnect = () => {
     if (stopped) return;
+    noteSocketEvent("daemon", "reconnect");
     heartbeat.stop();
     const stale = socket;
     socket = undefined;
