@@ -334,6 +334,9 @@ function AgentComposerInner({
     };
   });
 
+  const cacheHitInput = (usage?.input ?? 0) + (usage?.cacheRead ?? 0) + (usage?.cacheWrite ?? 0);
+  const cacheHitRate = cacheHitInput > 0 ? ((usage?.cacheRead ?? 0) / cacheHitInput) * 100 : 0;
+
   return (
     <footer className="composer-container">
       <div className="composer-meta-line">
@@ -405,6 +408,10 @@ function AgentComposerInner({
                   <div className="ctx-detail-row">
                     <span>Cache read</span>
                     <span>{formatCompactTokens(usage?.cacheRead ?? 0)}</span>
+                  </div>
+                  <div className="ctx-detail-row">
+                    <span>Cache hit rate</span>
+                    <span>{cacheHitRate.toFixed(1)}%</span>
                   </div>
                   {usage?.cost !== undefined && usage.cost > 0 && (
                     <div className="ctx-detail-row total">
