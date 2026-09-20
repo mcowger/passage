@@ -40,11 +40,12 @@ function run(command: string[]): void {
   }
 }
 
-// 1-2. Build first: a build failure leaves the running service untouched.
+// 1-3. Install deps (frozen) then build: a failure leaves the running service untouched.
+run([process.execPath, "install", "--frozen-lockfile"]);
 run([process.execPath, "run", "build"]);
 run([process.execPath, "run", "package"]);
 
-// 3. Atomic install while the old daemon is still running.
+// 4. Atomic install while the old daemon is still running.
 copyFileSync("./dist/passage", staged);
 chmodSync(staged, 0o755);
 renameSync(staged, installed);
@@ -55,7 +56,7 @@ if (noRestart) {
   process.exit(0);
 }
 
-// 4. Detached restart: reparented via setsid, stdio detached, delayed so
+// 5. Detached restart: reparented via setsid, stdio detached, delayed so
 //    this script (and its PTY output) is gone before the daemon dies.
 //    argv passing (not string interpolation) keeps the unit name safe.
 try {
