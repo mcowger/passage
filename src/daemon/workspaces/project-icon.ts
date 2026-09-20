@@ -381,11 +381,224 @@ async function collectDirIconsRecursively(
 }
 
 /**
+ * HTML-declared icon detection. The filename walk below ignores `src/` (and
+ * `lib/`) so component-asset SVGs never shadow a real favicon — but that
+ * also hides legitimate app icons such as `src/web/icon.svg`. Those icons
+ * are always referenced explicitly from their page's `<link rel="icon">`
+ * (and often a web-manifest), so resolve them directly from the markup
+ * instead of opening the whole `src/` tree to filename matching.
+ */
+
+/** `src`/`lib` hold app code, not vendored assets: allow them here only. */
+const HTML_SEARCH_IGNORED_DIRS = IGNORED_DIRS.filter((dir) => dir !== "src" && dir !== "lib");
+
+const MANIFEST_FILENAMES = ["manifest.webmanifest", "manifest.json", "site.webmanifest"];
+
+const MAX_HTML_FILES = 10;
+const MAX_HTML_SIZE = 256 * 1024; // 256KB max per HTML/manifest file
+
+/** Extract `href`s from `<link>` tags whose `rel` contains "icon". */
+export function extractHtmlIconHrefs(html: string): string[] {
+  const hrefs: string[] = [];
+  for (const match of html.matchAll(/<link\b[^>]*>/gi)) {
+    const tag = match[0];
+    const rel = tag.match(/\brel\s*=\s*["']([^"']*)["']/i)?.[1];
+    if (!rel || !rel.toLowerCase().includes("icon")) continue;
+    const href = tag.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (href) hrefs.push(href);
+  }
+  return hrefs;
+}
+
+/** Extract the web-manifest `href` from `<link rel="manifest">`, if any. */
+export function extractHtmlManifestHref(html: string): string | null {
+  for (const match of html.matchAll(/<link\b[^>]*>/gi)) {
+    const tag = match[0];
+    const rel = tag.match(/\brel\s*=\s*["']([^"']*)["']/i)?.[1];
+    if (!rel || rel.trim().toLowerCase() !== "manifest") continue;
+    const href = tag.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (href) return href;
+  }
+  return null;
+}
+
+/** Extract icon `src`s from a web-manifest JSON document. */
+export function extractManifestIconSrcs(manifestText: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(manifestText);
+    if (typeof parsed !== "object" || parsed === null) return [];
+    const icons = (parsed as { icons?: unknown }).icons;
+    if (!Array.isArray(icons)) return [];
+    const srcs: string[] = [];
+    for (const entry of icons) {
+      if (typeof entry === "string") {
+        srcs.push(entry);
+      } else if (typeof entry === "object" && entry !== null) {
+        const src = (entry as { src?: unknown }).src;
+        if (typeof src === "string") srcs.push(src);
+      }
+    }
+    return srcs;
+  } catch {
+    return [];
+  }
+}
+
+/** Strip query/hash; return null for remote, data:, or empty references. */
+function cleanIconRef(ref: string): string | null {
+  const trimmed = ref.trim();
+  if (!trimmed || trimmed.startsWith("#")) return null;
+  const lower = trimmed.toLowerCase();
+  if (
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.startsWith("//") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("blob:")
+  ) {
+    return null;
+  }
+  const withoutQuery = trimmed.split(/[?#]/)[0]?.trim();
+  return withoutQuery ? withoutQuery : null;
+}
+
+/**
+ * Resolve an HTML/manifest-relative icon reference to on-disk candidates.
+ * Absolute (`/icon.svg`) references are serve-root-relative: the file may
+ * live in `public/`, `src/web/`, `src/`, or the project root, so try each.
+ * Relative references resolve against the referencing file's directory.
+ */
+function resolveIconRefCandidates(ref: string, baseDir: string, projectDir: string): string[] {
+  const cleaned = cleanIconRef(ref);
+  if (!cleaned) return [];
+  if (cleaned.startsWith("/")) {
+    const rel = cleaned.slice(1);
+    if (!rel) return [];
+    return [
+      join(projectDir, "public", rel),
+      join(projectDir, "src", "web", rel),
+      join(projectDir, "src", rel),
+      join(projectDir, rel),
+      join(baseDir, rel),
+    ];
+  }
+  return [join(baseDir, cleaned)];
+}
+
+async function findIndexHtmlFiles(projectDir: string, maxDepth: number): Promise<string[]> {
+  const ignored = new Set(HTML_SEARCH_IGNORED_DIRS);
+  const found: string[] = [];
+  const visit = async (dir: string, depth: number): Promise<void> => {
+    if (depth > maxDepth || found.length >= MAX_HTML_FILES) return;
+    let entries: string[];
+    try {
+      entries = await readdir(dir);
+    } catch {
+      return;
+    }
+    if (entries.includes("index.html")) {
+      const fullPath = join(dir, "index.html");
+      if (await isExistingFile(fullPath)) found.push(fullPath);
+    }
+    const subdirs = entries.filter((entry) => !ignored.has(entry)).map((entry) => join(dir, entry));
+    const isDirResults = await Promise.all(subdirs.map((p) => isExistingDirectory(p)));
+    for (let i = 0; i < subdirs.length; i += 1) {
+      if (isDirResults[i] && found.length < MAX_HTML_FILES) {
+        const sub = subdirs[i];
+        if (sub) await visit(sub, depth + 1);
+      }
+    }
+  };
+  await visit(projectDir, 0);
+  // Shallow pages first: the top-level app shell outranks nested demos.
+  found.sort((a, b) => a.length - b.length);
+  return found;
+}
+
+async function readIfSmall(path: string): Promise<string | null> {
+  try {
+    const stats = await stat(path);
+    if (!stats.isFile() || stats.size > MAX_HTML_SIZE) return null;
+    return await readFile(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Icon files declared by `<link rel="icon">` / web-manifests, best first.
+ * Returned paths may not exist — `getProjectIcon` validates each candidate
+ * (existence, size, squareness, root containment) before use.
+ */
+async function collectDeclaredIconCandidates(
+  projectDir: string,
+  maxDepth: number,
+): Promise<string[]> {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const push = (path: string) => {
+    if (!seen.has(path)) {
+      seen.add(path);
+      candidates.push(path);
+    }
+  };
+  const pushManifestIcons = async (manifestPath: string, manifestDir: string) => {
+    const text = await readIfSmall(manifestPath);
+    if (text === null) return;
+    for (const src of extractManifestIconSrcs(text)) {
+      for (const candidate of resolveIconRefCandidates(src, manifestDir, projectDir)) {
+        push(candidate);
+      }
+    }
+  };
+
+  const htmlFiles = await findIndexHtmlFiles(projectDir, maxDepth);
+  for (const htmlFile of htmlFiles) {
+    const text = await readIfSmall(htmlFile);
+    if (text === null) continue;
+    const baseDir = join(htmlFile, "..");
+    for (const href of extractHtmlIconHrefs(text)) {
+      for (const candidate of resolveIconRefCandidates(href, baseDir, projectDir)) {
+        push(candidate);
+      }
+    }
+    const manifestHref = extractHtmlManifestHref(text);
+    if (manifestHref) {
+      for (const manifestPath of resolveIconRefCandidates(manifestHref, baseDir, projectDir)) {
+        if (await isExistingFile(manifestPath)) {
+          await pushManifestIcons(manifestPath, join(manifestPath, ".."));
+          break;
+        }
+      }
+    }
+  }
+
+  // Fallback for manifests with no referencing page found (e.g. the HTML
+  // itself lives deeper than maxDepth): check conventional locations.
+  if (candidates.length === 0) {
+    const bases = [projectDir, join(projectDir, "public"), join(projectDir, "src", "web"), join(projectDir, "src")];
+    for (const base of bases) {
+      for (const name of MANIFEST_FILENAMES) {
+        const manifestPath = join(base, name);
+        if (await isExistingFile(manifestPath)) {
+          await pushManifestIcons(manifestPath, base);
+          if (candidates.length > 0) break;
+        }
+      }
+      if (candidates.length > 0) break;
+    }
+  }
+
+  const existing = await Promise.all(candidates.map((p) => isExistingFile(p)));
+  return candidates.filter((_, index) => existing[index]);
+}
+
+/**
  * Find project icon/favicon candidates in the given directory, in priority
- * order: priority dirs first, then monorepo package dirs, then the root
- * fallback scan. Callers validate each candidate (size, shape) and use the
- * first usable one, so an unusable higher-priority file does not shadow a
- * valid lower-priority one.
+ * order: HTML/manifest-declared icons first, then priority dirs, then
+ * monorepo package dirs, then the root fallback scan. Callers validate each
+ * candidate (size, shape) and use the first usable one, so an unusable
+ * higher-priority file does not shadow a valid lower-priority one.
  *
  * @param projectDir - The root directory of the project to search
  * @param maxDepth - Maximum depth below projectDir to descend (default: 3).
@@ -396,6 +609,11 @@ export async function findProjectIcons(
   projectDir: string,
   maxDepth: number = 3,
 ): Promise<string[]> {
+  // Explicit `<link rel="icon">` / manifest references outrank filename
+  // guesses: they are the icon the app actually serves (and the only
+  // signal when the icon lives under an ignored dir such as `src/`).
+  const declaredMatches = await collectDeclaredIconCandidates(projectDir, maxDepth);
+
   const ignoredDirsSet = new Set(IGNORED_DIRS);
 
   // First search priority directories
@@ -444,13 +662,20 @@ export async function findProjectIcons(
   // Then search root and any other non-priority directories
   const rootMatches = await collectRootIcons(projectDir, maxDepth);
 
-  return [...priorityMatches, ...monoMatches, ...rootMatches];
+  const seen = new Set(declaredMatches);
+  const rest = [...priorityMatches, ...monoMatches, ...rootMatches].filter((p) => {
+    if (seen.has(p)) return false;
+    seen.add(p);
+    return true;
+  });
+  return [...declaredMatches, ...rest];
 }
 
 /**
  * Find a project icon/favicon in the given directory: the first candidate
- * from findProjectIcons, or null if there are none. Note this is a filename
- * match only — use getProjectIcon to get a validated, readable icon.
+ * from findProjectIcons, or null if there are none. Prefers icons declared
+ * by `<link rel="icon">` / web-manifests, then falls back to filename
+ * matching — use getProjectIcon to get a validated, readable icon.
  */
 export async function findProjectIcon(
   projectDir: string,

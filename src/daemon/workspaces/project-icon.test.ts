@@ -2,7 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { extractIcoPngFrame, findProjectIcon, getProjectIcon } from "./project-icon.ts";
+import {
+  extractHtmlIconHrefs,
+  extractHtmlManifestHref,
+  extractManifestIconSrcs,
+  extractIcoPngFrame,
+  findProjectIcon,
+  getProjectIcon,
+} from "./project-icon.ts";
 
 /** Minimal 1x1 PNG (square) with the IHDR width/height patched in. */
 function png(width: number, height: number): Buffer {
@@ -104,8 +111,7 @@ describe("findProjectIcon", () => {
     }
   });
 
-  test("honors maxDepth across every search branch", async () => {
-    const root = await makeRoot();
+  test("honors maxDepth across every search branch", async () => {    const root = await makeRoot();
     try {
       await mkdir(join(root, "brand"), { recursive: true });
       await writeFile(join(root, "brand", "icon.svg"), "<svg></svg>");
@@ -215,5 +221,105 @@ describe("getProjectIcon", () => {
       await rm(root, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });
     }
+  });
+});
+
+describe("declared icons (index.html / manifest)", () => {
+  test("finds an icon under src/ declared by index.html", async () => {
+    // Passage layout: src/web/index.html references ./icon.svg, but `src/`
+    // is ignored by the filename walk.
+    const root = await makeRoot();
+    try {
+      await mkdir(join(root, "src", "web"), { recursive: true });
+      await writeFile(
+        join(root, "src", "web", "index.html"),
+        '<link rel="icon" type="image/svg+xml" href="./icon.svg" />',
+      );
+      await writeFile(join(root, "src", "web", "icon.svg"), "<svg></svg>");
+      expect(await findProjectIcon(root)).toBe(join(root, "src", "web", "icon.svg"));
+      const icon = await getProjectIcon(root);
+      expect(icon?.mimeType).toBe("image/svg+xml");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("declared icon outranks filename matches", async () => {
+    const root = await makeRoot();
+    try {
+      await mkdir(join(root, "public"), { recursive: true });
+      await writeFile(join(root, "public", "favicon.png"), png(16, 16));
+      await mkdir(join(root, "src", "web"), { recursive: true });
+      const declared = png(32, 32);
+      await writeFile(join(root, "src", "web", "app.png"), declared);
+      await writeFile(
+        join(root, "src", "web", "index.html"),
+        '<link rel="icon" href="./app.png" />',
+      );
+      expect(await findProjectIcon(root)).toBe(join(root, "src", "web", "app.png"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("absolute href resolves into public/", async () => {
+    const root = await makeRoot();
+    try {
+      await mkdir(join(root, "public"), { recursive: true });
+      const data = png(16, 16);
+      await writeFile(join(root, "public", "icon.svg"), "<svg></svg>");
+      await writeFile(join(root, "index.html"), '<link rel="icon" href="/icon.svg" />');
+      expect(await findProjectIcon(root)).toBe(join(root, "public", "icon.svg"));
+      expect((await getProjectIcon(root))?.mimeType).toBe("image/svg+xml");
+      await writeFile(join(root, "public", "icon.svg"), data);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("manifest icons are used via the manifest link", async () => {
+    const root = await makeRoot();
+    try {
+      await mkdir(join(root, "src", "web"), { recursive: true });
+      const data = png(32, 32);
+      await writeFile(join(root, "src", "web", "icon-512.png"), data);
+      await writeFile(
+        join(root, "src", "web", "manifest.webmanifest"),
+        JSON.stringify({ icons: [{ src: "./icon-512.png", sizes: "512x512" }] }),
+      );
+      await writeFile(
+        join(root, "src", "web", "index.html"),
+        '<link rel="manifest" href="./manifest.webmanifest" />',
+      );
+      expect(await findProjectIcon(root)).toBe(join(root, "src", "web", "icon-512.png"));
+      const icon = await getProjectIcon(root);
+      expect(icon?.mimeType).toBe("image/png");
+      expect(icon?.data).toBe(data.toString("base64"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("ignores remote and data: hrefs", async () => {
+    expect(extractHtmlIconHrefs('<link rel="icon" href="https://example.com/i.png" />')).toEqual([
+      "https://example.com/i.png",
+    ]);
+    const root = await makeRoot();
+    try {
+      await writeFile(
+        join(root, "index.html"),
+        '<link rel="icon" href="https://example.com/i.png" /><link rel="icon" href="data:image/png;base64,AAAA" />',
+      );
+      expect(await findProjectIcon(root)).toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("parses link tags regardless of attribute order", async () => {
+    expect(extractHtmlIconHrefs('<link href="./a.png" rel="apple-touch-icon" />')).toEqual(["./a.png"]);
+    expect(extractHtmlManifestHref('<link href="./m.json" rel="manifest" />')).toBe("./m.json");
+    expect(extractManifestIconSrcs(JSON.stringify({ icons: [{ src: "/i.png" }] }))).toEqual(["/i.png"]);
+    expect(extractManifestIconSrcs("not json")).toEqual([]);
   });
 });
