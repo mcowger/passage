@@ -464,7 +464,7 @@ function ToolRowInner({ item, open, onOpenChange, workspaceId, workspaceRoot, ap
           )}
         </span>
       </CollapsibleTrigger>
-      <CollapsibleContent forceMount>
+      <CollapsibleContent>
         <ToolExpandedBody item={item} diff={diff} filePath={rawPath || filePath} workspaceId={workspaceId} workspaceRoot={workspaceRoot} api={api} shellOutputMode={shellOutputMode} />
       </CollapsibleContent>
     </Collapsible>

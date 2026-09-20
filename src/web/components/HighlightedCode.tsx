@@ -33,7 +33,58 @@ let cachedHighlighter: HighlighterCore | null = null;
 let highlighterPromise: Promise<HighlighterCore> | null = null;
 
 const MAX_TOKEN_CACHE_ENTRIES = 500;
-const tokenCache = new Map<string, ThemedToken[][]>();
+const MAX_TOKEN_CACHE_BYTES = 4 * 1024 * 1024;
+const textEncoder = new TextEncoder();
+
+type TokenCacheEntry = {
+  tokens: ThemedToken[][];
+  bytes: number;
+};
+
+export function getTokenCacheEntryBytes(tokens: ThemedToken[][]): number {
+  return textEncoder.encode(JSON.stringify(tokens)).byteLength;
+}
+
+export function createTokenCache(maxEntries: number, maxBytes: number) {
+  const entries = new Map<string, TokenCacheEntry>();
+  let totalBytes = 0;
+
+  const remove = (key: string) => {
+    const entry = entries.get(key);
+    if (!entry) return;
+    entries.delete(key);
+    totalBytes -= entry.bytes;
+  };
+
+  return {
+    get(key: string): ThemedToken[][] | null {
+      const entry = entries.get(key);
+      if (!entry) return null;
+      entries.delete(key);
+      entries.set(key, entry);
+      return entry.tokens;
+    },
+    set(key: string, tokens: ThemedToken[][]): void {
+      const bytes = getTokenCacheEntryBytes(tokens);
+      if (maxEntries < 1 || bytes > maxBytes) return;
+
+      remove(key);
+      while (entries.size > 0 && (entries.size >= maxEntries || totalBytes + bytes > maxBytes)) {
+        const oldestKey = entries.keys().next().value;
+        if (oldestKey === undefined) break;
+        remove(oldestKey);
+      }
+
+      entries.set(key, { tokens, bytes });
+      totalBytes += bytes;
+    },
+    stats(): { entries: number; bytes: number } {
+      return { entries: entries.size, bytes: totalBytes };
+    },
+  };
+}
+
+const tokenCache = createTokenCache(MAX_TOKEN_CACHE_ENTRIES, MAX_TOKEN_CACHE_BYTES);
 
 function fastHash(str: string): number {
   let hash = 5381;
@@ -53,8 +104,6 @@ function getCachedTokens(
   const key = `${lang}:${theme}:${code.length}:${fastHash(code)}`;
   const cached = tokenCache.get(key);
   if (cached) {
-    tokenCache.delete(key);
-    tokenCache.set(key, cached);
     return cached;
   }
 
@@ -65,10 +114,6 @@ function getCachedTokens(
       lang: targetLang,
       theme,
     });
-    if (tokenCache.size >= MAX_TOKEN_CACHE_ENTRIES) {
-      const oldestKey = tokenCache.keys().next().value;
-      if (oldestKey) tokenCache.delete(oldestKey);
-    }
     tokenCache.set(key, result.tokens);
     return result.tokens;
   } catch {

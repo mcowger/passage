@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { ensureHighlighter, getLanguageFromPath, HighlightedCode } from "./HighlightedCode.tsx";
+import { createTokenCache, ensureHighlighter, getLanguageFromPath, getTokenCacheEntryBytes, HighlightedCode } from "./HighlightedCode.tsx";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
+import type { ThemedToken } from "shiki/core";
 
 describe("getLanguageFromPath", () => {
   test("correctly identifies TypeScript files", () => {
@@ -85,5 +86,36 @@ describe("HighlightedCode component", () => {
     );
 
     expect(html).toContain('<pre class="tool-output-pre"><code>Plain text content</code></pre>');
+  });
+});
+
+describe("highlight token cache", () => {
+  const tokens = (content: string): ThemedToken[][] => [[{ content, color: "#fff", offset: 0 }]];
+
+  test("evicts the least-recently-used entry to stay within its byte budget", () => {
+    const entry = tokens("cache payload");
+    const entryBytes = getTokenCacheEntryBytes(entry);
+    const cache = createTokenCache(3, entryBytes * 2);
+
+    cache.set("first", entry);
+    cache.set("second", entry);
+    expect(cache.get("first")).toBe(entry);
+
+    cache.set("third", entry);
+
+    expect(cache.get("first")).toBe(entry);
+    expect(cache.get("second")).toBeNull();
+    expect(cache.get("third")).toBe(entry);
+    expect(cache.stats()).toEqual({ entries: 2, bytes: entryBytes * 2 });
+  });
+
+  test("does not retain a token payload larger than the byte budget", () => {
+    const entry = tokens("too large to cache");
+    const cache = createTokenCache(1, getTokenCacheEntryBytes(entry) - 1);
+
+    cache.set("large", entry);
+
+    expect(cache.get("large")).toBeNull();
+    expect(cache.stats()).toEqual({ entries: 0, bytes: 0 });
   });
 });

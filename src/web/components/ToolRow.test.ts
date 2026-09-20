@@ -197,6 +197,24 @@ describe("ToolRow with workspaceRoot", () => {
   });
 
 describe("ToolRow component", () => {
+  test("does not mount a collapsed tool body", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "tool-collapsed",
+      kind: "tool",
+      name: "bash",
+      input: { command: "echo collapsed" },
+      result: "this output must not be mounted while collapsed",
+      status: "complete",
+    };
+
+    const html = ReactDOMServer.renderToStaticMarkup(
+      React.createElement(ToolRow, { item, open: false })
+    );
+
+    expect(html).not.toContain("tool-expanded-body");
+    expect(html).not.toContain("this output must not be mounted while collapsed");
+  });
+
   test("recognizes absolute image paths from model reads", () => {
     const item: Extract<TimelineItem, { kind: "tool" }> = {
       id: "tool-read-image",
@@ -233,7 +251,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("tool-command-block");
@@ -256,7 +274,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("tool-diff-card");
@@ -281,7 +299,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("tool-read-card");
@@ -304,7 +322,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("tool-glob-results");
@@ -328,7 +346,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("tool-glob-results");
@@ -350,7 +368,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("tool-grep-results");
@@ -371,7 +389,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("Output (JSON)");
@@ -395,7 +413,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).not.toContain("[object Object]");
@@ -414,7 +432,7 @@ describe("ToolRow component", () => {
     } as any;
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).not.toContain("rawInput");
@@ -432,7 +450,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("sleep 30");
@@ -453,7 +471,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("npm test");
@@ -476,7 +494,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("tool-pending-skeleton");
@@ -514,7 +532,7 @@ describe("ToolRow component", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).not.toContain("[object Object]");
@@ -732,7 +750,7 @@ describe("ToolRow shell output preview", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("shell-output-block");
@@ -754,7 +772,7 @@ describe("ToolRow shell output preview", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item })
+      React.createElement(ToolRow, { item, open: true })
     );
 
     expect(html).toContain("shell-output-block");
@@ -772,7 +790,7 @@ describe("ToolRow shell output preview", () => {
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(ToolRow, { item, shellOutputMode: "full" })
+      React.createElement(ToolRow, { item, shellOutputMode: "full", open: true })
     );
 
     expect(html).toContain("line1");
