@@ -24,6 +24,7 @@ import { AgentError, ID } from "./errors.ts";
 import { errorFields, logger } from "../logging.ts";
 import { AgentRuntime, MAX_RUNTIME_DIAGNOSTICS, type Cancellation } from "./runtime.ts";
 import { AgentViews } from "./agentViews.ts";
+import type { AgentPreviewSupport } from "../previews/agent-support.ts";
 import { AgentTitles } from "./agentTitles.ts";
 import type { AgentServiceEvent } from "./runtime.ts";
 // Re-exported for existing importers; new code should import from ./runtime.ts directly.
@@ -151,6 +152,9 @@ export class AgentService {
    *  + prompt templates (Settings). Empty/undefined fields mean the
    *  suggestion backend's defaults. */
   private readonly getSuggestConfig?: (workspaceId: string) => { model?: string; thinkingLevel?: string; titlePrompt?: string } | undefined;
+  /** Shared web-preview session support (pin + open-on-demand). Absent in
+   *  tests/tools that never wire a `WebPreviewManager`. */
+  private readonly previews?: AgentPreviewSupport;
 
   constructor(
     private readonly repositories: MetadataRepositories,
@@ -182,6 +186,8 @@ export class AgentService {
       /** Regen window for a spent auto-continue retry. Defaults to
        *  `resolveAutoContinueWindowMs()` (env `PASSAGE_AUTO_CONTINUE_WINDOW_MINUTES`, else one hour). */
       autoContinueWindowMs?: number;
+      /** Shared web-preview session support (pin + open-on-demand). */
+      previews?: AgentPreviewSupport;
     },
   ) {
     if (!options.sessionsRoot) throw new AgentError("invalid-input", "sessionsRoot is required");
@@ -210,6 +216,7 @@ export class AgentService {
     this.onWorkspaceGitChanged = options.onWorkspaceGitChanged;
     this.admissionGate = options.admissionGate ?? (() => true);
     this.titleSuggester = options.titleSuggester ?? new AgentTitleSuggester();
+    this.previews = options.previews;
     this.getSuggestConfig = options.getSuggestConfig;
     this.views = new AgentViews({
       repositories: this.repositories,
@@ -391,6 +398,33 @@ export class AgentService {
     return pending;
   }
 
+  /** Resolve the shared preview session to pin into a new Pi process: the
+   *  workspace's session when it has exactly one preview, else null.
+   *  Never throws — without a pin the agent falls back to its own session. */
+  private previewSessionFor(workspaceId: string): string | null {
+    try {
+      return this.previews?.sessionForWorkspace(workspaceId) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Open-on-demand: the first task demand in a preview-less workspace
+   *  creates (+background-opens) the default preview so the agent has a
+   *  shared session to drive. Never throws and never blocks the message. */
+  private async ensurePreviewRow(workspaceId: string): Promise<void> {
+    if (!this.previews) return;
+    try {
+      await this.previews.ensurePreviewForWorkspace(workspaceId);
+    } catch (cause) {
+      logger("agent").warn("Agent preview auto-open failed", {
+        event: "agent.preview_ensure_failed",
+        workspaceId,
+        ...errorFields(cause),
+      });
+    }
+  }
+
   /** `options.admitted` is set only by create()'s own background boot: that
    *  work was already admitted when create() passed the gate, so it must
    *  run to completion even if drain begins moments later. An explicit
@@ -411,11 +445,15 @@ export class AgentService {
     const sessionDir = this.sessionDirectory(agent.id);
     try {
       await mkdir(sessionDir, { recursive: true });
+      const previewSession = this.previewSessionFor(agent.workspaceId);
       const process = await this.manager.start(agent.id, {
         ...this.pi,
         cwd: workspace.cwd,
         sessionDir,
         sessionId: agent.piSessionId,
+        // Pin the shared preview session when the workspace has exactly
+        // one preview; otherwise the agent falls back to its own session.
+        ...(previewSession ? { extraEnv: { AGENT_BROWSER_SESSION: previewSession } } : {}),
       });
       // create() no longer awaits start(), so an archive can land while Pi
       // is still booting. Don't attach/reconcile (and resurrect the status
@@ -456,6 +494,7 @@ export class AgentService {
     // (the user took over; no phantom continuation later).
     this.runtime.autoContinued.delete(agentId);
     try { this.repositories.agents.updateStopReason(agentId, null); } catch {}
+    await this.ensurePreviewRow(agent.workspaceId);
     const process = await this.ensureProcess(agentId);
     this.beginRun(agentId);
     // The transcript journals the original text plus file metadata; the
@@ -490,6 +529,7 @@ export class AgentService {
     const fileRefs = await this.storeUploads(agentId, files);
     this.runtime.autoContinued.delete(agentId);
     try { this.repositories.agents.updateStopReason(agentId, null); } catch {}
+    await this.ensurePreviewRow(this.requireAgent(agentId).workspaceId);
     const process = await this.ensureProcess(agentId);
     await this.appendUserRow(agentId, text, imageRefs, fileRefs);
     await process.request({ type: "steer", message: withFileRefs(text, fileRefs), ...(validatedImages?.length ? { images: validatedImages } : {}) });
@@ -504,6 +544,7 @@ export class AgentService {
     const fileRefs = await this.storeUploads(agentId, files);
     this.runtime.autoContinued.delete(agentId);
     try { this.repositories.agents.updateStopReason(agentId, null); } catch {}
+    await this.ensurePreviewRow(this.requireAgent(agentId).workspaceId);
     const process = await this.ensureProcess(agentId);
     await this.appendUserRow(agentId, text, imageRefs, fileRefs);
     await process.request({ type: "follow_up", message: withFileRefs(text, fileRefs), ...(validatedImages?.length ? { images: validatedImages } : {}) });

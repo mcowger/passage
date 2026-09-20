@@ -133,6 +133,27 @@ bounded stderr/diagnostics, discovers the loopback stream port, and serializes
 mutating commands per preview. Browser HTTP handlers must not spawn or control
 agent-browser directly.
 
+### Agent-shared session
+
+Previews are shared with the workspace's agents: the agent drives the same
+session the human watches, with no input lease. Two mechanisms keep the agent
+on the shared session without prompting:
+
+- Pinning: every Pi process spawns with `AGENT_BROWSER_NAMESPACE=passage`,
+  loopback `AGENT_BROWSER_ALLOWED_DOMAINS`, and the Passage idle timeout.
+  When the workspace has exactly one preview, `AGENT_BROWSER_SESSION` is
+  pinned to it, so bare `agent-browser` commands land on the shared page.
+  With zero or several previews the variable is left unset.
+- Auto-open: the first task demand (prompt, steer, or follow-up) in a
+  workspace with no previews creates an `Agent preview` row for the default
+  target (same rule as creation) and opens it in the background. It persists
+  as an ordinary preview the human can watch or stop.
+
+Agent driving is page-level (`snapshot/click/fill/type/wait/screenshot`,
+loopback navigation, and ungated `eval`); browser lifecycle stays with
+`WebPreviewManager`. Per-call session resolution with closed-on-ambiguity
+failure is later work, once multi-preview pain justifies the shim.
+
 ## 5. Finding a development server
 
 Manual entry is always available. Passage accepts an HTTP or HTTPS URL whose

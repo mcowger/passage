@@ -30,6 +30,7 @@ import { WorkspaceScriptsService } from "./workspaces/scripts.ts";
 import { createWorkspaceScriptRoutes } from "./http/scripts.ts";
 import { TerminalManager } from "./terminals/manager.ts";
 import { WebPreviewManager } from "./previews/manager.ts";
+import { createAgentPreviewSupport } from "./previews/agent-support.ts";
 import { isAllowedPreviewRequest } from "./previews/relay.ts";
 import { createPreviewRoutes } from "./http/previews.ts";
 import { PushService } from "./push/service.ts";
@@ -199,6 +200,10 @@ const agentService = new AgentService(repositories, {
     workspaceEvents.emitGitStatus({ workspaceId, reason: "commit" });
   },
   admissionGate: () => admissionOpen,
+  // Shared browser session: Pi processes spawn pinned to the workspace's
+  // single preview (env), and the first task demand auto-opens the default
+  // preview in a preview-less workspace. Eval stays ungated per policy.
+  previews: createAgentPreviewSupport(previewManager, { serverPort: port }),
   // Auto-titles use the workspace's configured suggestion model + thinking
   // level + prompt template (Settings); empty fields mean the suggestion
   // backend's defaults.

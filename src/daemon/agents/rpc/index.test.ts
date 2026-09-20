@@ -22,6 +22,32 @@ test("prompt acknowledgement is distinct from settlement and replay is ordered",
 });
 
 test("isolates agents and enforces capacity", async () => { const manager = new PiRpcManager(2); await Promise.all([manager.start("a", options("a")), manager.start("b", options("b"))]); await expect(manager.start("c", options("c"))).rejects.toThrow("maximum"); await manager.shutdown(); });
+test("pins agent-browser defaults and an explicit session into Pi env", async () => {
+  const envScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);const data=r.type==='get_state'?{browserEnv:{session:process.env.AGENT_BROWSER_SESSION??null,namespace:process.env.AGENT_BROWSER_NAMESPACE??null,domains:process.env.AGENT_BROWSER_ALLOWED_DOMAINS??null,idle:process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS??null}}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+  const envOptions = (id: string, extraEnv?: Record<string, string | undefined>) => ({
+    cwd: "/tmp", sessionDir: "/tmp", sessionId: id,
+    executable: process.execPath, executableArgs: ["-e", envScript], ...(extraEnv ? { extraEnv } : {}),
+  });
+  const prior = process.env.AGENT_BROWSER_SESSION;
+  process.env.AGENT_BROWSER_SESSION = "operator-session";
+  try {
+    const manager = new PiRpcManager(2);
+    const pinned = await manager.start("pinned", envOptions("pinned", { AGENT_BROWSER_SESSION: "pp-abc123" }));
+    expect(responseData<{ browserEnv: Record<string, string | null> }>(await pinned.request({ type: "get_state" }))?.browserEnv).toEqual({
+      session: "pp-abc123",
+      namespace: "passage",
+      domains: "localhost,127.0.0.1,::1",
+      idle: String(30 * 60 * 1000),
+    });
+    // Without a pin the operator's own session must not leak through.
+    const unpinned = await manager.start("bare", envOptions("bare"));
+    expect(responseData<{ browserEnv: Record<string, string | null> }>(await unpinned.request({ type: "get_state" }))?.browserEnv.session).toBeNull();
+    await manager.shutdown();
+  } finally {
+    if (prior === undefined) delete process.env.AGENT_BROWSER_SESSION;
+    else process.env.AGENT_BROWSER_SESSION = prior;
+  }
+});
 test("rejects oversized commands before writing", async () => { const manager = new PiRpcManager(1); const p = await manager.start("a", { ...options("a"), maxCommandBytes: 100 }); await expect(p.request({ type: "prompt", message: "x".repeat(200) })).rejects.toThrow("byte limit"); await manager.shutdown(); });
 test("captures non-JSON stdout lines into stderr without breaking protocol", async () => {
   const noisyScript = `process.stdin.on('data',d=>{const r=JSON.parse(d); process.stdout.write('[MCP-UI] non-json log\\n'); process.stdout.write(JSON.stringify({type:'response',id:r.id,command:r.type,success:true,data:{ok:true}})+'\\n')})`;

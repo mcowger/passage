@@ -12,6 +12,11 @@ import {
 import { parsePiExtensionUiDialog, type PiExtensionUiDialog } from "../ui.ts";
 import { errorFields, logger } from "../../logging.ts";
 import { sanitizedSubprocessEnv } from "../../env.ts";
+import {
+  PREVIEW_ALLOWED_DOMAINS,
+  PREVIEW_IDLE_TIMEOUT_MS,
+  PREVIEW_SESSION_NAMESPACE,
+} from "../../previews/manager.ts";
 
 export type PiRecord = { type?: string; id?: string; [key: string]: unknown };
 export type PiImageBlock = AgentImage;
@@ -50,6 +55,9 @@ export type PiRpcOptions = {
   cwd: string; sessionDir: string; sessionId: string; executable?: string; executableArgs?: string[];
   model?: string; disableTools?: boolean;
   maxCommandBytes?: number; maxRecordBytes?: number; maxEventBytes?: number; maxStderrBytes?: number;
+  /** Per-agent env overlaid on the pinned agent-browser defaults (e.g. the
+   *  shared preview session). `undefined` values delete that key. */
+  extraEnv?: Record<string, string | undefined>;
 };
 
 const encoder = new TextEncoder();
@@ -123,8 +131,19 @@ export class PiRpcProcess {
       cwd: options.cwd,
       // Pi tool calls (bash, dev servers) inherit this env: strip the
       // daemon's own PORT/PASEO_PORT so agent children never see this
-      // worktree's bind port.
-      env: sanitizedSubprocessEnv({ PI_CODING_AGENT_DIR: piAgentDirectory() }),
+      // worktree's bind port. Agent-browser defaults pin every agent to
+      // the shared Passage session namespace on loopback; the per-agent
+      // preview session arrives via extraEnv. The operator's own
+      // AGENT_BROWSER_SESSION must never leak in, so scrub it first
+      // (undefined deletes the key; extraEnv re-adds the pinned one).
+      env: sanitizedSubprocessEnv({
+        PI_CODING_AGENT_DIR: piAgentDirectory(),
+        AGENT_BROWSER_NAMESPACE: PREVIEW_SESSION_NAMESPACE,
+        AGENT_BROWSER_ALLOWED_DOMAINS: PREVIEW_ALLOWED_DOMAINS,
+        AGENT_BROWSER_IDLE_TIMEOUT_MS: String(PREVIEW_IDLE_TIMEOUT_MS),
+        AGENT_BROWSER_SESSION: undefined,
+        ...options.extraEnv,
+      }),
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",

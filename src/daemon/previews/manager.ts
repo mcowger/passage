@@ -18,6 +18,8 @@ import { sanitizedSubprocessEnv } from "../env.ts";
 
 export const PREVIEW_SESSION_NAMESPACE = "passage";
 export const PREVIEW_SESSION_PREFIX = "pp-";
+/** Loopback-only navigation scope, shared by preview sessions and agent Pi env. */
+export const PREVIEW_ALLOWED_DOMAINS = "localhost,127.0.0.1,::1";
 export const PREVIEW_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_VIEWPORT: PreviewViewport = { width: 1280, height: 800, deviceScaleFactor: 1 };
 const MAX_STDERR_BYTES = 16 * 1024;
@@ -75,7 +77,7 @@ class RealAgentBrowserRunner implements AgentBrowserRunner {
       env: sanitizedSubprocessEnv({
         AGENT_BROWSER_NAMESPACE: PREVIEW_SESSION_NAMESPACE,
         AGENT_BROWSER_IDLE_TIMEOUT_MS: String(PREVIEW_IDLE_TIMEOUT_MS),
-        AGENT_BROWSER_ALLOWED_DOMAINS: "localhost,127.0.0.1,::1",
+        AGENT_BROWSER_ALLOWED_DOMAINS: PREVIEW_ALLOWED_DOMAINS,
       }),
     });
     const timeout = setTimeout(() => {

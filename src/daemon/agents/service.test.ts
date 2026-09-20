@@ -4,16 +4,17 @@ import { join } from "node:path";
 import { MetadataStore } from "../metadata/database.ts";
 import { MetadataRepositories, type Workspace } from "../metadata/repositories.ts";
 import { AgentService, CONTINUATION_MESSAGE, DEFAULT_AUTO_CONTINUE_WINDOW_MS, collectTitleSources, isGitCommitToolEvent, resolveAutoContinueWindowMs } from "./service.ts";
-import { PiRpcManager } from "./rpc/index.ts";
+import { PiRpcManager, responseData } from "./rpc/index.ts";
+import type { AgentPreviewSupport } from "../previews/agent-support.ts";
 
 const script = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'||r.type==='steer'||r.type==='follow_up')process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');const data=r.type==='get_available_models'?{models:[{provider:'test',id:'model',name:'Model',api:'test',input:['text'],authenticated:true,supportedThinkingLevels:['medium','high']}]}:r.type==='get_available_thinking_levels'?{levels:['medium','high']}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
 const roots: string[] = [];
-const make = async (limit = 10, executableArgs?: string[], autoContinueWindowMs?: number, admissionGate?: () => boolean) => {
+const make = async (limit = 10, executableArgs?: string[], autoContinueWindowMs?: number, admissionGate?: () => boolean, previews?: AgentPreviewSupport) => {
   const root = await mkdtemp(join("/tmp", "passage-agent-")); roots.push(root);
   const store = new MetadataStore(":memory:"); const repos = new MetadataRepositories(store.db);
   repos.projects.save({ id: "p", configuredRootPath: root, canonicalRootPath: root, displayLabel: "p", archivedAt: null });
   const workspace: Workspace = { id: "w", projectId: "p", kind: "directory", cwd: root, checkoutRoot: root, mainRepositoryRoot: root, branchRef: null, displayLabel: "w", locationId: null, ownershipState: "not-owned", archivedAt: null }; repos.workspaces.save(workspace);
-  const manager = new PiRpcManager(4); const service = new AgentService(repos, { sessionsRoot: join(root, "sessions"), manager, listLimit: limit, pi: { executable: process.execPath, executableArgs: executableArgs ?? ["-e", script] }, titleSuggester: { suggestTitle: async () => null }, ...(autoContinueWindowMs === undefined ? {} : { autoContinueWindowMs }), ...(admissionGate === undefined ? {} : { admissionGate }) });
+  const manager = new PiRpcManager(4); const service = new AgentService(repos, { sessionsRoot: join(root, "sessions"), manager, listLimit: limit, pi: { executable: process.execPath, executableArgs: executableArgs ?? ["-e", script] }, titleSuggester: { suggestTitle: async () => null }, ...(autoContinueWindowMs === undefined ? {} : { autoContinueWindowMs }), ...(admissionGate === undefined ? {} : { admissionGate }), ...(previews === undefined ? {} : { previews }) });
   return { root, store, repos, manager, service };
 };
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -1307,6 +1308,48 @@ describe("getCommitConversation", () => {
     expect(await f.service.getCommitConversation("w", agent.id)).toEqual(convo);
     expect(await f.service.getCommitConversation("missing")).toEqual({ userMessages: [], finalAssistantMessages: [] });
     expect(await f.service.getCommitConversation("w", "agt_missing")).toEqual({ userMessages: [], finalAssistantMessages: [] });
+    await f.service.shutdown();
+    f.store.close();
+  });
+});
+
+describe("shared preview session", () => {
+  test("task demand ensures a preview row and pins its session into Pi env", async () => {
+    const ensured: string[] = [];
+    const previews: AgentPreviewSupport = {
+      sessionForWorkspace: (workspaceId: string) => (workspaceId === "w" ? "pp-shared" : null),
+      ensurePreviewForWorkspace: async (workspaceId: string) => { ensured.push(workspaceId); },
+    };
+    const envScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'||r.type==='steer'||r.type==='follow_up')process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');const data=r.type==='get_state'?{browserSession:process.env.AGENT_BROWSER_SESSION??null,browserNamespace:process.env.AGENT_BROWSER_NAMESPACE??null}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
+    const f = await make(10, ["-e", envScript], undefined, undefined, previews);
+    const agent = await f.service.create("w", "driver");
+    await f.service.prompt(agent.id, "check the preview");
+    await waitForIdle(f.service, agent.id);
+    await f.service.steer(agent.id, "click submit");
+    await f.service.followUp(agent.id, "done?");
+    // Every task demand ensures the row; the spawn pinned the session.
+    expect(ensured).toEqual(["w", "w", "w"]);
+    const live = f.manager.get(agent.id);
+    expect(live).toBeDefined();
+    const state = responseData<{ browserSession: string | null; browserNamespace: string | null }>(
+      await live!.request({ type: "get_state" }),
+    );
+    expect(state?.browserSession).toBe("pp-shared");
+    expect(state?.browserNamespace).toBe("passage");
+    await f.service.shutdown();
+    f.store.close();
+  });
+
+  test("a failing preview provider never breaks the message", async () => {
+    const previews: AgentPreviewSupport = {
+      sessionForWorkspace: () => { throw new Error("preview store gone"); },
+      ensurePreviewForWorkspace: async () => { throw new Error("preview store gone"); },
+    };
+    const f = await make(10, undefined, undefined, undefined, previews);
+    const agent = await f.service.create("w", "resilient");
+    await f.service.prompt(agent.id, "hello");
+    await waitForIdle(f.service, agent.id);
+    expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
     await f.service.shutdown();
     f.store.close();
   });
