@@ -22,7 +22,7 @@ import { daemonBlockerSchema, daemonPhaseSchema, daemonLifecycleSnapshotSchema, 
 import type { FileListing, FileRead, FileRevision, FileWrite } from "../shared/domain/files.ts";
 import type { GitDiff, GitStatus } from "../shared/domain/git.ts";
 import { webPreviewSchema, type WebPreview } from "../shared/domain/previews.ts";
-import { createWorktreeResponseSchema, workspaceActionListSchema, workspaceActionRunSchema, type CreateWorktreeResponse, type WorkspaceActionList, type WorkspaceActionRun } from "../shared/domain/workspace-actions.ts";
+import { createWorktreeResponseSchema, workspaceActionListSchema, workspaceActionRunSchema, workspaceScriptListSchema, workspaceScriptRuntimeSchema, type CreateWorktreeResponse, type WorkspaceActionList, type WorkspaceActionRun, type WorkspaceScriptList, type WorkspaceScriptRuntime } from "../shared/domain/workspace-actions.ts";
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 const acceptedResponseSchema = z.object({ accepted: z.literal(true) }).strict();
@@ -231,6 +231,18 @@ export function createWorkspaceApi(
     async cancelWorkspaceActionRun(workspaceId: string, runId: string): Promise<WorkspaceActionRun> {
       return workspaceActionRunSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/actions/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }));
     },
+    async listWorkspaceScripts(workspaceId: string): Promise<WorkspaceScriptList> {
+      return workspaceScriptListSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/scripts`));
+    },
+    async startWorkspaceScript(workspaceId: string, scriptName: string): Promise<WorkspaceScriptRuntime> {
+      return workspaceScriptRuntimeSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/scripts/${encodeURIComponent(scriptName)}/start`, { method: "POST" }));
+    },
+    async stopWorkspaceScript(workspaceId: string, scriptName: string): Promise<WorkspaceScriptRuntime> {
+      return workspaceScriptRuntimeSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/scripts/${encodeURIComponent(scriptName)}/stop`, { method: "POST" }));
+    },
+    async restartWorkspaceScript(workspaceId: string, scriptName: string): Promise<WorkspaceScriptRuntime> {
+      return workspaceScriptRuntimeSchema.parse(await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/scripts/${encodeURIComponent(scriptName)}/restart`, { method: "POST" }));
+    },
     async discoverWorktrees(projectId: string): Promise<DiscoveredWorktree[]> {
       return (await request(`/api/projects/${encodeURIComponent(projectId)}/worktrees/discover`)) as DiscoveredWorktree[];
     },
@@ -391,8 +403,8 @@ export function createWorkspaceApi(
         body: JSON.stringify(input),
       }));
     },
-    async previewCandidates(workspaceId: string): Promise<{ port: number; confidence: string; processName: string | null; pid: number | null }[]> {
-      return (await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/previews/candidates`)) as { port: number; confidence: string; processName: string | null; pid: number | null }[];
+    async previewCandidates(workspaceId: string): Promise<{ port: number; confidence: string; processName: string | null; pid: number | null; source: "script" | "process" }[]> {
+      return (await request(`/api/workspaces/${encodeURIComponent(workspaceId)}/previews/candidates`)) as { port: number; confidence: string; processName: string | null; pid: number | null; source: "script" | "process" }[];
     },
     async getPreview(previewId: string): Promise<WebPreview> {
       return webPreviewSchema.parse(await request(`/api/previews/${encodeURIComponent(previewId)}`));

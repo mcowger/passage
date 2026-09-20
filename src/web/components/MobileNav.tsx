@@ -1,6 +1,7 @@
 import type { AgentSummary } from "../../shared/domain/agents.ts";
 import type { TerminalSummary } from "../../shared/domain/terminals.ts";
 import type { WebPreview } from "../../shared/domain/previews.ts";
+import type { WorkspaceScriptRuntime } from "../../shared/domain/workspace-actions.ts";
 import type { ConnectionHealth } from "../socketLifecycle.ts";
 import { AGENT_STATUS_LABEL, getAgentStatusKind, type AgentStatusKind } from "./agentStatus.ts";
 import { WsHealthIndicator } from "./WsHealthIndicator.tsx";
@@ -177,6 +178,7 @@ interface MobileSessionSheetProps {
   agents: AgentSummary[];
   terminals: TerminalSummary[];
   previews: WebPreview[];
+  scripts: WorkspaceScriptRuntime[];
   showChanges: boolean;
   currentKind: MobileDestinationKind;
   currentTargetId?: string;
@@ -197,6 +199,13 @@ interface MobileSessionSheetProps {
   onCloseAgent?: (id: string) => void;
   onCloseTerminal?: (id: string) => void;
   onClosePreview?: (id: string) => void;
+  /** Script controls (bottom-sheet home for the Actions list on phones).
+   *  Absent handlers hide the section. View-terminal selects the backing
+   *  PTY without closing the sheet's parent flow. */
+  onStartScript?: (name: string) => void;
+  onStopScript?: (name: string) => void;
+  onRestartScript?: (name: string) => void;
+  onViewScriptTerminal?: (terminalId: string) => void;
 }
 
 function SectionLabel({ children }: { children: string }) {
@@ -226,6 +235,11 @@ export function MobileSessionSheet(props: MobileSessionSheetProps) {
     onCloseAgent,
     onCloseTerminal,
     onClosePreview,
+    scripts = [],
+    onStartScript,
+    onStopScript,
+    onRestartScript,
+    onViewScriptTerminal,
   } = props;
 
   const pick = (fn: () => void) => () => {
@@ -380,8 +394,87 @@ export function MobileSessionSheet(props: MobileSessionSheetProps) {
             </>
           )}
 
-          <SectionLabel>Views</SectionLabel>
-          <button
+          {scripts.length > 0 && (onStartScript || onStopScript) && (
+            <>
+              <SectionLabel>{`Scripts (${scripts.length})`}</SectionLabel>
+              {scripts.map((script) => {
+                const running = script.lifecycle === "running";
+                const healthSuffix =
+                  running && script.health === "healthy"
+                    ? " · listening"
+                    : running && script.health === "unhealthy"
+                      ? " · not listening"
+                      : "";
+                const meta = running
+                  ? `running${healthSuffix}${script.url ? ` · ${script.url}` : ""}`
+                  : script.exitCode !== null
+                    ? `exit ${script.exitCode}`
+                    : "stopped";
+                const dotKind: "idle" | "empty" | "active" =
+                  running && script.health === "healthy"
+                    ? "idle"
+                    : running && script.health === "unhealthy"
+                      ? "empty"
+                      : running
+                        ? "active"
+                        : "idle";
+                return (
+                  <div key={script.name} role="listitem" className="mobile-sheet-row">
+                    <span className={statusDotClass(dotKind)} aria-hidden="true" />
+                    <span className="mobile-sheet-row-main">
+                      <span className="mobile-sheet-row-title">▶ {script.name}</span>
+                      <span className="mobile-sheet-row-meta">{meta}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      {!running ? (
+                        <button
+                          type="button"
+                          className="mobile-sheet-action"
+                          aria-label={`Run script ${script.name}`}
+                          onClick={() => onStartScript?.(script.name)}
+                        >
+                          Run
+                        </button>
+                      ) : (
+                        <>
+                          {script.terminalId && onViewScriptTerminal && (
+                            <button
+                              type="button"
+                              className="mobile-sheet-action"
+                              aria-label={`View ${script.name} logs`}
+                              onClick={pick(() => onViewScriptTerminal(script.terminalId as string))}
+                            >
+                              Logs
+                            </button>
+                          )}
+                          {onRestartScript && (
+                            <button
+                              type="button"
+                              className="mobile-sheet-action"
+                              aria-label={`Restart script ${script.name}`}
+                              onClick={() => onRestartScript(script.name)}
+                            >
+                              Restart
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="mobile-sheet-action"
+                            aria-label={`Stop script ${script.name}`}
+                            onClick={() => onStopScript?.(script.name)}
+                          >
+                            Stop
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          <SectionLabel>Views</SectionLabel>          <button
             type="button"
             className={`mobile-sheet-row${currentKind === "explorer" ? " current" : ""}`}
             aria-current={currentKind === "explorer" || undefined}

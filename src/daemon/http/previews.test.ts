@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MetadataRepositories, MetadataStore } from "../metadata/index.ts";
@@ -14,6 +14,8 @@ import {
   previewUpstreamMessageSchema,
 } from "../../shared/protocol/previews.ts";
 import { isAllowedPreviewRequest } from "../previews/relay.ts";
+import { TerminalManager } from "../terminals/manager.ts";
+import { WorkspaceScriptsService } from "../workspaces/scripts.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -239,13 +241,77 @@ describe("preview stream protocol", () => {
   });
 });
 
-describe("preview origin policy", () => {
-  test("same-origin and loopback pass, cross-origin fails", () => {
+describe("preview origin policy", () => {  test("same-origin and loopback pass, cross-origin fails", () => {
     const same = new Request("http://localhost:3333/api/previews/x/ws", { headers: { Host: "localhost:3333", Origin: "http://localhost:3333" } });
     expect(isAllowedPreviewRequest(same)).toBe(true);
     const none = new Request("http://localhost:3333/api/previews/x/ws", { headers: { Host: "localhost:3333" } });
     expect(isAllowedPreviewRequest(none)).toBe(true);
     const evil = new Request("http://localhost:3333/api/previews/x/ws", { headers: { Host: "localhost:3333", Origin: "https://evil.example" } });
     expect(isAllowedPreviewRequest(evil)).toBe(false);
+  });
+});
+
+describe("preview candidates from workspace scripts", () => {
+  async function scriptFixture(paseoJson: unknown) {
+    const root = await mkdtemp(join(tmpdir(), "passage-preview-scripts-"));
+    roots.push(root);
+    const store = new MetadataStore(join(root, "metadata.sqlite"));
+    const repos = new MetadataRepositories(store.db);
+    const workspaces = new WorkspaceService(repos);
+    const project = await workspaces.registerProject(root, "Test Repo");
+    const dir = join(root, "ws");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "paseo.json"), JSON.stringify(paseoJson));
+    const workspace = await workspaces.createDirectoryWorkspace(project.id, {
+      cwd: dir,
+      displayLabel: "Scripts",
+    });
+    const terminals = new TerminalManager(workspaces);
+    const scripts = new WorkspaceScriptsService(repos, terminals);
+    const manager = new WebPreviewManager(repos, workspaces, fakeRunner(), scripts);
+    return { root, store, workspace, terminals, scripts, manager };
+  }
+
+  test("running services lead as high-confidence script candidates", async () => {
+    const f = await scriptFixture({
+      scripts: { dev: { type: "service", command: "sleep 30", port: 48791 } },
+    });
+    await f.scripts.start(f.workspace.id, "dev");
+    try {
+      const candidates = await f.manager.portCandidates(f.workspace.id);
+      const dev = candidates.find((c) => c.port === 48791);
+      expect(dev).toMatchObject({ confidence: "high", source: "script" });
+      expect(candidates[0]).toMatchObject({ port: 48791, source: "script" });
+    } finally {
+      f.scripts.stopForWorkspace(f.workspace.id);
+      f.store.close();
+    }
+  });
+
+  test("stopped services with explicit ports appear as uncertain script candidates", async () => {
+    const f = await scriptFixture({
+      scripts: { web: { type: "service", command: "sleep 30", port: 48792 } },
+    });
+    try {
+      const candidates = await f.manager.portCandidates(f.workspace.id);
+      expect(candidates.find((c) => c.port === 48792)).toMatchObject({
+        confidence: "uncertain",
+        source: "script",
+      });
+    } finally {
+      f.store.close();
+    }
+  });
+
+  test("services without a known port are skipped", async () => {
+    const f = await scriptFixture({
+      scripts: { api: { type: "service", command: "sleep 30" } },
+    });
+    try {
+      const candidates = await f.manager.portCandidates(f.workspace.id);
+      expect(candidates.filter((c) => c.source === "script")).toEqual([]);
+    } finally {
+      f.store.close();
+    }
   });
 });

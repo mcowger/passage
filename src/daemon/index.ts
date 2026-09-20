@@ -27,6 +27,8 @@ import { FileService } from "./workspaces/files.ts";
 import { WorktreeService } from "./workspaces/worktrees.ts";
 import { WorkspaceActionsService } from "./workspaces/actions.ts";
 import { createWorkspaceActionRoutes } from "./http/actions.ts";
+import { WorkspaceScriptsService } from "./workspaces/scripts.ts";
+import { createWorkspaceScriptRoutes } from "./http/scripts.ts";
 import { TerminalManager } from "./terminals/manager.ts";
 import { WebPreviewManager } from "./previews/manager.ts";
 import { isAllowedPreviewRequest } from "./previews/relay.ts";
@@ -147,7 +149,12 @@ const workspaceActionsService = new WorkspaceActionsService(repositories, undefi
 const worktreeService = new WorktreeService(repositories, gitService, undefined, workspaceActionsService);
 const commitGenerator = new CommitGenerator();
 const terminalManager = new TerminalManager(workspaceService);
-const previewManager = new WebPreviewManager(repositories, workspaceService);
+const workspaceScriptsService = new WorkspaceScriptsService(repositories, terminalManager, {
+  onScriptsChanged: (workspaceId, runtime) => {
+    workspaceEvents.emitActionsChanged({ workspaceId, runId: `script:${runtime.name}` });
+  },
+});
+const previewManager = new WebPreviewManager(repositories, workspaceService, undefined, workspaceScriptsService);
 const sessionsRoot = process.env.PASSAGE_SESSIONS_ROOT ?? join(dirname(metadataPath), "sessions");
 // DaemonLifecycle needs AgentService's blocker methods; AgentService needs
 // the lifecycle's admission gate. Bridge the cycle with a forward
@@ -304,14 +311,33 @@ app.post("/api/daemon/shutdown", async (context) => {
   return context.json({ ok: true as const, accepted: true });
 });
 /** Stop everything bound to a workspace before it is archived/removed:
- *  running setup actions, PTY terminals (+ children), live Pi processes,
- *  and agent-browser preview sessions (+ their chromium). Never throws so
- *  a teardown failure can't block the archival/removal itself. */
+ *  running setup actions, supervised scripts/services (ports freed),
+ *  `paseo.json` teardown commands, PTY terminals (+ children), live Pi
+ *  processes, and agent-browser preview sessions (+ their chromium).
+ *  Teardown runs after scripts stop so commands observe a quiet worktree
+ *  but before the directory is touched. Never throws so a teardown
+ *  failure can't block the archival/removal itself. */
 const teardownWorkspace = async (workspaceId: string): Promise<void> => {
   try {
     workspaceActionsService.cancelForWorkspace(workspaceId);
   } catch (error) {
     log.warn("Workspace action teardown failed", { event: "daemon.workspace_teardown_actions_failed", workspaceId, ...errorFields(error) });
+  }
+  try {
+    workspaceScriptsService.stopForWorkspace(workspaceId);
+  } catch (error) {
+    log.warn("Workspace script teardown failed", { event: "daemon.workspace_teardown_scripts_failed", workspaceId, ...errorFields(error) });
+  }
+  try {
+    const teardown = await workspaceActionsService.runTeardown(workspaceId);
+    if (teardown) {
+      const failed = teardown.results.find((result) => result.exitCode !== 0);
+      if (failed) {
+        log.warn("Workspace teardown command failed", { event: "daemon.workspace_teardown_command_failed", workspaceId, command: failed.command, exitCode: failed.exitCode });
+      }
+    }
+  } catch (error) {
+    log.warn("Workspace teardown run failed", { event: "daemon.workspace_teardown_run_failed", workspaceId, ...errorFields(error) });
   }
   try {
     terminalManager.terminateForWorkspace(workspaceId);
@@ -334,6 +360,7 @@ app.route("/", createGitRoutes(workspaceService, gitService, workspaceEvents, co
 app.route("/", createFileRoutes(fileService, workspaceEvents));
 app.route("/", createWorktreeRoutes(worktreeService, { onRemoveWorkspace: (workspaceId) => teardownWorkspace(workspaceId) }, workspaceEvents));
 app.route("/", createWorkspaceActionRoutes(workspaceActionsService));
+app.route("/", createWorkspaceScriptRoutes(workspaceScriptsService));
 app.route("/", createTerminalRoutes(terminalManager));
 app.route("/", createPreviewRoutes(previewManager, workspaceEvents, { serverPort: port }));
 app.route("/", createPushRoutes(pushService));

@@ -17,6 +17,7 @@ import type { WorkspaceApi } from "../api.ts";
 import { friendlyApiError } from "../api.ts";
 import type { TabKind } from "./appHelpers.tsx";
 import type { MobileDestinationKind, MobileReturn } from "../components/MobileNav.tsx";
+import { pickPreviewTargetUrl } from "./previewTarget.ts";
 
 export type WorkspaceActionDeps = {
   api: WorkspaceApi;
@@ -343,9 +344,7 @@ export function useWorkspaceActions(deps: WorkspaceActionDeps) {
     if (!workspace) return;
     try {
       const candidates = await api.previewCandidates(workspace.id).catch(() => []);
-      const targetUrl = candidates.find((c) => c.confidence === "high")
-        ? `http://localhost:${candidates.find((c) => c.confidence === "high")!.port}`
-        : "http://localhost:3000";
+      const targetUrl = pickPreviewTargetUrl(candidates);
       const created = await api.createPreview(workspace.id, { targetUrl });
       setPreviews((current) => [...current, created]);
       setSelectedPreviewId(created.id);

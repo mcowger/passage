@@ -59,6 +59,8 @@ import { useDaemon } from "./app/useDaemon.ts";
 import { useWorkspaceList } from "./app/useWorkspaceList.ts";
 import { useWorkspaceLayout } from "./app/useWorkspaceLayout.ts";
 import { useWorkspaceResources } from "./app/useWorkspaceResources.ts";
+import { useWorkspaceScripts } from "./app/useWorkspaceScripts.ts";
+import { WorkspaceScriptsButton } from "./components/WorkspaceScriptsButton.tsx";
 import { useWorkspaceActions } from "./app/useWorkspaceActions.ts";
 import { WorkspaceTabContent } from "./app/WorkspaceTabs.tsx";
 import { resolveMobileDest, resolveMobileReturn, type MobileSessionState } from "./app/mobileSession.ts";
@@ -120,6 +122,13 @@ function App() {
     loadLayout: loadLayoutAndSettings,
     onWorkspaceSwitched: handleWorkspaceSwitched,
   });
+  const {
+    scripts,
+    busyName: scriptBusyName,
+    startScript,
+    stopScript,
+    restartScript,
+  } = useWorkspaceScripts(api, selectedWorkspaceId);
   const [formError, setFormError] = useState("");
   const [activeTab, setActiveTab] = useState<TabKind>("agent");
   const [mobileReturnTo, setMobileReturnTo] = useState<MobileReturn | null>(null);
@@ -351,6 +360,27 @@ function App() {
     goMobileBack,
     handleWorkspaceRemoved,
   } = actions;
+  // Script runs own a backing PTY: after start, refresh the terminal list
+  // (the new PTY appears there) and open it in the canvas. Viewing a
+  // running script focuses its existing terminal tab instead.
+  const handleViewScriptTerminal = (terminalId: string) => {
+    captureMobileReturn();
+    const termObj = terminals.find((t) => t.id === terminalId);
+    setSelectedTerminalId(terminalId);
+    setActiveTab("terminal");
+    openPaneTab({
+      id: `terminal-${terminalId}`,
+      kind: "terminal",
+      title: termObj?.title ?? "Script",
+      targetId: terminalId,
+    });
+  };
+  const handleStartScript = async (name: string) => {
+    const runtime = await startScript(name);
+    if (!selectedWorkspaceId) return;
+    await loadTerminals(selectedWorkspaceId, false);
+    if (runtime?.terminalId) handleViewScriptTerminal(runtime.terminalId);
+  };
   const renderTabContent = (tab: PaneTab): ReactNode => (
     <WorkspaceTabContent
       tab={tab}
@@ -584,6 +614,14 @@ function App() {
               </div>
 
               <div className="workspace-nav-actions shrink-0">
+                <WorkspaceScriptsButton
+                  scripts={scripts}
+                  busyName={scriptBusyName}
+                  onStart={(name) => void handleStartScript(name)}
+                  onStop={(name) => void stopScript(name)}
+                  onRestart={(name) => void restartScript(name)}
+                  onViewTerminal={handleViewScriptTerminal}
+                />
                 <button
                   type="button"
                   className="nav-action-btn"
@@ -679,6 +717,11 @@ function App() {
         onCloseAgent={closeAgentOnMobile}
         onCloseTerminal={closeTerminalOnMobile}
         onClosePreview={closePreviewOnMobile}
+        scripts={scripts}
+        onStartScript={(name) => void handleStartScript(name)}
+        onStopScript={(name) => void stopScript(name)}
+        onRestartScript={(name) => void restartScript(name)}
+        onViewScriptTerminal={handleViewScriptTerminal}
       />
       )}
 

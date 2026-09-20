@@ -49,6 +49,8 @@ export type TerminalSubscriber = {
   sendControl: (control: ServerTerminalControl) => void;
 };
 
+export type TerminalExitListener = (terminalId: string, exitCode: number | null) => void;
+
 class TerminalInstance {
   readonly id: string;
   readonly workspaceId: string;
@@ -75,6 +77,8 @@ class TerminalInstance {
     cwd: string,
     columns = DEFAULT_COLS,
     rows = DEFAULT_ROWS,
+    spawn?: { argv: string[]; env?: Record<string, string | undefined> },
+    onExit?: (exitCode: number | null) => void,
   ) {
     this.id = id;
     this.workspaceId = workspaceId;
@@ -85,6 +89,13 @@ class TerminalInstance {
     this.createdAt = new Date().toISOString();
 
     const shell = process.env.SHELL || DEFAULT_SHELL;
+    const argv = spawn?.argv ?? resolvePtyShellArgv(shell);
+    const childEnv = spawn?.env
+      ? { ...spawn.env }
+      : sanitizedSubprocessEnv({
+          TERM: "xterm-256color",
+          COLORTERM: "truecolor",
+        });
     this.terminal = new Bun.Terminal({
       name: "xterm-256color",
       cols: columns,
@@ -95,15 +106,9 @@ class TerminalInstance {
     });
 
     try {
-      this.process = Bun.spawn(resolvePtyShellArgv(shell), {
+      this.process = Bun.spawn(argv, {
         cwd,
-        // Strip the daemon's own PORT/PASEO_PORT so shells (and everything
-        // they launch, e.g. Vite honoring PORT) never inherit this
-        // worktree's bind port from a different checkout's launch env.
-        env: sanitizedSubprocessEnv({
-          TERM: "xterm-256color",
-          COLORTERM: "truecolor",
-        }),
+        env: childEnv,
         terminal: this.terminal,
       });
 
@@ -114,6 +119,9 @@ class TerminalInstance {
         this.broadcastControl({ type: "exit", exitCode: code });
         try {
           if (!this.terminal.closed) this.terminal.close();
+        } catch {}
+        try {
+          onExit?.(code);
         } catch {}
       });
     } catch (err) {
@@ -295,8 +303,50 @@ class TerminalInstance {
 
 export class TerminalManager {
   private terminals = new Map<string, TerminalInstance>();
+  private readonly exitListeners = new Set<TerminalExitListener>();
 
   constructor(private readonly workspaces: WorkspaceService) {}
+
+  /** Subscribe to PTY exits (fired once per terminal when its process
+   *  settles). Used by the scripts service to mark runs stopped. */
+  onExit(listener: TerminalExitListener): () => boolean {
+    this.exitListeners.add(listener);
+    return () => this.exitListeners.delete(listener);
+  }
+
+  private notifyExit(terminalId: string, exitCode: number | null): void {
+    for (const listener of [...this.exitListeners]) {
+      try {
+        listener(terminalId, exitCode);
+      } catch {}
+    }
+  }
+
+  /** Spawn a workspace command attached to a PTY (script/service run).
+   *  The command executes under `bash -c` with the provided env so project
+   *  scripts see the same service variables Paseo provides. When the
+   *  command exits the terminal settles to `exited` with its exit code. */
+  async createCommand(
+    workspaceId: string,
+    input: { title: string; command: string; env?: Record<string, string | undefined>; cwd?: string; columns?: number; rows?: number },
+  ): Promise<TerminalSummary> {
+    const cwd = await this.workspaces.resolvePath(workspaceId, input.cwd ?? ".");
+    const id = `trm_${crypto.randomUUID()}`;
+    const cols = input.columns ?? DEFAULT_COLS;
+    const rows = input.rows ?? DEFAULT_ROWS;
+    const base = sanitizedSubprocessEnv({ TERM: "xterm-256color", COLORTERM: "truecolor" });
+    const env: Record<string, string | undefined> = { ...base, ...(input.env ?? {}) };
+    const instance = new TerminalInstance(id, workspaceId, input.title, cwd, cols, rows, {
+      // setsid --ctty prefix (Linux) gives the command a controlling
+      // terminal, matching interactive shells.
+      argv: process.platform === "linux" && (() => { try { return Bun.which("setsid"); } catch { return null; } })()
+        ? ["setsid", "--ctty", "/bin/bash", "-c", input.command]
+        : ["/bin/bash", "-c", input.command],
+      env,
+    }, (exitCode) => this.notifyExit(id, exitCode));
+    this.terminals.set(id, instance);
+    return instance.summary();
+  }
 
   async create(workspaceId: string, input?: CreateTerminalInput): Promise<TerminalSummary> {
     const cwd = await this.workspaces.resolvePath(workspaceId, input?.cwd ?? ".");
@@ -306,7 +356,7 @@ export class TerminalManager {
     const cols = input?.columns ?? DEFAULT_COLS;
     const rows = input?.rows ?? DEFAULT_ROWS;
 
-    const instance = new TerminalInstance(id, workspaceId, title, cwd, cols, rows);
+    const instance = new TerminalInstance(id, workspaceId, title, cwd, cols, rows, undefined, (exitCode) => this.notifyExit(id, exitCode));
     this.terminals.set(id, instance);
     return instance.summary();
   }

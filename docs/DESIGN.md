@@ -50,7 +50,7 @@ Persistent Bun daemon
 | Host support | Linux x64. |
 | UI | React, Bun HTML imports, Tailwind CSS, and shadcn/ui (+ Radix primitives, lucide-react, cmdk command palette, sonner toasts). Bun handles development rendering, bundling, and production packaging. Client state is `useState` + hand-rolled `subscribe*` socket helpers (`agentSocket`, `workspaceSocket`, `terminalSocket`, `previewSocket`); TanStack Query and Zustand are sanctioned but deferred per `docs/WS.md` and are **not** dependencies. Splits use a custom split-tree renderer + `react-resizable-panels`; there is **no** dnd-kit dependency — pane move/split is via `moveTab`/`splitTabGroup`/tab actions, context menus, and keyboard paths. |
 | Markdown | Agent prose renders with `streamdown` (plus `shiki`/`prism-react-renderer` for code). |
-| Scope | Multiple agents and live terminals per workspace; durable projects/workspaces/worktrees **including `directory` workspaces**; Git/files/diff with stage/commit/pull/fetch/merge; web previews via agent-browser; workspace setup actions from `paseo.json`; a persistent split/tab canvas; responsive PWA. |
+| Scope | Multiple agents and live terminals per workspace; durable projects/workspaces/worktrees **including `directory` workspaces**; Git/files/diff with stage/commit/pull/fetch/merge; web previews via agent-browser; workspace setup/teardown actions and runnable scripts/services from `paseo.json`; a persistent split/tab canvas; responsive PWA. |
 | Worktree locations | Users choose configured named locations. Workspace labels are independent of Git branch names and on-disk directory names. Locations may be `global` or `project` scoped with an `enabled` flag. |
 | Extensibility | Built-in theme/font/tool-renderer packs served read-only over HTTP (`GET /api/customization/*`; no upload endpoint). No executable plugin framework. |
 | Pi extras | Pi is the only agent runtime. Subagent/MCP/extension orchestration management stays hidden, but Passage surfaces: Pi slash commands (`/compact` action with confirmation, `/model` and `/thinking` prompt-text), extension UI question cards (`pendingUiRequest` + `POST /api/agents/:id/ui-response`), the `skillsAvailable` capability flag, and model/thinking pickers. Skill-backed slash entries require an explicit persisted workspace-trust decision; without one, only Pi built-ins are offered. |
@@ -166,7 +166,7 @@ Project
     ├── Terminal(s)       ── live PTYs, scoped to the workspace
     ├── Files and editors (explorer, editor, changes, diff)
     ├── Web preview(s)    ── workspace-bound agent-browser sessions
-    ├── Workspace action(s) ── setup runs from paseo.json (daemon memory only)
+    ├── Workspace action(s) ── setup/teardown runs and paseo.json scripts/services (daemon memory only)
     └── Per-workspace pane layout + global settings
 ```
 
@@ -697,8 +697,43 @@ are daemon memory only and do not survive a daemon restart. Only commands
 from `paseo.json` ever execute — the API accepts an action id, never a
 command string — and a setup failure never fails creation or deletes user
 work; the create response carries the background run reference for the caller
-to poll. Teardown scripts and auto-allocated ports are out of scope
-(`paseo.json` `servicePorts` is ignored).
+to poll.
+
+`worktree.teardown` commands run sequentially in the worktree directory
+during archival/removal, *before* the directory is touched and *after*
+running scripts are stopped. They block teardown (bounded per-command
+timeout, stops at the first failure) but a teardown failure never blocks
+the archival/removal itself — it is logged and the operation proceeds.
+
+### Workspace scripts and services
+
+`paseo.json` `scripts` are runnable from the workspace Actions button
+(hidden when no scripts are declared). Plain entries run once in a
+workspace PTY and report an exit code; `"type": "service"` entries are
+supervised long-running processes with an allocated port. Every start owns
+one daemon PTY (run/stop/restart/view-terminal per row, plus open-URL and
+copy-URL for services); at most one live instance per script; crashes stay
+stopped with their exit code for manual restart. Starts are manual only —
+opening a workspace never boots anything — and `worktree.terminals`
+auto-open is ignored.
+
+Service ports resolve per entry: an explicit `port` always wins, otherwise
+a stable per-workspace plan is allocated once and retained across restarts
+(`portScript` trusted blindly, else `range` skipping reserved ports, else
+an OS ephemeral port). Services receive `PASEO_PORT`, direct
+`http://127.0.0.1:<port>` `PASEO_URL` / `PASEO_SERVICE_*_URL` vars (no
+reverse proxy in v1), peer `PASEO_SERVICE_*_PORT` vars for planned peers,
+and `HOST=0.0.0.0`. Script settle publishes an `actions-changed`
+workspace invalidation (`script:<name>` run IDs, ignored by setup-toast
+tracking); clients refetch the script list over HTTP. Runtimes and port
+plans are daemon memory only and do not survive a daemon restart. As with
+setup, only `paseo.json`-declared commands ever execute — the API accepts
+a script name, never a command string — and scripts require no trust gate.
+
+Script service ports also feed preview port candidates: running services
+lead at high confidence, stopped services with a planned or explicit port
+follow as uncertain, and new preview sessions default to the first high
+candidate, else the first declared script port, else `localhost:3000`.
 
 ### Files, editor, changes, and diff panels
 

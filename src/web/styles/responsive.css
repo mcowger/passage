@@ -79,6 +79,10 @@
   .mobile-sheet-select:hover { background: var(--surface-hover); }
   .mobile-sheet-close { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 44px; min-height: 44px; border: 0; border-radius: 8px; background: none; color: var(--muted); }
   .mobile-sheet-close:hover { background: var(--surface-hover); color: var(--foreground); }
+  /* Script rows: text action buttons (Run/Stop/Restart/Logs) with the
+     same 44px touch targets as the close buttons above. */
+  .mobile-sheet-action { display: inline-flex; align-items: center; justify-content: center; flex: none; min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: none; color: var(--accent); font-size: 13px; font-weight: 600; }
+  .mobile-sheet-action:hover { background: var(--surface-hover); }
   /* Composer toolbar: single row at every viewport -- it never wraps.
      The attach (+) button and every action button keep their size; the
      model chip is the flexible item and shrinks with an ellipsis so

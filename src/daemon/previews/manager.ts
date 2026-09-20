@@ -12,6 +12,7 @@ import {
 } from "../../shared/domain/previews.ts";
 import type { MetadataRepositories } from "../metadata/repositories.ts";
 import type { WorkspaceService } from "../workspaces/service.ts";
+import type { WorkspaceScriptsService } from "../workspaces/scripts.ts";
 import { errorFields, logger } from "../logging.ts";
 import { sanitizedSubprocessEnv } from "../env.ts";
 
@@ -35,6 +36,10 @@ export type PortCandidate = {
   confidence: "high" | "uncertain";
   processName: string | null;
   pid: number | null;
+  /** Where the candidate came from: `script` = a `paseo.json` service port
+   *  (running or declared), `process` = a loopback listener found by
+   *  scanning /proc. Clients prefer script ports for preview defaults. */
+  source: "script" | "process";
 };
 
 export type AgentBrowserRunner = {
@@ -118,6 +123,7 @@ export class WebPreviewManager {
     private readonly repositories: MetadataRepositories,
     private readonly workspaces: WorkspaceService,
     runner?: AgentBrowserRunner,
+    private readonly scripts?: WorkspaceScriptsService,
   ) {
     this.binary = resolveAgentBrowserBinary();
     this.runner = runner ?? new RealAgentBrowserRunner(this.binary);
@@ -468,21 +474,29 @@ export class WebPreviewManager {
     }
   }
 
-  /** Suggest loopback dev-server candidates related to this workspace. */
+  /** Suggest loopback dev-server candidates related to this workspace.
+   *  `paseo.json` service ports come first: running services at high
+   *  confidence, stopped-but-known ports (planned or explicit) as
+   *  uncertain. Loopback listeners from /proc follow, minus duplicates and
+   *  excluded ports. Never throws — failures yield fewer candidates. */
   async portCandidates(workspaceId: string, excludedPorts: number[] = []): Promise<PortCandidate[]> {
     const workspace = await this.workspaces.resolvePath(workspaceId, ".").catch(() => null);
-    if (!workspace || process.platform !== "linux") return [];
+    if (!workspace) return [];
     const excluded = new Set(excludedPorts);
+    const scriptCandidates = await this.scriptCandidates(workspaceId, excluded).catch(() => []);
+    const seen = new Set(scriptCandidates.map((c) => c.port));
+    if (process.platform !== "linux") return scriptCandidates;
     try {
       const listening = await listLoopbackListeners();
       const inodeToListener = new Map(listening.map((item) => [item.inode, item.port]));
       const pidOf = await mapSocketInodesToPids([...inodeToListener.keys()]);
-      const candidates: PortCandidate[] = [];
+      const candidates: PortCandidate[] = [...scriptCandidates];
       for (const [inode, port] of inodeToListener) {
-        if (excluded.has(port)) continue;
+        if (excluded.has(port) || seen.has(port)) continue;
+        seen.add(port);
         const pid = pidOf.get(inode);
         if (!pid) {
-          candidates.push({ port, confidence: "uncertain", processName: null, pid: null });
+          candidates.push({ port, confidence: "uncertain", processName: null, pid: null, source: "process" });
           continue;
         }
         const meta = await processMeta(pid);
@@ -492,12 +506,49 @@ export class WebPreviewManager {
           confidence: related ? "high" : "uncertain",
           processName: meta?.name ?? null,
           pid,
+          source: "process",
         });
       }
-      return candidates.sort((left, right) => left.port - right.port);
+      return candidates.sort((left, right) =>
+        left.source === right.source ? left.port - right.port : left.source === "script" ? -1 : 1,
+      );
     } catch {
-      return [];
+      return scriptCandidates;
     }
+  }
+
+  /** `paseo.json` service ports for a workspace, in manifest order: running
+   *  services (high confidence) first, then stopped services whose port is
+   *  known from the retained plan or an explicit manifest `port`
+   *  (uncertain — nothing may be listening yet). Services with no known
+   *  port are skipped: allocating just to suggest would pollute the plan.
+   *  Never throws. */
+  private async scriptCandidates(
+    workspaceId: string,
+    excluded: ReadonlySet<number>,
+  ): Promise<PortCandidate[]> {
+    if (!this.scripts) return [];
+    const runtimes = await this.scripts.list(workspaceId);
+    const declared = this.scripts.declaredServicePorts(workspaceId);
+    const declaredByName = new Map(declared.map((d) => [d.name, d.port]));
+    const seen = new Set<number>();
+    const running: PortCandidate[] = [];
+    const stopped: PortCandidate[] = [];
+    for (const runtime of runtimes) {
+      if (runtime.type !== "service") continue;
+      const port = runtime.port ?? declaredByName.get(runtime.name) ?? null;
+      if (port === null || excluded.has(port) || seen.has(port)) continue;
+      seen.add(port);
+      const candidate: PortCandidate = {
+        port,
+        confidence: runtime.lifecycle === "running" ? "high" : "uncertain",
+        processName: null,
+        pid: null,
+        source: "script",
+      };
+      (runtime.lifecycle === "running" ? running : stopped).push(candidate);
+    }
+    return [...running, ...stopped];
   }
 
   sessionName(id: string): string {

@@ -10,6 +10,7 @@ import {
   WorkspaceActionsService,
   normalizeLifecycleCommands,
   readPaseoSetupCommands,
+  readPaseoTeardownCommands,
 } from "./actions.ts";
 
 const roots: string[] = [];
@@ -307,6 +308,56 @@ describe("WorktreeService setup auto-run", () => {
     expect(settled.status).toBe("failed");
     expect(settled.results[0].exitCode).toBe(7);
     expect(f.repositories.workspaces.get(result.workspace.id)).toBeDefined();
+    f.store.close();
+  });
+});
+
+describe("readPaseoTeardownCommands", () => {
+  test("reads teardown lists and ignores missing files", async () => {
+    const f = await fixture();
+    const dir = join(f.root, `ws-${crypto.randomUUID()}`);
+    await mkdir(dir, { recursive: true });
+    expect((await import("./actions.ts")).readPaseoTeardownCommands(dir)).toEqual([]);
+    await writeFile(join(dir, "paseo.json"), JSON.stringify({ worktree: { teardown: ["rm -rf .cache", " "] } }));
+    expect(readPaseoTeardownCommands(dir)).toEqual(["rm -rf .cache"]);
+    f.store.close();
+  });
+});
+
+describe("WorkspaceActionsService runTeardown", () => {
+  test("runs teardown commands sequentially and reports results", async () => {
+    const f = await fixture();
+    const { workspace, dir } = await workspaceWithCommands(f, undefined);
+    await writeFile(
+      join(dir, "paseo.json"),
+      JSON.stringify({ worktree: { setup: [], teardown: ["touch torn-down.txt", "echo bye"] } }),
+    );
+    const result = await f.actions.runTeardown(workspace.id);
+    expect(result?.commands).toEqual(["touch torn-down.txt", "echo bye"]);
+    expect(result?.results.every((r) => r.exitCode === 0)).toBe(true);
+    expect(await Bun.file(join(dir, "torn-down.txt")).exists()).toBe(true);
+    f.store.close();
+  });
+
+  test("stops at the first failing teardown command", async () => {
+    const f = await fixture();
+    const { workspace, dir } = await workspaceWithCommands(f, undefined);
+    await writeFile(
+      join(dir, "paseo.json"),
+      JSON.stringify({ worktree: { teardown: ["exit 4", "touch should-not-exist.txt"] } }),
+    );
+    const result = await f.actions.runTeardown(workspace.id);
+    expect(result?.results).toHaveLength(1);
+    expect(result?.results[0].exitCode).toBe(4);
+    expect(await Bun.file(join(dir, "should-not-exist.txt")).exists()).toBe(false);
+    f.store.close();
+  });
+
+  test("returns null without teardown commands or a missing directory", async () => {
+    const f = await fixture();
+    const { workspace } = await workspaceWithCommands(f, undefined);
+    expect(await f.actions.runTeardown(workspace.id)).toBeNull();
+    expect(await f.actions.runTeardown("wsp_missing")).toBeNull();
     f.store.close();
   });
 });

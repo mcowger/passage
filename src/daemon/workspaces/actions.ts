@@ -1,6 +1,4 @@
-import { readFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { join } from "node:path";
 import { workspaceSchema, type Workspace } from "../../shared/domain/workspaces.ts";
 import {
   WORKSPACE_SETUP_ACTION_ID,
@@ -11,9 +9,9 @@ import {
 } from "../../shared/domain/workspace-actions.ts";
 import type { MetadataRepositories } from "../metadata/repositories.ts";
 import { sanitizedSubprocessEnv } from "../env.ts";
+import { readPaseoConfig } from "./paseo-config.ts";
 
 export const PASEO_CONFIG_FILE_NAME = "paseo.json";
-const MAX_COMMANDS = 50;
 /** Finished runs retained in memory; the oldest finished run is evicted past this. */
 const MAX_RETAINED_RUNS = 100;
 const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
@@ -49,21 +47,13 @@ export function normalizeLifecycleCommands(commands: unknown): string[] {
  *  directory. Missing files, invalid JSON, and unexpected shapes all yield
  *  an empty list — everything except the setup list is ignored. */
 export function readPaseoSetupCommands(cwd: string): string[] {
-  try {
-    const json: unknown = JSON.parse(
-      readFileSync(join(cwd, PASEO_CONFIG_FILE_NAME), "utf8"),
-    );
-    if (!json || typeof json !== "object" || !("worktree" in json)) return [];
-    const worktree = (json as { worktree?: unknown }).worktree;
-    if (!worktree || typeof worktree !== "object" || !("setup" in worktree)) {
-      return [];
-    }
-    return normalizeLifecycleCommands(
-      (worktree as { setup?: unknown }).setup,
-    ).slice(0, MAX_COMMANDS);
-  } catch {
-    return [];
-  }
+  return readPaseoConfig(cwd).setup;
+}
+
+/** Read `worktree.teardown` commands. Same lenient contract as setup:
+ *  anything unreadable yields an empty list. */
+export function readPaseoTeardownCommands(cwd: string): string[] {
+  return readPaseoConfig(cwd).teardown;
 }
 
 function truncateOutput(output: string): string {
@@ -250,6 +240,31 @@ export class WorkspaceActionsService {
     }
     if (entry.record.status === "running") entry.controller.abort();
     return snapshot(entry.record);
+  }
+
+  /** Run `worktree.teardown` commands sequentially in the worktree
+   *  directory, blocking until they settle. Used during workspace
+   *  archival/removal *before* the directory is touched. Stops at the
+   *  first failing command (mirroring setup). Never throws: failures are
+   *  reported in the returned results so teardown can never block the
+   *  archival/removal itself. Returns null when there is nothing to run. */
+  async runTeardown(
+    workspaceId: string,
+  ): Promise<{ commands: string[]; results: WorkspaceActionCommandResult[] } | null> {
+    const value = this.repositories.workspaces.get(workspaceId);
+    if (!value) return null;
+    const cwd = await realpath(value.cwd).catch(() => null);
+    if (!cwd) return null;
+    const commands = readPaseoTeardownCommands(cwd);
+    if (commands.length === 0) return null;
+    const controller = new AbortController();
+    const results: WorkspaceActionCommandResult[] = [];
+    for (const command of commands) {
+      const result = await execSetupCommand(command, cwd, this.commandTimeoutMs, controller.signal);
+      results.push(result);
+      if (result.exitCode !== 0) break;
+    }
+    return { commands, results };
   }
 
   private async execute(record: MutableRun, signal: AbortSignal, cwd: string): Promise<void> {

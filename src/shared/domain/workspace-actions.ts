@@ -16,6 +16,51 @@ import { workspaceSchema } from "./workspaces.ts";
 
 export const WORKSPACE_SETUP_ACTION_ID = "setup" as const;
 
+export const workspaceScriptTypeSchema = z.enum(["script", "service"]);
+export type WorkspaceScriptType = z.infer<typeof workspaceScriptTypeSchema>;
+
+/** A single `scripts` entry from `paseo.json`: the declared manifest for one
+ *  runnable. `type` defaults to `"script"` (run once, report an exit
+ *  code); `"service"` means supervised long-running with an allocated
+ *  port and peer env. `port` is an explicit override that always wins over
+ *  range/portScript allocation. */
+export const workspaceScriptSchema = z.object({
+  name: z.string().min(1).max(128),
+  type: workspaceScriptTypeSchema,
+  command: z.string().min(1).max(8192),
+  port: z.number().int().min(1).max(65535).nullable(),
+}).strict();
+export type WorkspaceScript = z.infer<typeof workspaceScriptSchema>;
+
+export const workspaceScriptLifecycleSchema = z.enum(["running", "stopped"]);
+export type WorkspaceScriptLifecycle = z.infer<typeof workspaceScriptLifecycleSchema>;
+
+/** Live runtime snapshot for one script. `port`/`url` are set for running
+ *  services only (`url` is the direct `http://127.0.0.1:<port>` form until
+ *  a reverse proxy exists). `terminalId` points at the backing PTY while
+ *  running; `exitCode` is the last observed exit for stopped one-shots.
+ *  `health` is a display-only loopback port probe (`healthy` = accepting,
+ *  `unhealthy` = not) for running services — null when there is nothing
+ *  to probe (stopped or portless). It drives no supervision: crashes stay
+ *  stopped regardless, and a listening port implies nothing about
+ *  correctness. */
+export const workspaceScriptRuntimeSchema = z.object({
+  name: z.string().min(1).max(128),
+  type: workspaceScriptTypeSchema,
+  lifecycle: workspaceScriptLifecycleSchema,
+  terminalId: z.string().min(1).max(128).nullable(),
+  exitCode: z.number().int().nullable(),
+  port: z.number().int().min(1).max(65535).nullable(),
+  url: z.string().max(512).nullable(),
+  health: z.enum(["healthy", "unhealthy"]).nullable(),
+}).strict();
+export type WorkspaceScriptRuntime = z.infer<typeof workspaceScriptRuntimeSchema>;
+
+export const workspaceScriptListSchema = z.object({
+  scripts: z.array(workspaceScriptRuntimeSchema).max(50),
+}).strict();
+export type WorkspaceScriptList = z.infer<typeof workspaceScriptListSchema>;
+
 export const workspaceActionSchema = z.object({
   id: z.literal(WORKSPACE_SETUP_ACTION_ID),
   label: z.string().min(1).max(256),
