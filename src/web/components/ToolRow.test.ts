@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { ToolRow, getReadToolImagePath, getShellOutputPreview, getToolSummary, toWorkspaceRelativePath } from "./ToolRow.tsx";
+import { ToolRow, getExtraToolSummary, getReadToolImagePath, getShellOutputPreview, getToolSummary, toWorkspaceRelativePath } from "./ToolRow.tsx";
 import type { TimelineItem } from "../../shared/domain/agents.ts";
 
 describe("getToolSummary", () => {
@@ -518,6 +518,182 @@ describe("ToolRow component", () => {
     );
 
     expect(html).not.toContain("[object Object]");
+  });
+});
+
+describe("extra tool summaries match on substring + shape", () => {
+  test("exa search uses the query", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "t1", kind: "tool", name: "exa_web_search_exa",
+      input: { query: "Bun allowedHosts", objective: "Find docs" },
+      status: "complete",
+    };
+    const s = getToolSummary(item);
+    expect(s.title).toBe("Web search");
+    expect(s.subtitle).toBe("Bun allowedHosts");
+    expect(s.icon).toBe("web");
+  });
+
+  test("prefixed names still match when the shape confirms", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "t2", kind: "tool", name: "mcp_exa_web_search_exa",
+      input: { query: "frp docs" },
+      status: "complete",
+    };
+    expect(getToolSummary(item).title).toBe("Web search");
+    const file: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "t3", kind: "tool", name: "ns_github_get_file_contents",
+      input: { owner: "fatedier", repo: "frp", path: "/" },
+      status: "complete",
+    };
+    expect(getToolSummary(file).title).toBe("GitHub file");
+  });
+
+  test("wrong shape falls back to generic", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "t4", kind: "tool", name: "exa_web_search_exa",
+      input: { urls: ["https://a"] },
+      status: "complete",
+    };
+    // urls shape does not confirm a search-named tool -- stays generic.
+    expect(getToolSummary(item).title).toBe("exa_web_search_exa");
+  });
+
+  test("github actions get vs list vs trigger", () => {
+    const get = getExtraToolSummary("gh-actions-get", { owner: "mcowger", repo: "olive", resource_id: "35358512186" });
+    expect(get.title).toBe("Actions run");
+    const list = getExtraToolSummary("gh-actions-list", { owner: "mcowger", repo: "olive" });
+    expect(list.title).toBe("Actions runs");
+    const trig = getExtraToolSummary("gh-actions-trigger", { workflow_id: "docker-publish.yml", ref: "main" });
+    expect(trig.subtitle).toBe("docker-publish.yml @ main");
+  });
+
+  test("process summary combines action and target", () => {
+    const item: Extract<TimelineItem, { kind: "tool" }> = {
+      id: "t5", kind: "tool", name: "process",
+      input: { action: "start", name: "llama-persist" },
+      status: "complete",
+    };
+    const s = getToolSummary(item);
+    expect(s.title).toBe("Process");
+    expect(s.subtitle).toBe("start llama-persist");
+    expect(s.icon).toBe("system");
+  });
+
+  test("every extra family has a distinct icon", () => {
+    expect(getExtraToolSummary("exa-fetch", { urls: ["https://a"] }).icon).toBe("download");
+    expect(getExtraToolSummary("exa-agent", { query: "q" }).icon).toBe("agent");
+    expect(getExtraToolSummary("github-file", { owner: "o", repo: "r", path: "/" }).icon).toBe("filecode");
+    expect(getExtraToolSummary("github-code", { query: "q" }).icon).toBe("codesearch");
+    expect(getExtraToolSummary("github-repos", { query: "q" }).icon).toBe("package");
+    expect(getExtraToolSummary("gh-actions-get", { owner: "o", repo: "r", resource_id: "1" }).icon).toBe("activity");
+    expect(getExtraToolSummary("gh-actions-list", { owner: "o", repo: "r" }).icon).toBe("list");
+    expect(getExtraToolSummary("github-pr", { owner: "o", repo: "r", pullNumber: 1, method: "get" }).icon).toBe("pr");
+    expect(getExtraToolSummary("gh-actions-trigger", { workflow_id: "ci.yml", ref: "main" }).icon).toBe("trigger");
+    expect(getExtraToolSummary("recall", { query: "q" }).icon).toBe("recall");
+  });
+
+  test("recall summary uses query or touched mode", () => {
+    expect(getExtraToolSummary("recall", { query: "nilskluewer", scope: "all" }).subtitle).toBe("nilskluewer");
+    expect(getExtraToolSummary("recall", { mode: "touched" }).subtitle).toBe("touched");
+  });
+});
+
+describe("extra tool output views", () => {
+  function render(item: Extract<TimelineItem, { kind: "tool" }>): string {
+    return ReactDOMServer.renderToStaticMarkup(React.createElement(ToolRow, { item, open: true }));
+  }
+
+  test("exa search renders result titles", () => {
+    const html = render({
+      id: "x1", kind: "tool", name: "exa_web_search_exa",
+      input: { query: "frp", objective: "Find docs" },
+      result: "Title: fatedier/frp | URL: https://github.com/fatedier/frp | Published: N/A | Author: N/A | Highlights:\nbody\n---\nTitle: Other | URL: https://example.com | Published: 2026-01-01 | Author: Jane | Highlights:\nmore",
+      status: "complete",
+    });
+    expect(html).toContain("Results · 2");
+    expect(html).toContain("fatedier/frp");
+    expect(html).toContain("https://github.com/fatedier/frp");
+  });
+
+  test("github dir listing renders entries", () => {
+    const html = render({
+      id: "x2", kind: "tool", name: "github_get_file_contents",
+      input: { owner: "fatedier", repo: "frp", path: "/" },
+      result: JSON.stringify([
+        { type: "dir", size: 0, name: ".github", path: ".github" },
+        { type: "file", size: 324, name: ".gitignore", path: ".gitignore" },
+      ]),
+      status: "complete",
+    });
+    expect(html).toContain("Contents · 1 files, 1 dirs");
+    expect(html).toContain(".gitignore");
+  });
+
+  test("code search renders matches", () => {
+    const html = render({
+      id: "x3", kind: "tool", name: "github_search_code",
+      input: { query: "RegisterProxyFlags", perPage: 10 },
+      result: JSON.stringify({ total_count: 1, items: [{ name: "flags.go", path: "pkg/config/flags.go", repository: "fatedier/frp", text_matches: [{ fragment: "func RegisterProxyFlags(cmd", matches: [] }] }] }),
+      status: "complete",
+    });
+    expect(html).toContain("Matches · 1");
+    expect(html).toContain("RegisterProxyFlags");
+  });
+
+  test("repo search renders stars", () => {
+    const html = render({
+      id: "x4", kind: "tool", name: "github_search_repositories",
+      input: { query: "paseo" },
+      result: JSON.stringify({ total_count: 1, items: [{ full_name: "getpaseo/paseo", description: "Orchestrate", language: "TypeScript", stargazers_count: 17147 }] }),
+      status: "complete",
+    });
+    expect(html).toContain("getpaseo/paseo");
+    expect(html).toContain("17147");
+  });
+
+  test("actions run renders status card", () => {
+    const html = render({
+      id: "x5", kind: "tool", name: "github_actions_get",
+      input: { method: "get_workflow_run", owner: "mcowger", repo: "olive", resource_id: "35358512186" },
+      result: JSON.stringify({ id: 1, name: "CI", display_title: "fix(plaud)", status: "completed", conclusion: "success", head_branch: "main", run_number: 40, event: "push" }),
+      status: "complete",
+    });
+    expect(html).toContain("Run #40");
+    expect(html).toContain("fix(plaud)");
+  });
+
+  test("PR get renders number and title", () => {
+    const html = render({
+      id: "x6", kind: "tool", name: "github_pull_request_read",
+      input: { method: "get", owner: "openai", repo: "codex", pullNumber: 29602 },
+      result: JSON.stringify({ number: 29602, title: "Flatten namespace tools" }),
+      status: "complete",
+    });
+    expect(html).toContain("PR #29602");
+    expect(html).toContain("Flatten namespace tools");
+  });
+
+  test("recall renders entries", () => {
+    const html = render({
+      id: "x7", kind: "tool", name: "vcc_recall",
+      input: { query: "nilskluewer", scope: "all", page: 1 },
+      result: 'Page 1/8 (40 total matches (scope: all)) for "q":\n\n#393 [tool_result] some preview',
+      status: "complete",
+    });
+    expect(html).toContain("40 matches");
+    expect(html).toContain("#393");
+  });
+
+  test("process renders status", () => {
+    const html = render({
+      id: "x8", kind: "tool", name: "process",
+      input: { action: "start", name: "llama-persist" },
+      result: 'Started process llama-persist (proc_000f) with pid 1333879.',
+      status: "complete",
+    });
+    expect(html).toContain("Status");
+    expect(html).toContain("llama-persist");
   });
 });
 
