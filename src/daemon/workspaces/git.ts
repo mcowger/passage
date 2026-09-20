@@ -125,7 +125,9 @@ export class GitService {
    *  empty indexes fail via validation or Git itself. */
   async commit(cwd: string, message: string, options?: Options): Promise<string> {
     if (message.trim() === "") throw new GitError("Commit message is empty");
-    await this.run(cwd, ["commit", "-m", message], options);
+    // Pre-commit hooks (lint, typecheck, tests) can take well beyond the
+    // default 3s git timeout, so allow up to 60s unless overridden.
+    await this.run(cwd, ["commit", "-m", message], { timeoutMs: 60_000, ...options });
     return (await this.run(cwd, ["rev-parse", "HEAD"], options)).stdout.trim();
   }
   async pull(cwd: string, options?: Options): Promise<void> {
