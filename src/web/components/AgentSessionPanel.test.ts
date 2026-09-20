@@ -7,9 +7,11 @@ import {
   loadAgentSessionWithRetry,
   mergeLoadedHistory,
   prependOlderHistory,
+  selectTakeHydration,
   type AgentSessionLoadResult,
   type AgentSessionLoader,
 } from "./AgentSessionPanel.tsx";
+import type { KeepAliveSnapshot } from "../agentKeepAlive.ts";
 import type { TimelineItem } from "../../shared/domain/agents.ts";
 
 const summary = { id: "agt-1" } as unknown as AgentSummary;
@@ -298,3 +300,41 @@ describe("loadAgentSessionWithRetry", () => {
 });
 
 
+
+describe("selectTakeHydration", () => {
+  const kept = (overrides: Partial<KeepAliveSnapshot> = {}): KeepAliveSnapshot => ({
+    agent: summary,
+    history,
+    capabilities,
+    nextBefore: 42,
+    sequence: 9,
+    stale: false,
+    ...overrides,
+  });
+
+  test("warm snapshot hydrates everything for a silent reconcile", () => {
+    const hydration = selectTakeHydration(kept());
+    expect(hydration.cold).toBe(false);
+    expect(hydration.history).toBe(history);
+    expect(hydration.capabilities).toBe(capabilities);
+    expect(hydration.nextBefore).toBe(42);
+    expect(hydration.sequence).toBe(9);
+  });
+
+  test("stale snapshot counts as cold but keeps capabilities and sequence", () => {
+    const hydration = selectTakeHydration(kept({ stale: true }));
+    expect(hydration.cold).toBe(true);
+    expect(hydration.history).toBeUndefined();
+    expect(hydration.nextBefore).toBeUndefined();
+    expect(hydration.capabilities).toBe(capabilities);
+    expect(hydration.sequence).toBe(9);
+  });
+
+  test("miss or history-less snapshot is a full cold load", () => {
+    expect(selectTakeHydration(undefined).cold).toBe(true);
+    expect(selectTakeHydration(undefined).sequence).toBe(0);
+    const noHistory = selectTakeHydration(kept({ history: undefined }));
+    expect(noHistory.cold).toBe(true);
+    expect(noHistory.capabilities).toBe(capabilities);
+  });
+});

@@ -6,6 +6,7 @@ import type { WorkspaceActionRun } from "../../shared/domain/workspace-actions.t
 import type { WorkspaceApi } from "../api.ts";
 import { toast } from "sonner";
 import { subscribeWorkspace } from "../workspaceSocket.ts";
+import { agentKeepAlive } from "../components/AgentSessionPanel.tsx";
 import { setupToastId } from "./appHelpers.tsx";
 
 export type WorkspaceResourcesCallbacks = {
@@ -120,6 +121,9 @@ export function useWorkspaceResources(
     setSelectedAgentId(undefined);
     setSelectedTerminalId(undefined);
     setSelectedPreviewId(undefined);
+    // A workspace switch orphans every parked agent snapshot: drop
+    // cross-workspace keep-alive state so old-workspace sockets never linger.
+    agentKeepAlive.prune(workspaceId);
     onWorkspaceSwitched();
     if (workspaceId) {
       void loadAgents(workspaceId);

@@ -206,6 +206,15 @@ describe("subscribeAgent lifecycle (docs/IOSWEBSOCKETS.md)", () => {
     sub.close();
   });
 
+  test("resumes from a keep-alive handoff sequence instead of zero", () => {
+    const sub = subscribeAgent("agent-1", () => {}, async () => {}, undefined, 7);
+    const socket = FakeWebSocket.instances[0]!;
+    socket.serverOpen();
+    const subscribe = socket.sent.find((m) => (m as { type?: string }).type === "subscribe");
+    expect(subscribe).toMatchObject({ payload: { agentId: "agent-1", afterSequence: 7 } });
+    sub.close();
+  });
+
   test("close() is terminal: no further reconnect, probe, or resume handling", async () => {
     const sub = subscribeAgent("agent-1", () => {}, async () => {});
     const socket = FakeWebSocket.instances[0]!;

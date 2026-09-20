@@ -3,6 +3,12 @@ import type { AgentCapabilities, AgentHistory, AgentSummary } from "../../shared
 import { timelineItemPayloadSchema } from "../../shared/domain/agents.ts";
 import type { WorkspaceSettings } from "../../shared/domain/settings.ts";
 import { subscribeAgent } from "../agentSocket.ts";
+import { AgentKeepAliveStore, type KeepAliveSnapshot } from "../agentKeepAlive.ts";
+
+/** Process-wide background keep-alive for recently viewed agents (see
+ *  `agentKeepAlive.ts`). Built with this module's own `subscribeAgent`
+ *  binding so test `mock.module` stubs apply to background sockets too. */
+export const agentKeepAlive = new AgentKeepAliveStore(subscribeAgent);
 import type { WorkspaceApi } from "../api.ts";
 import { addOptimisticUserMessage, applyRowUpsert, applyUsageEvent } from "../lib/transcript-apply.ts";
 import { deriveStreamPhase, emptyStreamActivity, measureEnvelopeBytes, trackStreamFrame, type StreamActivity } from "../lib/stream-activity.ts";
@@ -144,6 +150,42 @@ export function historyReplaced(current: AgentHistory | undefined, loaded: Agent
   return loaded !== undefined && (!current || current.transcriptEpoch !== loaded.transcriptEpoch);
 }
 
+/** How a foreground mount consumes a parked keep-alive snapshot. */
+export type TakeHydration = {
+  history: AgentHistory | undefined;
+  capabilities: AgentCapabilities | undefined;
+  nextBefore: number | undefined;
+  /** Resume sequence for the foreground socket (replay-or-reconcile). */
+  sequence: number;
+  /** True when there is no usable cached timeline: paint the loading state
+   *  and run a full initial load instead of a silent reconcile. */
+  cold: boolean;
+};
+
+/** Maps a parked snapshot to mount state. Stale snapshots (replay gap,
+ *  settlement, or transcript reset while parked) count as cold even when
+ *  they carry a timeline: `mergeLoadedHistory` intentionally preserves a
+ *  same-epoch timeline, so hydrating a gapped one would leave the missed
+ *  rows missing indefinitely. Capabilities are always safe to reuse. */
+export function selectTakeHydration(kept: KeepAliveSnapshot | undefined): TakeHydration {
+  if (kept && !kept.stale && kept.history) {
+    return {
+      history: kept.history,
+      capabilities: kept.capabilities,
+      nextBefore: kept.nextBefore,
+      sequence: kept.sequence,
+      cold: false,
+    };
+  }
+  return {
+    history: undefined,
+    capabilities: kept?.capabilities,
+    nextBefore: undefined,
+    sequence: kept?.sequence ?? 0,
+    cold: true,
+  };
+}
+
 /**
  * Prepends an older page of history (fetched by scrolling up) onto the
  * currently rendered timeline. Ids are deduped defensively in case the page
@@ -158,12 +200,15 @@ export function prependOlderHistory(current: AgentHistory | undefined, older: Ag
 }
 
 export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, previewHistory, settings, onWorkspaceDeleted }: AgentSessionPanelProps) {
+  // Hydrate instantly from the background keep-alive when this agent was
+  // recently visible: the cached timeline paints on the first frame and the
+  // mount load below reconciles silently instead of flashing a spinner.
   const [agent, setAgent] = useState(initialAgent);
-  const [history, setHistory] = useState<AgentHistory>();
-  const [capabilities, setCapabilities] = useState<AgentCapabilities>();
-  const [loading, setLoading] = useState(true);
+  const [history, setHistory] = useState<AgentHistory | undefined>(() => selectTakeHydration(agentKeepAlive.peek(initialAgent.id)).history);
+  const [capabilities, setCapabilities] = useState<AgentCapabilities | undefined>(() => selectTakeHydration(agentKeepAlive.peek(initialAgent.id)).capabilities);
+  const [loading, setLoading] = useState(() => selectTakeHydration(agentKeepAlive.peek(initialAgent.id)).cold);
   const [error, setError] = useState("");
-  const [nextBefore, setNextBefore] = useState<number>();
+  const [nextBefore, setNextBefore] = useState<number | undefined>(() => selectTakeHydration(agentKeepAlive.peek(initialAgent.id)).nextBefore);
   const [loadingOlder, setLoadingOlder] = useState(false);
   // Bumped on every history load so the composer's git buttons re-check
   // status even when the live `git-status-changed` WS invalidations that
@@ -173,6 +218,15 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   const generation = useRef(0);
   const historyRef = useRef<AgentHistory | undefined>(undefined);
   historyRef.current = history;
+  const agentRef = useRef(initialAgent);
+  agentRef.current = agent;
+  const capabilitiesRef = useRef<AgentCapabilities | undefined>(undefined);
+  capabilitiesRef.current = capabilities;
+  const nextBeforeRef = useRef<number | undefined>(undefined);
+  nextBeforeRef.current = nextBefore;
+  // Last applied `pi` stream sequence, handed to the keep-alive (and back)
+  // so each resubscribe replays only the gap instead of starting from 0.
+  const seqRef = useRef(0);
   // Written on every relayed `pi` frame (a ref, not state, so a frame burst
   // never adds a render); the pill samples it on its own interval tick.
   const streamActivityRef = useRef<StreamActivity>(emptyStreamActivity());
@@ -249,19 +303,29 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
   }, [api, initialAgent.id, nextBefore]);
 
   useEffect(() => {
+    // Claim a warmed snapshot when this agent was recently visible. A hit
+    // paints the cached timeline immediately; the load below still runs
+    // (non-initial, no spinner) to reconcile summary/usage/capabilities.
+    const hydration = selectTakeHydration(agentKeepAlive.take(initialAgent.id));
     setAgent(initialAgent);
-    setHistory(undefined);
-    setCapabilities(undefined);
-    setNextBefore(undefined);
+    setHistory(hydration.history);
+    setCapabilities(hydration.capabilities);
+    setNextBefore(hydration.nextBefore);
     setGitStatusRefreshKey(0);
     loadingOlderRef.current = false;
     setLoadingOlder(false);
     streamActivityRef.current = emptyStreamActivity();
-    void loadWithRetry(true);
+    setLoading(hydration.cold);
+    // Resume from whichever is newer: the parked snapshot or frames this
+    // mount already applied (effect re-runs after a take-miss must not
+    // rewind the live sequence back to zero).
+    seqRef.current = Math.max(hydration.sequence, seqRef.current);
+    void loadWithRetry(hydration.cold);
 
     const subscription = subscribeAgent(
       initialAgent.id,
       (value, state) => {
+        seqRef.current = state.sequence;
         const envelopePayload = value && typeof value === "object" && "payload" in value && typeof (value as { payload?: unknown }).payload === "object"
           ? (value as { payload: Record<string, unknown> }).payload
           : undefined;
@@ -322,8 +386,24 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
         }
       },
       () => loadWithRetry(),
+      undefined,
+      seqRef.current,
     );
-    return () => subscription.close();
+    return () => {
+      subscription.close();
+      // Park this agent in the background keep-alive (subject to the
+      // desktop/mobile budget) so a revisit repaints from cache instead of
+      // paying a full reload. Summary transitions keep flowing to the
+      // workspace agent list so tab-strip dots stay fresh.
+      agentKeepAlive.handOff(initialAgent.id, {
+        agent: agentRef.current,
+        history: historyRef.current,
+        capabilities: capabilitiesRef.current,
+        nextBefore: nextBeforeRef.current,
+        sequence: seqRef.current,
+        onAgentChanged: (next) => onAgentChangedRef.current?.(next),
+      });
+    };
   }, [initialAgent.id, load, loadWithRetry]);
 
   return (

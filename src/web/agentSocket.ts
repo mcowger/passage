@@ -78,13 +78,18 @@ export function subscribeAgent(
   onMessage: (value: EventEnvelope | unknown, state: AgentSocketState) => void,
   onReconcile: () => Promise<void>,
   onHealthChange?: (health: ConnectionHealth) => void,
+  initialSequence = 0,
 ): AgentSocket {
+  const resumeFrom = Number.isSafeInteger(initialSequence) && initialSequence >= 0 ? initialSequence : 0;
   let socket: WebSocket | undefined;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let reconciling = false;
   let generation = 0;
-  let state: AgentSocketState = { sequence: 0, connected: false, snapshotRequired: false };
+  // `initialSequence` lets a handoff (visible panel -> background keep-alive
+  // or back) resume from the last applied sequence instead of 0, so the
+  // daemon replays only the gap (or nothing) rather than the whole buffer.
+  let state: AgentSocketState = { sequence: resumeFrom, connected: false, snapshotRequired: false };
 
   const setHealth = (health: ConnectionHealth) => onHealthChange?.(health);
 
