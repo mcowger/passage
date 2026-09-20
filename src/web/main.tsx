@@ -228,7 +228,7 @@ function App() {
 
 
 
-  const { build, daemonLifecycle, drainBusy, wsHealth, handleBeginDrain, handleCancelDrain } = useDaemon(api);
+  const { build, wsHealth } = useDaemon(api);
 
 
 
@@ -477,12 +477,8 @@ function App() {
           agents={agents}
           workspaceStatuses={workspaceStatuses}
           build={build}
-          daemon={daemonLifecycle}
-          daemonBusy={drainBusy}
           wsHealth={wsHealth}
           projectIconUrl={api.projectIconUrl}
-          onBeginDrain={handleBeginDrain}
-          onCancelDrain={handleCancelDrain}
           onDiscoverWorktrees={(projId) => {
             setFormError("");
             setWorktreeModalTab("discover");

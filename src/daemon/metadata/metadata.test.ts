@@ -57,6 +57,7 @@ function seed(repositories: MetadataRepositories): void {
     thinkingPreference: "medium",
     lastKnownStatus: "idle",
     archivedAt: null,
+    stopReason: null,
   });
 }
 
@@ -67,10 +68,10 @@ afterEach(async () => {
 describe("metadata persistence", () => {
   test("migrates an empty database and reopens idempotently", async () => {
     const { path, store } = await open();
-    expect(store.schemaVersion).toBe(6);
+    expect(store.schemaVersion).toBe(7);
     store.close();
     const reopened = new MetadataStore(path);
-    expect(reopened.schemaVersion).toBe(6);
+    expect(reopened.schemaVersion).toBe(7);
     reopened.close();
   });
 

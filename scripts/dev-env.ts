@@ -31,7 +31,6 @@ export const DEV_DATA_ENV_VARS = [
 /** Daemon tuning vars that must never leak in from another checkout:
  *  always unset for dev so daemon defaults apply. */
 export const DEV_SCRUBBED_ENV_VARS = [
-  "PASSAGE_SHUTDOWN_TIMEOUT_MINUTES",
   "PASSAGE_MAX_ACTIVE_AGENTS",
 ] as const;
 

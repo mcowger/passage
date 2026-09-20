@@ -22,7 +22,6 @@ describe("dev-env", () => {
         PASSAGE_DB_PATH: "/home/user/.config/passage.sqlite",
         PASSAGE_SESSIONS_ROOT: "/home/user/.config/sessions",
         PASSAGE_PID_FILE: "/tmp/staging.pid",
-        PASSAGE_SHUTDOWN_TIMEOUT_MINUTES: "5",
         PASSAGE_MAX_ACTIVE_AGENTS: "1",
         PASSAGE_PI_PATH: "/custom/pi",
         PORT: "9999",

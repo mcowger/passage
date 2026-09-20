@@ -3,7 +3,15 @@ import type { Database } from "bun:sqlite";
 export type Project = { id: string; configuredRootPath: string; canonicalRootPath: string; displayLabel: string; iconName?: string | null; iconColor?: string | null; useProjectIcon?: boolean; archivedAt: string | null };
 export type WorktreeLocation = { id: string; projectId: string | null; scope: "global" | "project"; displayLabel: string; configuredRootPath: string; canonicalRootPath: string; enabled: boolean };
 export type Workspace = { id: string; projectId: string; kind: string; cwd: string; checkoutRoot: string | null; mainRepositoryRoot: string | null; branchRef: string | null; displayLabel: string; locationId: string | null; ownershipState: string; markerId?: string | null; markerPath?: string | null; repairDetail?: string | null; archivedAt: string | null };
-export type Agent = { id: string; workspaceId: string; piSessionId: string; piSessionPath: string | null; title: string; titleOverridden: boolean; modelPreference: string | null; thinkingPreference: string | null; lastKnownStatus: string; archivedAt: string | null };
+/** Why an agent's run last stopped, as recorded at stop time (never
+ *  inferred later): `shutdown` (own shutdown killed it -- resume on boot),
+ *  `user_abort` (explicit user stop -- never resume), `crash` (unexpected
+ *  exit mid-run -- resume on boot). NULL means no terminal stop is on
+ *  record (running normally, settled, or fresh). Read by boot recovery;
+ *  written by abort paths and onLifecycle; cleared by any manual message
+ *  or a confirmed continuation. Queryable straight from sqlite. */
+export type AgentStopReason = "shutdown" | "user_abort" | "crash";
+export type Agent = { id: string; workspaceId: string; piSessionId: string; piSessionPath: string | null; title: string; titleOverridden: boolean; modelPreference: string | null; thinkingPreference: string | null; lastKnownStatus: string; archivedAt: string | null; stopReason: AgentStopReason | null };
 export type WebPreviewRow = { id: string; workspaceId: string; displayLabel: string; targetUrl: string; viewport: unknown; createdAt: string; updatedAt: string };
 
 const encode = (value: unknown) => JSON.stringify(value);
@@ -13,12 +21,12 @@ const integer = (value: boolean) => value ? 1 : 0;
 type ProjectRow = { id: string; configured_root_path: string; canonical_root_path: string; display_label: string; icon_name: string | null; icon_color: string | null; use_project_icon: number | null; archived_at: string | null };
 type LocationRow = { id: string; project_id: string | null; scope: "global" | "project"; display_label: string; configured_root_path: string; canonical_root_path: string; enabled: number };
 type WorkspaceRow = { id: string; project_id: string; kind: string; cwd: string; checkout_root: string | null; main_repository_root: string | null; branch_ref: string | null; display_label: string; location_id: string | null; ownership_state: string; marker_id: string | null; marker_path: string | null; repair_detail: string | null; archived_at: string | null; layout_json: string | null; preferences_json: string | null };
-type AgentRow = { id: string; workspace_id: string; pi_session_id: string; pi_session_path: string | null; title: string; title_overridden: number; model_preference: string | null; thinking_preference: string | null; last_known_status: string; archived_at: string | null };
+type AgentRow = { id: string; workspace_id: string; pi_session_id: string; pi_session_path: string | null; title: string; title_overridden: number; model_preference: string | null; thinking_preference: string | null; last_known_status: string; archived_at: string | null; stop_reason: string | null };
 
 const projectFromRow = (row: ProjectRow | null | undefined): Project | undefined => row ? { id: row.id, configuredRootPath: row.configured_root_path, canonicalRootPath: row.canonical_root_path, displayLabel: row.display_label, iconName: row.icon_name ?? null, iconColor: row.icon_color ?? null, useProjectIcon: (row.use_project_icon ?? 0) === 1, archivedAt: row.archived_at } : undefined;
 const locationFromRow = (row: LocationRow | null | undefined): WorktreeLocation | undefined => row ? { id: row.id, projectId: row.project_id, scope: row.scope, displayLabel: row.display_label, configuredRootPath: row.configured_root_path, canonicalRootPath: row.canonical_root_path, enabled: row.enabled === 1 } : undefined;
 const workspaceFromRow = (row: WorkspaceRow | null | undefined): Workspace | undefined => row ? { id: row.id, projectId: row.project_id, kind: row.kind, cwd: row.cwd, checkoutRoot: row.checkout_root, mainRepositoryRoot: row.main_repository_root, branchRef: row.branch_ref, displayLabel: row.display_label, locationId: row.location_id, ownershipState: row.ownership_state, markerId: row.marker_id ?? null, markerPath: row.marker_path ?? null, repairDetail: row.repair_detail ?? null, archivedAt: row.archived_at } : undefined;
-const agentFromRow = (row: AgentRow | null | undefined): Agent | undefined => row ? { id: row.id, workspaceId: row.workspace_id, piSessionId: row.pi_session_id, piSessionPath: row.pi_session_path, title: row.title, titleOverridden: row.title_overridden === 1, modelPreference: row.model_preference, thinkingPreference: row.thinking_preference, lastKnownStatus: row.last_known_status, archivedAt: row.archived_at } : undefined;
+const agentFromRow = (row: AgentRow | null | undefined): Agent | undefined => row ? { id: row.id, workspaceId: row.workspace_id, piSessionId: row.pi_session_id, piSessionPath: row.pi_session_path, title: row.title, titleOverridden: row.title_overridden === 1, modelPreference: row.model_preference, thinkingPreference: row.thinking_preference, lastKnownStatus: row.last_known_status, archivedAt: row.archived_at, stopReason: row.stop_reason as AgentStopReason | null } : undefined;
 
 export class ProjectRepository {
   constructor(private readonly db: Database) {}
@@ -54,7 +62,7 @@ export class WorkspaceRepository {
 
 export class AgentRepository {
   constructor(private readonly db: Database) {}
-  save(value: Agent): void { this.db.query("INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET workspace_id=excluded.workspace_id, pi_session_id=excluded.pi_session_id, pi_session_path=excluded.pi_session_path, title=excluded.title, title_overridden=excluded.title_overridden, model_preference=excluded.model_preference, thinking_preference=excluded.thinking_preference, last_known_status=excluded.last_known_status, archived_at=excluded.archived_at").run(value.id, value.workspaceId, value.piSessionId, value.piSessionPath, value.title, integer(value.titleOverridden), value.modelPreference, value.thinkingPreference, value.lastKnownStatus, value.archivedAt); }
+  save(value: Agent): void { this.db.query("INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET workspace_id=excluded.workspace_id, pi_session_id=excluded.pi_session_id, pi_session_path=excluded.pi_session_path, title=excluded.title, title_overridden=excluded.title_overridden, model_preference=excluded.model_preference, thinking_preference=excluded.thinking_preference, last_known_status=excluded.last_known_status, archived_at=excluded.archived_at, stop_reason=excluded.stop_reason").run(value.id, value.workspaceId, value.piSessionId, value.piSessionPath, value.title, integer(value.titleOverridden), value.modelPreference, value.thinkingPreference, value.lastKnownStatus, value.archivedAt, value.stopReason); }
   get(id: string): Agent | undefined { return agentFromRow(this.db.query<AgentRow, [string]>("SELECT * FROM agents WHERE id=?").get(id)); }
   listForWorkspace(workspaceId: string, limit: number, archived = false): Agent[] { return this.db.query<AgentRow, [string, number]>(`SELECT * FROM agents WHERE workspace_id=? AND archived_at IS ${archived ? "NOT NULL" : "NULL"} ORDER BY id LIMIT ?`).all(workspaceId, limit).map((row) => agentFromRow(row)!); }
   /** Lightweight (workspaceId, status) pairs for every non-archived agent,
@@ -63,11 +71,20 @@ export class AgentRepository {
   listNonArchivedStatus(limit: number): Array<{ id: string; workspaceId: string; lastKnownStatus: string }> {
     return this.db.query<AgentRow, [number]>("SELECT * FROM agents WHERE archived_at IS NULL ORDER BY workspace_id, id LIMIT ?").all(limit).map((row) => ({ id: row.id, workspaceId: row.workspace_id, lastKnownStatus: row.last_known_status }));
   }
-  /** Non-archived agents whose persisted status implies live work (used once
-   * at daemon boot to find runtime state a restart could not have settled
-   * honestly -- see reconcileAfterRestart). */
-  listActiveRuntime(limit: number): Agent[] { return this.db.query<AgentRow, [number]>("SELECT * FROM agents WHERE archived_at IS NULL AND last_known_status IN ('initializing','running','stopping','needs-attention') ORDER BY id LIMIT ?").all(limit).map((row) => agentFromRow(row)!); }
+  /** Non-archived agents a boot sweep should recover: stale-active
+   *  statuses left by a restart, plus `interrupted` rows (every one was
+   *  active when its process died -- including runs killed by the previous
+   *  shutdown's own drain, whose exit arrived with the gate already closed).
+   *  Idle/error/archived agents are untouched. */
+  listActiveRuntime(limit: number): Agent[] { return this.db.query<AgentRow, [number]>("SELECT * FROM agents WHERE archived_at IS NULL AND last_known_status IN ('initializing','running','stopping','needs-attention','interrupted') ORDER BY id LIMIT ?").all(limit).map((row) => agentFromRow(row)!); }
   updateStatus(id: string, status: string): void { this.db.query("UPDATE agents SET last_known_status=? WHERE id=?").run(status, id); }
+  /** Record why an agent's run stopped (see AgentStopReason); NULL clears it. */
+  updateStopReason(id: string, value: AgentStopReason | null): void { this.db.query("UPDATE agents SET stop_reason=? WHERE id=?").run(value, id); }
+  /** Non-archived agents whose recorded stop reason wants a boot resume
+   *  (any status: later reads may have normalized the pre-kill status to
+   *  interrupted or error without touching the reason). `user_abort` rows
+   *  are never resume candidates. */
+  listResumeCandidates(limit: number): Agent[] { return this.db.query<AgentRow, [number]>("SELECT * FROM agents WHERE archived_at IS NULL AND stop_reason IN ('shutdown','crash') ORDER BY id LIMIT ?").all(limit).map((row) => agentFromRow(row)!); }
   updateTitle(id: string, title: string): void { this.db.query("UPDATE agents SET title=? WHERE id=?").run(title, id); }
   updateSessionPath(id: string, path: string): void { this.db.query("UPDATE agents SET pi_session_path=? WHERE id=?").run(path, id); }
   updateModelPreference(id: string, model: string): void { this.db.query("UPDATE agents SET model_preference=? WHERE id=?").run(model, id); }

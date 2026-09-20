@@ -91,6 +91,13 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 7,
+    name: "agent_stop_reason",
+    sql: `
+      ALTER TABLE agents ADD COLUMN stop_reason TEXT NULL CHECK (stop_reason IS NULL OR stop_reason IN ('shutdown', 'user_abort', 'crash'));
+    `,
+  },
 ];
 
 export class MetadataStore {

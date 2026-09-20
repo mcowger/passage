@@ -6,9 +6,6 @@ import { honoLogger } from "@logtape/hono";
 import { AgentError } from "./agents/errors.ts";
 import { AgentService } from "./agents/service.ts";
 import { AgentEventHub } from "./agents/events/index.ts";
-import { DaemonLifecycle } from "./lifecycle/index.ts";
-import { DaemonEventHub } from "./lifecycle/events.ts";
-import { runSafeShutdown } from "./lifecycle/shutdown.ts";
 import { HttpInputError, readJsonBody } from "./http/body.ts";
 import { createAgentRoutes } from "./http/agents.ts";
 import { createModelRoutes } from "./http/models.ts";
@@ -81,36 +78,15 @@ const MAX_AGENT_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_WORKSPACE_SUBSCRIPTIONS_PER_SOCKET = 32;
 const MAX_INFLIGHT_COMMANDS = 256;
 const UNKNOWN_REQUEST_ID = "unknown";
-/** `POST /api/daemon/shutdown` body. Bare
- *  `{}`/empty body is the plain safe path; `force: true` is a separate,
- *  clearly-labeled interruption; the identity fields are for a validated
- *  commit against a drain the caller already observed reach `ready`. */
+/** `POST /api/daemon/shutdown` body. Bare `{}`/empty body cancels
+ *  in-flight runs, confirms settlement (bounded ~3s), then stops and
+ *  exits; boot recovery resumes whatever never confirmed. `force: true`
+ *  skips the cancel/confirm phase and stops processes immediately. */
 const shutdownInputSchema = z.object({
   force: z.boolean().optional(),
-  instanceId: z.string().min(1).max(64).optional(),
-  drainId: z.string().min(1).max(64).nullable().optional(),
-  readinessRevision: z.number().int().nonnegative().safe().optional(),
 }).strict();
-/** Safe drain has no automatic kill deadline by design; overridden by
- *  explicit product decision (see AGENTS.md Pi process ownership) to
- *  bound how long a safe shutdown request waits for an idle boundary
- *  before escalating to a forced stop. Does not bound a manually held
- *  drain (`POST /api/daemon/drain` without a shutdown request behind it)
- *  -- only an actual shutdown attempt (HTTP, SIGINT/SIGTERM). */
-const DEFAULT_SHUTDOWN_TIMEOUT_MINUTES = 60;
 await configureLogging();
 const log = logger("daemon");
-function resolveShutdownTimeoutMs(): number {
-  const raw = process.env.PASSAGE_SHUTDOWN_TIMEOUT_MINUTES;
-  if (raw === undefined || raw.trim() === "") return DEFAULT_SHUTDOWN_TIMEOUT_MINUTES * 60_000;
-  const minutes = Number(raw);
-  if (!Number.isFinite(minutes) || minutes <= 0) {
-    log.warn("Ignoring invalid PASSAGE_SHUTDOWN_TIMEOUT_MINUTES", { event: "daemon.invalid_shutdown_timeout", value: raw });
-    return DEFAULT_SHUTDOWN_TIMEOUT_MINUTES * 60_000;
-  }
-  return minutes * 60_000;
-}
-const shutdownTimeoutMs = resolveShutdownTimeoutMs();
 // `--port` wins over `PORT` so a stale PORT inherited from a different
 // checkout's shell can never steal this worktree's bind. Fails fast on an
 // invalid value instead of binding 0/NaN.
@@ -206,11 +182,11 @@ if (!isStandaloneExecutable) {
     });
   }
 }
-// DaemonLifecycle needs AgentService's blocker methods; AgentService needs
-// the lifecycle's admission gate. Bridge the cycle with a forward
-// reference the gate closure resolves lazily -- it is only ever called
-// after both are fully constructed below.
-let lifecycleRef: DaemonLifecycle | undefined;
+// Admission gate: open until the first shutdown request (HTTP or signal)
+// closes it synchronously. There is no drain phase: shutdown cancels
+// in-flight runs instead of waiting for them, and boot recovery resumes
+// whatever never confirmed settlement (see AgentService shutdown/warm).
+let admissionOpen = true;
 const agentService = new AgentService(repositories, {
   sessionsRoot,
   ...(process.env.PASSAGE_MAX_ACTIVE_AGENTS ? { maxActiveAgents: Number(process.env.PASSAGE_MAX_ACTIVE_AGENTS) } : {}),
@@ -221,9 +197,7 @@ const agentService = new AgentService(repositories, {
   onWorkspaceGitChanged: (workspaceId) => {
     workspaceEvents.emitGitStatus({ workspaceId, reason: "commit" });
   },
-  // Drain lifecycle: closed synchronously the instant a drain begins. Defaults to open before the lifecycle below exists
-  // (construction order), never after.
-  admissionGate: () => lifecycleRef?.isAdmissionOpen() ?? true,
+  admissionGate: () => admissionOpen,
   // Auto-titles use the workspace's configured suggestion model + thinking
   // level + prompt template (Settings); empty fields mean the suggestion
   // backend's defaults.
@@ -249,27 +223,15 @@ try {
   }
 } catch {}
 const agentEvents = new AgentEventHub(agentService);
-// One lifecycle controller: admission closed synchronously on beginDrain(); readiness is recomputed from live
-// agent state only -- see AgentService.listQuickBlockers/listBlockers.
-// Only agents block drain readiness; terminals, previews, and workspace
-// Git/file/worktree operations do not (explicit product decision).
-const daemonEvents = new DaemonEventHub();
-const lifecycle = new DaemonLifecycle({
-  listQuickBlockers: () => agentService.listQuickBlockers(),
-  listBlockers: () => agentService.listBlockers(),
-  onPhaseChanged: (phase) => {
-    log.info("Daemon lifecycle phase changed", { event: "daemon.phase_changed", phase });
-    daemonEvents.emit({ reason: phase === "draining" ? "drain-begin" : phase === "running" ? "drain-cancel" : "readiness-changed" });
-  },
-});
-lifecycleRef = lifecycle;
+// Presence/health hub for the `daemon` WS channel (Sidebar connection
+// indicator). It carries no lifecycle invalidations: there are no phases
+// to publish anymore, so clients simply never receive daemon events --
+// the subscription handshake and heartbeat are what matter.
+
 // Web Push for installed PWAs (iOS 16.4+ standalone + Android/desktop):
 // env-provided VAPID keys, multi-device fanout, prune on 404/410.
 const pushService = new PushService(repositories);
 wireAgentPushNotifications({ agentService, workspaceService, push: pushService });
-// Cheap, synchronous: only ever revokes an already-reached `ready`, and
-// (while draining) kicks off the coalesced authoritative recompute.
-agentService.subscribe(() => lifecycle.onActivity());
 const responses = new IdempotencyCache<{ fingerprint: string; response: string }>();
 const inflightResponses = new Map<string, { fingerprint: string; response: Promise<string> }>();
 const app = new Hono();
@@ -302,37 +264,17 @@ app.onError((error, context) => {
   return context.json({ error: "internal-error" }, 500);
 });
 app.get("/api/health", (context) => context.json({ ok: true, build: getBuildInfo() }));
-app.get("/api/daemon/snapshot", async (context) => context.json({
+app.get("/api/daemon/snapshot", (context) => context.json({
   protocolVersion: PROTOCOL_VERSION,
   metadataSchemaVersion: metadata.schemaVersion,
   build: getBuildInfo(),
-  ...await lifecycle.snapshot(),
 }));
-// Begin/cancel drain. Both return the fresh snapshot inline (HTTP =
-// snapshots) and the phase-change callback above publishes a
-// `daemon-changed` WS invalidation for every other window (WS =
-// invalidations only). Draining itself stops nothing and closes no
-// agent tabs; it only closes new-work admission (the shutdown route adds
-// the actual stop/commit path).
-app.post("/api/daemon/drain", async (context) => {
-  lifecycle.beginDrain();
-  return context.json(await lifecycle.snapshot());
-});
-app.delete("/api/daemon/drain", async (context) => {
-  lifecycle.cancelDrain();
-  return context.json(await lifecycle.snapshot());
-});
-// `force: true` interrupts active work immediately (a separate, clearly-labeled action). Without it, this is a
-// safe request: begin/join a drain, wait for `ready`, and commit -- no
-// overall kill deadline, so this can take a while or (if the drain gets
-// cancelled) never happen at all. Supplying `instanceId`/`drainId`/
-// `readinessRevision` (the deploy tool holding a drain at `ready`) instead
-// synchronously validates and commits exactly that observed snapshot,
-// failing fast with 409 on a stale or not-yet-ready one rather than
-// silently accepting and doing nothing. Acknowledgement means accepted,
-// not "already shut down"; a dropped connection around the moment of
-// actual exit is not proof either way -- verify independently (health
-// check / port probe), not via this response.
+// Shutdown is cancel-then-kill and takes ~seconds: in-flight runs get the
+// abort trio plus a bounded confirmation window (`force: true` skips
+// straight to the kill). Acknowledgement means accepted, not "already
+// shut down"; a dropped connection around the moment of actual exit is
+// not proof either way -- verify independently (health check / port
+// probe), not via this response.
 app.post("/api/daemon/shutdown", async (context) => {
   let body: unknown = {};
   try {
@@ -344,20 +286,7 @@ app.post("/api/daemon/shutdown", async (context) => {
   }
   const parsed = shutdownInputSchema.safeParse(body);
   if (!parsed.success) return context.json({ error: "invalid-request" }, 400);
-  const input = parsed.data;
-
-  if (input.force) {
-    void finishShutdown({ interrupted: true });
-    return context.json({ ok: true as const, accepted: true });
-  }
-  const hasIdentity = input.instanceId !== undefined || input.drainId !== undefined || input.readinessRevision !== undefined;
-  if (!hasIdentity) {
-    void finishShutdown({ interrupted: false });
-    return context.json({ ok: true as const, accepted: true });
-  }
-  const commitResult = await lifecycle.commit({ instanceId: input.instanceId, drainId: input.drainId, readinessRevision: input.readinessRevision });
-  if (!commitResult.committed) return context.json({ ok: false as const, error: commitResult.reason }, 409);
-  void finishShutdown({ interrupted: false, alreadyCommitted: true });
+  void finishShutdown({ force: parsed.data.force ?? false });
   return context.json({ ok: true as const, accepted: true });
 });
 /** Stop everything bound to a workspace before it is archived/removed:
@@ -585,33 +514,31 @@ async function handleWorkspaceCommand(command: CommandEnvelope, socket: Bun.Serv
   } satisfies Acknowledgement;
 }
 
-/** `subscribe`/`unsubscribe` to daemon lifecycle invalidations. There is
- *  only ever one subject (`DAEMON_SNAPSHOT_SUBJECT`), so unlike `pi`/
- *  `workspace` this needs no per-subject map -- one optional unsubscribe
- *  per socket is enough. */
+/** `subscribe`/`unsubscribe` to the daemon channel. There is only ever one
+ *  subject (`DAEMON_SNAPSHOT_SUBJECT`), so unlike `pi`/`workspace` this
+ *  needs no per-subject map -- one optional unsubscribe per socket is
+ *  enough. The channel is presence/health only: the server never emits
+ *  daemon events (there are no lifecycle phases to publish), it just
+ *  answers every fresh subscribe with `snapshot-required` so the client
+ *  refetches `/api/daemon/snapshot` once, and the heartbeat drives the
+ *  connection indicator after that. */
 async function handleDaemonCommand(command: CommandEnvelope, socket: Bun.ServerWebSocket<SocketData>): Promise<ProtocolResponse> {
   if (socket.data.kind !== "agent") return protocolError(command.requestId, "invalid-channel", "Terminal/preview sockets do not accept daemon commands");
   try {
     if (command.type === "subscribe") {
-      const input = daemonSubscriptionPayloadSchema.parse(command.payload);
+      daemonSubscriptionPayloadSchema.parse(command.payload);
       socket.data.daemonUnsubscribe?.();
-      const subscription = daemonEvents.subscribe(input.afterSequence, (event) => sendSocketJson(socket, event));
-      socket.data.daemonUnsubscribe = subscription.unsubscribe;
-      if (subscription.replay.kind === "replay") {
-        for (const event of subscription.replay.events) sendSocketJson(socket, event);
-      } else {
-        sendSocketJson(socket, {
-          version: PROTOCOL_VERSION,
-          stream: "daemon",
-          subjectId: DAEMON_SNAPSHOT_SUBJECT,
-          kind: "snapshot-required",
-          metadata: {
-            snapshotUrl: "/api/daemon/snapshot",
-            sequence: String(daemonEvents.currentSequence()),
-          },
-        });
-      }
-      subscription.activate();
+      socket.data.daemonUnsubscribe = () => true;
+      sendSocketJson(socket, {
+        version: PROTOCOL_VERSION,
+        stream: "daemon",
+        subjectId: DAEMON_SNAPSHOT_SUBJECT,
+        kind: "snapshot-required",
+        metadata: {
+          snapshotUrl: "/api/daemon/snapshot",
+          sequence: "0",
+        },
+      });
     } else if (command.type === "unsubscribe") {
       socket.data.daemonUnsubscribe?.();
       socket.data.daemonUnsubscribe = undefined;
@@ -700,7 +627,7 @@ async function handleCommand(command: CommandEnvelope, socket: Bun.ServerWebSock
   } catch (cause) {
     const message = cause instanceof Error ? cause.message.slice(0, 512) : "Agent command failed";
     // Preserve AgentError's stable code (in particular "draining", so a
-    // drained daemon refuses new agent work identically over HTTP and WS)
+    // shutting-down daemon refuses new agent work identically over HTTP and WS)
     // instead of collapsing every failure into one generic code.
     const code = cause instanceof AgentError ? `agent-${cause.code}` : "agent-command-failed";
     return protocolError(command.requestId, code, message);
@@ -908,10 +835,10 @@ if (portPath) {
 log.warn("Passage has no application authentication; expose it only on a trusted network or behind an authenticated proxy/VPN.", { event: "daemon.authentication_disabled" });
 log.info("Passage listening", { event: "daemon.started", port: server.port });
 
-// Teardown order: (1) admission is already
-// sealed by this point (lifecycle phase is draining/ready/stopping, which
-// closes AgentService.admissionGate); (2) stop Pi children while SQLite is
-// still open, so final diagnostics/status persist; (3) clean up remaining
+// Teardown order: (1) admission is already sealed by finishShutdown
+// before this runs; (2) cancel/confirm in-flight agent runs, then stop Pi
+// children while SQLite is still open, so final diagnostics/status persist
+// and the resume marker lands for boot recovery; (3) clean up remaining
 // owned resources, aggregating failures instead of abandoning later owners
 // after the first error; (4) dispose event hubs, stop HTTP/WS, close
 // SQLite only after callbacks that use them have finished; (5) remove this
@@ -919,13 +846,13 @@ log.info("Passage listening", { event: "daemon.started", port: server.port });
 // archive agent records, remove canvas tabs, delete history, or move
 // session files.
 let teardownRan = false;
-async function teardown(options: { interrupted: boolean }): Promise<void> {
+async function teardown(force: boolean): Promise<void> {
   if (teardownRan) return;
   teardownRan = true;
-  log.info("Passage shutdown started", { event: "daemon.shutdown_started", interrupted: options.interrupted });
+  log.info("Passage shutdown started", { event: "daemon.shutdown_started", force });
 
   try {
-    await agentService.shutdown({ interrupted: options.interrupted });
+    await agentService.shutdown({ force });
   } catch (error) {
     log.warn("Agent shutdown failed", { event: "daemon.shutdown_agents_failed", ...errorFields(error) });
   }
@@ -941,7 +868,6 @@ async function teardown(options: { interrupted: boolean }): Promise<void> {
 
   agentEvents.dispose();
   workspaceEvents.dispose();
-  daemonEvents.dispose();
   // `server.stop(true)` force-closes active connections immediately,
   // including the socket carrying this very shutdown request's own
   // response. A brief pause lets that response actually reach the caller
@@ -961,42 +887,23 @@ async function teardown(options: { interrupted: boolean }): Promise<void> {
       }
     } catch {}
   }
-  log.info("Passage shutdown completed", { event: "daemon.shutdown_completed", interrupted: options.interrupted });
+  log.info("Passage shutdown completed", { event: "daemon.shutdown_completed", force });
 }
 
-// The daemon's one shutdown path, safe by default. Duplicate calls (repeated HTTP requests, a signal arriving
-// while another is already in flight) share this same in-flight promise
-// instead of racing a second teardown. A safe (non-force,
-// non-already-committed) attempt that gets cancelled -- the drain was
-// cancelled, or superseded by a fresh one -- leaves the daemon running and
-// clears the in-flight promise so a later call can try again. A safe
-// attempt that instead runs past PASSAGE_SHUTDOWN_TIMEOUT_MINUTES escalates
-// to an explicit forced stop rather than waiting forever.
+// The daemon's one shutdown path. Admission closes synchronously on entry
+// (no window where a call after this point observes it open). Duplicate
+// calls (repeated HTTP requests, a signal arriving while another is already
+// in flight) share the same in-flight promise instead of racing a second
+// teardown. Bounded by construction (cancel-confirm-kill takes ~seconds);
+// a second signal while the first is still tearing down exits raw instead
+// of falling through to Node/Bun's teardown-skipping default handler.
 let finishShutdownPromise: Promise<void> | undefined;
-function finishShutdown(options: { interrupted: boolean; alreadyCommitted?: boolean }): Promise<void> {
+function finishShutdown(options: { force: boolean }): Promise<void> {
   if (finishShutdownPromise) return finishShutdownPromise;
+  admissionOpen = false;
   finishShutdownPromise = (async () => {
-    let interrupted = options.interrupted;
     try {
-      if (interrupted) {
-        lifecycle.forceStop();
-      } else if (!options.alreadyCommitted) {
-        const result = await runSafeShutdown(lifecycle, { timeoutMs: shutdownTimeoutMs });
-        if (!result.committed) {
-          if (result.reason === "timeout") {
-            log.warn("Safe shutdown timed out waiting for an idle boundary; escalating to a forced stop", {
-              event: "daemon.shutdown_timeout_forced",
-              timeoutMinutes: shutdownTimeoutMs / 60_000,
-            });
-            lifecycle.forceStop();
-            interrupted = true;
-          } else {
-            log.warn("Safe shutdown was cancelled before commit; daemon remains running", { event: "daemon.shutdown_cancelled", reason: result.reason });
-            return;
-          }
-        }
-      }
-      await teardown({ interrupted });
+      await teardown(options.force);
       process.exit(0);
     } finally {
       finishShutdownPromise = undefined;
@@ -1005,12 +912,9 @@ function finishShutdown(options: { interrupted: boolean; alreadyCommitted?: bool
   return finishShutdownPromise;
 }
 
-// Safe by default; a second signal while the first is still waiting on an
-// idle boundary forces an immediate, clearly-labeled interruption instead
-// of falling through to Node/Bun's raw, teardown-skipping default handler.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    void finishShutdown({ interrupted: false });
-    process.once(signal, () => { void finishShutdown({ interrupted: true }); });
+    void finishShutdown({ force: false });
+    process.once(signal, () => { process.exit(1); });
   });
 }

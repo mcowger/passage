@@ -281,7 +281,7 @@ describe("agent HTTP API", () => {
       repositories.agents.save({
         id, workspaceId, piSessionId: `pi-${id}`, piSessionPath: null, title: id,
         titleOverridden: false, modelPreference: null, thinkingPreference: null,
-        lastKnownStatus, archivedAt,
+        lastKnownStatus, archivedAt, stopReason: null,
       });
     // workspace-1: idle -> idle/blue. (Initializing with no live process is
     // stale by design -- daemon restart normalizes it to interrupted -- so it

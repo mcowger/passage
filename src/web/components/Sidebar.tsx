@@ -13,14 +13,12 @@ import {
   Trash2,
   Pencil,
   Plus,
-  PauseCircle,
 } from "lucide-react";
 import { PassageLogo } from "./PassageLogo.tsx";
 import { ProjectIconBadge } from "./ProjectIcon.tsx";
 import { cn } from "../lib/utils.ts";
 import type { BuildInfo } from "../../shared/build-info.ts";
 import { formatBuildDetail, formatBuildLabel } from "../../shared/build-info.ts";
-import type { DaemonLifecycleSnapshot } from "../api.ts";
 import type { ConnectionHealth } from "../socketLifecycle.ts";
 import { WsHealthIndicator } from "./WsHealthIndicator.tsx";
 import { AGENT_STATUS_LABEL, getWorkspaceStatusKind, type AgentStatusKind } from "./agentStatus.ts";
@@ -56,11 +54,6 @@ export type SidebarProps = {
   onArchiveProject?: (id: string) => void;
   onEditProject?: (project: Project) => void;
   build?: BuildInfo | null;
-  /** Absent/null hides the drain control entirely rather than showing a misleading default phase. */
-  daemon?: DaemonLifecycleSnapshot | null;
-  daemonBusy?: boolean;
-  onBeginDrain?: () => void;
-  onCancelDrain?: () => void;
   /** Real `/ws` heartbeat status (docs/IOSWEBSOCKETS.md), not assumed
    *  connected. Absent renders the same as "checking" -- never a false
    *  "Connected" before the first heartbeat lands. */
@@ -69,60 +62,6 @@ export type SidebarProps = {
    *  renders lucide icons only. */
   projectIconUrl?: (projectId: string) => string;
 };
-
-const DAEMON_PHASE_LABEL: Record<DaemonLifecycleSnapshot["phase"], string> = {
-  running: "Running",
-  draining: "Draining\u2026",
-  ready: "Ready to stop",
-  stopping: "Stopping\u2026",
-};
-
-/** Maintenance-mode control: begin/cancel drain and a truthful, bounded
- *  drain and a truthful, bounded view of what is still blocking readiness.
- *  Draining itself stops nothing -- it only closes new-work admission --
- *  so this is deliberately understated next to the build/version footer,
- *  not a full-screen takeover. Distinguishes "daemon draining" from "Pi
- *  failed": blockers are agent activity, not errors. */
-function DaemonDrainControl({ daemon, busy, onBeginDrain, onCancelDrain }: {
-  daemon: DaemonLifecycleSnapshot;
-  busy?: boolean;
-  onBeginDrain?: () => void;
-  onCancelDrain?: () => void;
-}) {
-  const draining = daemon.phase === "draining" || daemon.phase === "ready";
-  if (!draining) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon-xs" onClick={onBeginDrain} disabled={busy || daemon.phase === "stopping"} aria-label="Begin daemon drain for maintenance">
-            <PauseCircle aria-hidden="true" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="top">Begin drain (stop accepting new agent work)</TooltipContent>
-      </Tooltip>
-    );
-  }
-  const blockerSummary = daemon.blockers.length > 0
-    ? `Waiting on ${daemon.blockedCount} agent${daemon.blockedCount === 1 ? "" : "s"}: ${daemon.blockers.slice(0, 5).map((blocker) => `${blocker.agentId} (${blocker.reason})`).join(", ")}${daemon.blockersTruncated ? "\u2026" : ""}`
-    : "No agent work is blocking readiness.";
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          className="footer-status daemon-drain-status"
-          onClick={onCancelDrain}
-          disabled={busy}
-          aria-label={`${DAEMON_PHASE_LABEL[daemon.phase]}. ${blockerSummary} Activate to cancel drain.`}
-        >
-          <span className={cn("connected-dot", daemon.phase === "ready" ? "idle" : "active")} aria-hidden="true" />
-          {DAEMON_PHASE_LABEL[daemon.phase]}{daemon.blockedCount > 0 ? ` (${daemon.blockedCount})` : ""}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top">{blockerSummary} Click to cancel drain.</TooltipContent>
-    </Tooltip>
-  );
-}
 
 export function Sidebar({
   data,
@@ -139,10 +78,6 @@ export function Sidebar({
   onArchiveProject,
   onEditProject,
   build,
-  daemon,
-  daemonBusy,
-  onBeginDrain,
-  onCancelDrain,
   wsHealth,
   projectIconUrl,
 }: SidebarProps) {
@@ -178,7 +113,6 @@ export function Sidebar({
       {activeProjects.length === 0 && <p className="muted side-empty">No active projects registered yet.</p>}
       <footer>
         <WsHealthIndicator health={wsHealth} />
-        {daemon && <DaemonDrainControl daemon={daemon} busy={daemonBusy} onBeginDrain={onBeginDrain} onCancelDrain={onCancelDrain} />}
         <span className="flex items-center gap-1">
           <span
             className="muted"

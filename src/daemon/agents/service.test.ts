@@ -8,12 +8,12 @@ import { PiRpcManager } from "./rpc/index.ts";
 
 const script = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='prompt'||r.type==='steer'||r.type==='follow_up')process.stdout.write(JSON.stringify({type:'agent_settled'})+'\\n');const data=r.type==='get_available_models'?{models:[{provider:'test',id:'model',name:'Model',api:'test',input:['text'],authenticated:true,supportedThinkingLevels:['medium','high']}]}:r.type==='get_available_thinking_levels'?{levels:['medium','high']}:{};process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
 const roots: string[] = [];
-const make = async (limit = 10, executableArgs?: string[], autoContinueWindowMs?: number) => {
+const make = async (limit = 10, executableArgs?: string[], autoContinueWindowMs?: number, admissionGate?: () => boolean) => {
   const root = await mkdtemp(join("/tmp", "passage-agent-")); roots.push(root);
   const store = new MetadataStore(":memory:"); const repos = new MetadataRepositories(store.db);
   repos.projects.save({ id: "p", configuredRootPath: root, canonicalRootPath: root, displayLabel: "p", archivedAt: null });
   const workspace: Workspace = { id: "w", projectId: "p", kind: "directory", cwd: root, checkoutRoot: root, mainRepositoryRoot: root, branchRef: null, displayLabel: "w", locationId: null, ownershipState: "not-owned", archivedAt: null }; repos.workspaces.save(workspace);
-  const manager = new PiRpcManager(4); const service = new AgentService(repos, { sessionsRoot: join(root, "sessions"), manager, listLimit: limit, pi: { executable: process.execPath, executableArgs: executableArgs ?? ["-e", script] }, titleSuggester: { suggestTitle: async () => null }, ...(autoContinueWindowMs === undefined ? {} : { autoContinueWindowMs }) });
+  const manager = new PiRpcManager(4); const service = new AgentService(repos, { sessionsRoot: join(root, "sessions"), manager, listLimit: limit, pi: { executable: process.execPath, executableArgs: executableArgs ?? ["-e", script] }, titleSuggester: { suggestTitle: async () => null }, ...(autoContinueWindowMs === undefined ? {} : { autoContinueWindowMs }), ...(admissionGate === undefined ? {} : { admissionGate }) });
   return { root, store, repos, manager, service };
 };
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -288,12 +288,24 @@ test("auto-continues a mid-run crash with a canned follow-up, once per intent", 
     expect(await cannedCount()).toBe(1);
     expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
   });
-  // A second crash with no user intent in between must not retry again.
+  // A second crash with no user intent in between must not retry again --
+  // but it records its reason, so the next boot resumes from the recorded
+  // fact even though no live status implies work anymore.
   f.repos.agents.updateStatus(agent.id, "running");
   f.manager.get(agent.id)?.child.kill();
   await pollExpect(() => expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("error"));
   await Bun.sleep(250);
   expect(await cannedCount()).toBe(1);
+  expect(f.repos.agents.get(agent.id)?.stopReason).toBe("crash");
+  const rebooted = new AgentService(f.repos, { sessionsRoot: join(f.root, "sessions"), manager: new PiRpcManager(4), pi: { executable: process.execPath, executableArgs: ["-e", script] } });
+  expect((await rebooted.warmAfterRestart()).continued).toEqual([agent.id]);
+  await pollExpect(async () => {
+    const history = await rebooted.history(agent.id);
+    expect("unpersisted" in history ? [] : history.history.timeline.filter((row) => row.kind === "user" && row.text === CONTINUATION_MESSAGE)).toHaveLength(1);
+    expect(rebooted.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  });
+  expect(f.repos.agents.get(agent.id)?.stopReason).toBeNull();
+  await rebooted.shutdown();
   // Fresh user intent restores the budget: the next mid-run crash continues.
   await f.service.prompt(agent.id, "keep going");
   await waitForIdle(f.service, agent.id);
@@ -420,6 +432,61 @@ test("auto-continue budget regenerates after the window", async () => {
     expect(await cannedCount()).toBe(2);
     expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle");
   });
+  await f.service.shutdown();
+  f.store.close();
+});
+
+test("leaves a drain-killed run for boot recovery, surviving later reads", async () => {
+  let admitted = true;
+  const f = await make(10, undefined, undefined, () => admitted);
+  const agent = await f.service.create("w");
+  await f.service.capabilities(agent.id);
+  const cannedCount = async () => {
+    const result = await f.service.history(agent.id);
+    if ("unpersisted" in result) return 0;
+    return result.history.timeline.filter((row) => row.kind === "user" && row.text === CONTINUATION_MESSAGE).length;
+  };
+  // Deploy SIGTERMs the process group mid-drain: the exit lands with the
+  // gate already closed, so no auto-continue is attempted and no `error`
+  // is persisted -- but the shutdown stop reason is recorded.
+  f.repos.agents.updateStatus(agent.id, "running");
+  admitted = false;
+  f.manager.get(agent.id)?.child.kill();
+  await pollExpect(async () => {
+    expect(f.manager.get(agent.id)).toBeUndefined();
+    expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("running");
+    expect(f.repos.agents.get(agent.id)?.stopReason).toBe("shutdown");
+  });
+  await Bun.sleep(100);
+  // A polling client normalizes the preserved status (first to interrupted
+  // via a status read, then to error via a history reconcile) -- the reason
+  // survives both, so the next boot still resumes the run. (Each read below
+  // performs the normalization it names; the canned-count read comes last
+  // because history() itself reconciles.)
+  expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("interrupted");
+  expect(f.repos.agents.get(agent.id)?.stopReason).toBe("shutdown");
+  await f.service.history(agent.id);
+  expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("error");
+  expect(f.repos.agents.get(agent.id)?.stopReason).toBe("shutdown");
+  expect(await cannedCount()).toBe(0);
+  // Next boot (fresh runtime state, gate open) warms, continues, and
+  // clears the reason -- a second boot finds nothing left to do.
+  admitted = true;
+  const restarted = new AgentService(f.repos, { sessionsRoot: join(f.root, "sessions"), manager: new PiRpcManager(4), pi: { executable: process.execPath, executableArgs: ["-e", script] } });
+  const recovery = await restarted.warmAfterRestart();
+  expect(recovery.continued).toEqual([agent.id]);
+  await pollExpect(async () => {
+    // The continuation row lives in the rebooted daemon's transcript state
+    // (user rows are in-memory projections, not pi session-file entries),
+    // so it is read back through the restarted service.
+    const resumed = await restarted.history(agent.id);
+    expect("unpersisted" in resumed ? [] : resumed.history.timeline.filter((row) => row.kind === "user" && row.text === CONTINUATION_MESSAGE)).toHaveLength(1);
+    expect(restarted.snapshot(agent.id).lastKnownStatus).toBe("idle");
+  });
+  expect(f.repos.agents.get(agent.id)?.stopReason).toBeNull();
+  const again = await restarted.warmAfterRestart();
+  expect(again).toEqual({ warmed: [], continued: [], failed: [] });
+  await restarted.shutdown();
   await f.service.shutdown();
   f.store.close();
 });
@@ -942,7 +1009,7 @@ describe("agent-side git invalidations (merge button freshness)", () => {
   });
 });
 
-describe("drain admission gate", () => {
+describe("admission gate", () => {
   test("closing admission refuses new agent work but keeps abort, question answers, and resource-close working", async () => {
     const root = await mkdtemp(join("/tmp", "passage-agent-"));
     roots.push(root);
@@ -979,7 +1046,7 @@ describe("drain admission gate", () => {
     await expect(service.capabilities(agent.id)).rejects.toMatchObject({ code: "draining" });
 
     // Abort, question answers, and resource-close controls stay usable
-    // while draining -- they let admitted work settle or the resource
+    // while closed -- they let admitted work settle or the resource
     // close, neither of which is new work.
     await expect(service.abort(agent.id)).resolves.toBeUndefined();
     await expect(service.archive(agent.id)).resolves.toBeUndefined();
@@ -988,29 +1055,7 @@ describe("drain admission gate", () => {
     store.close();
   });
 
-  test("listQuickBlockers and listBlockers reflect live agent activity, not persisted status alone", async () => {
-    const f = await make();
-    const idleAgent = await f.service.create("w");
-    await f.service.capabilities(idleAgent.id);
-    expect(f.service.listQuickBlockers()).toEqual([]);
-    expect(await f.service.listBlockers()).toEqual([]);
-
-    const runningScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);const data=r.type==='get_state'?{isStreaming:true}:{};if(r.type==='prompt')process.stdout.write(JSON.stringify({type:'agent_start'})+'\\n');process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data})+'\\n')}})`;
-    const g = await make(10, ["-e", runningScript]);
-    const runningAgent = await g.service.create("w");
-    await g.service.prompt(runningAgent.id, "keep going");
-    await pollExpect(async () => {
-      expect(g.service.listQuickBlockers()).toContainEqual({ agentId: runningAgent.id, reason: "running" });
-      expect(await g.service.listBlockers()).toContainEqual({ agentId: runningAgent.id, reason: "running" });
-    });
-
-    await f.service.shutdown();
-    await g.service.shutdown();
-    f.store.close();
-    g.store.close();
-  });
-
-  test("interrupted shutdown reports a forced stop honestly; safe shutdown leaves an already-idle agent alone", async () => {
+  test("shutdown cancels an in-flight run, then preserves it for boot recovery", async () => {
     const f = await make();
     const idleAgent = await f.service.create("w");
     await f.service.prompt(idleAgent.id, "hi");
@@ -1024,35 +1069,91 @@ describe("drain admission gate", () => {
     const agent = await g.service.create("w");
     await g.service.prompt(agent.id, "keep going");
     await pollExpect(() => expect(g.service.snapshot(agent.id).lastKnownStatus).toBe("running"));
-    // Interrupted: the forced stop's lifecycle event is still observed
-    // (not silently dropped by an early detach) and honestly reported.
-    await g.service.shutdown({ interrupted: true });
-    expect(g.repos.agents.get(agent.id)?.lastKnownStatus).toBe("error");
+    // The shutdown cancel (clear_queue + abort + abort_bash) is issued and
+    // confirmed; this mock keeps streaming, so the kill lands the shutdown
+    // branch: no `error` for a kill the daemon itself ordered, the pre-kill
+    // status is preserved, and the shutdown reason is recorded for the
+    // next boot sweep.
+    await g.service.shutdown();
+    expect(g.repos.agents.get(agent.id)?.lastKnownStatus).toBe("stopping");
+    expect(g.repos.agents.get(agent.id)?.stopReason).toBe("shutdown");
     g.store.close();
   });
 
-  test("listQuickBlockers reports needs-attention for an outstanding extension question", async () => {
+  test("shutdown-aborted runs resume on boot even when the cancel confirmed", async () => {
+    const f = await make();
+    const agent = await f.service.create("w");
+    await f.service.prompt(agent.id, "hi");
+    await waitForIdle(f.service, agent.id);
+    // Shutdown races a live run: the cancel confirms (settles idle), but
+    // Passage stopped the run itself, so it still owes the resume nudge.
+    f.repos.agents.updateStatus(agent.id, "running");
+    await f.service.shutdown();
+    expect(f.repos.agents.get(agent.id)?.lastKnownStatus).toBe("idle");
+    expect(f.repos.agents.get(agent.id)?.stopReason).toBe("shutdown");
+    const restarted = new AgentService(f.repos, { sessionsRoot: join(f.root, "sessions"), manager: new PiRpcManager(4), pi: { executable: process.execPath, executableArgs: ["-e", script] } });
+    const recovery = await restarted.warmAfterRestart();
+    expect(recovery.continued).toEqual([agent.id]);
+    await pollExpect(async () => {
+      const resumed = await restarted.history(agent.id);
+      expect("unpersisted" in resumed ? [] : resumed.history.timeline.filter((row) => row.kind === "user" && row.text === CONTINUATION_MESSAGE)).toHaveLength(1);
+      expect(restarted.snapshot(agent.id).lastKnownStatus).toBe("idle");
+    });
+    expect(f.repos.agents.get(agent.id)?.stopReason).toBeNull();
+    await restarted.shutdown();
+    await f.service.shutdown();
+    f.store.close();
+  });
+
+  test("an explicit user abort records its reason and is never resumed", async () => {
+    const f = await make();
+    const agent = await f.service.create("w");
+    await f.service.prompt(agent.id, "hi");
+    await waitForIdle(f.service, agent.id);
+    f.repos.agents.updateStatus(agent.id, "running");
+    await f.service.abort(agent.id);
+    // Recorded at cancel time, before the abort even settles.
+    expect(f.repos.agents.get(agent.id)?.stopReason).toBe("user_abort");
+    await pollExpect(() => expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("idle"));
+    // A later boot sees the recorded user stop and leaves it alone.
+    const restarted = new AgentService(f.repos, { sessionsRoot: join(f.root, "sessions"), manager: new PiRpcManager(4), pi: { executable: process.execPath, executableArgs: ["-e", script] } });
+    expect(await restarted.warmAfterRestart()).toEqual({ warmed: [], continued: [], failed: [] });
+    expect(f.repos.agents.get(agent.id)?.stopReason).toBe("user_abort");
+    await restarted.shutdown();
+    await f.service.shutdown();
+    f.store.close();
+  });
+
+  test("shutdown does not resume a run the user already cancelled", async () => {
+    const f = await make();
+    const agent = await f.service.create("w");
+    await f.service.prompt(agent.id, "hi");
+    await waitForIdle(f.service, agent.id);
+    // A live run the user stopped: reason recorded, process still briefly
+    // alive while the cancel settles.
+    f.repos.agents.updateStatus(agent.id, "running");
+    await f.service.abort(agent.id);
+    expect(f.repos.agents.get(agent.id)?.stopReason).toBe("user_abort");
+    // Shutdown kills the settling process but must not override the
+    // recorded user stop with its own shutdown reason, nor continue it.
+    await f.service.shutdown();
+    expect(f.repos.agents.get(agent.id)?.stopReason).toBe("user_abort");
+    const restarted = new AgentService(f.repos, { sessionsRoot: join(f.root, "sessions"), manager: new PiRpcManager(4), pi: { executable: process.execPath, executableArgs: ["-e", script] } });
+    // Warming still respawns the process (uniform for all non-idle rows)
+    // but the recorded user stop vetoes the continuation.
+    expect(await restarted.warmAfterRestart()).toEqual({ warmed: [agent.id], continued: [], failed: [] });
+    expect(f.repos.agents.get(agent.id)?.stopReason).toBe("user_abort");
+    await restarted.shutdown();
+    await f.service.shutdown();
+    f.store.close();
+  });
+
+  test("reports needs-attention for an outstanding extension question", async () => {
     const attentionScript = `process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n');if(r.type==='get_entries')setTimeout(()=>process.stdout.write(JSON.stringify({type:'extension_ui_request',id:'q-1',method:'select',title:'Pick',options:['One','Two']})+'\\n'),5)}})`;
     const f = await make(10, ["-e", attentionScript]);
     const agent = await f.service.create("w");
     await pollExpect(() => {
       expect(f.service.snapshot(agent.id).lastKnownStatus).toBe("needs-attention");
-      expect(f.service.listQuickBlockers()).toContainEqual({ agentId: agent.id, reason: "needs-attention" });
-    });
-    await f.service.shutdown();
-    f.store.close();
-  });
-
-  test("listBlockers treats a get_state probe failure as an unknown blocker, not idle", async () => {
-    // Handshake (manager.start) and the post-boot reconcile() each issue one
-    // get_state; only the third (the drain probe) fails, so this exercises
-    // the probe's own error path without the process ever failing to start.
-    const failScript = `let n=0;process.stdin.on('data',d=>{for(const l of d.toString().split('\\n')){if(!l)continue;const r=JSON.parse(l);if(r.type==='get_state'){n++;if(n<=2){process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{isStreaming:false}})+'\\n')}else{process.stdout.write(JSON.stringify({type:'response',id:r.id,success:false,error:'boom'})+'\\n')}}else{process.stdout.write(JSON.stringify({type:'response',id:r.id,success:true,data:{}})+'\\n')}}})`;
-    const f = await make(10, ["-e", failScript]);
-    const agent = await f.service.create("w");
-    await pollExpect(async () => {
-      expect(f.service.listQuickBlockers()).toEqual([]);
-      expect(await f.service.listBlockers()).toContainEqual({ agentId: agent.id, reason: "unknown" });
     });
     await f.service.shutdown();
     f.store.close();

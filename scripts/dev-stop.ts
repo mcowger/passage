@@ -4,11 +4,12 @@ import { dirname, isAbsolute, join } from "node:path";
 import { readRecordedPort } from "./dev-port.ts";
 
 const DEFAULT_PID_FILE = join(import.meta.dir, "..", ".data", "dev.pid");
-/** No automatic kill deadline here mirrors the daemon itself (safe drain
- *  waits for an idle boundary; see AGENTS.md Pi process ownership): this is only how long the CLI blocks
- *  before reporting incomplete maintenance. It never escalates to a
- *  signal on its own -- that requires --force. */
-const SAFE_WAIT_MS = 30_000;
+/** Shutdown is cancel-then-kill and takes ~seconds (in-flight runs get the
+ *  abort trio plus a ~3s confirmation window; boot recovery resumes
+ *  whatever never confirmed). This is only how long the CLI blocks before
+ *  reporting incomplete maintenance. It never escalates to a signal on
+ *  its own -- that requires --force. */
+const SAFE_WAIT_MS = 10_000;
 const FORCE_WAIT_MS = 6_000;
 const SIGNAL_ESCALATION_WAIT_MS = 2_000;
 
@@ -57,17 +58,15 @@ async function waitForExit(pid: number, pidFile: string, timeoutMs: number): Pro
     }
     await Bun.sleep(100);
   }
-  return { stopped: false, pid, message: `Dev server (PID ${pid}) did not stop within ${timeoutMs}ms. It may be waiting on active agent work to drain; pass --force for an explicit forced stop.` };
+  return { stopped: false, pid, message: `Dev server (PID ${pid}) did not stop within ${timeoutMs}ms; pass --force for an explicit forced stop.` };
 }
 
 export type StopDevServerOptions = { force?: boolean; timeoutMs?: number };
 
-/** Default stop uses the daemon's own lifecycle API (safe shutdown:
- *  a safe request that waits for an idle boundary before actually
- *  exiting, with no automatic kill deadline on the daemon's side. `--force`
- *  is a separate, explicit decision -- it asks the lifecycle API for a
- *  forced/interrupting stop and, only if that is unreachable or does not
- *  finish in time, falls back to signal escalation (SIGTERM, then SIGKILL)
+/** Default stop uses the daemon's shutdown API (cancel in-flight runs with
+ *  a bounded confirmation window, then stop and exit; `--force` skips the
+ *  cancel phase). Only if the API is unreachable or does not finish in
+ *  time does this fall back to signal escalation (SIGTERM, then SIGKILL)
  *  the way this script always used to behave unconditionally. */
 export async function stopDevServer(pidFile = resolvePidFile(), options: StopDevServerOptions = {}): Promise<{ stopped: boolean; pid?: number; message: string }> {
   if (!existsSync(pidFile)) {
@@ -100,7 +99,7 @@ export async function stopDevServer(pidFile = resolvePidFile(), options: StopDev
 
   if (options.force) {
     if (port !== null) {
-      // Only wait on the lifecycle API if the request actually reached it
+      // Only wait on the shutdown API if the request actually reached it
       // -- an unresolved port has nothing to wait for.
       try {
         await requestDaemonShutdown(port, { force: true });
@@ -127,7 +126,7 @@ export async function stopDevServer(pidFile = resolvePidFile(), options: StopDev
       return { stopped: false, pid, message: `Dev server rejected the stop request (HTTP ${response.status}). Pass --force for an explicit forced stop.` };
     }
   } catch (error) {
-    return { stopped: false, pid, message: `Could not reach the dev server's lifecycle API on port ${port}: ${String(error)}. Pass --force for a signal-based stop.` };
+    return { stopped: false, pid, message: `Could not reach the dev server's shutdown API on port ${port}: ${String(error)}. Pass --force for a signal-based stop.` };
   }
   return await waitForExit(pid, pidFile, options.timeoutMs ?? SAFE_WAIT_MS);
 }

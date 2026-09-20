@@ -99,59 +99,6 @@ describe("Sidebar", () => {
     expect(html).not.toContain("v1.4.0");
   });
 
-  test("shows a begin-drain control while running and a cancel control with truthful blockers while draining", () => {
-    const runningHtml = ReactDOMServer.renderToString(
-      React.createElement(Sidebar, {
-        data: snapshot,
-        open: false,
-        onClose: () => {},
-        onSelect: () => {},
-        onNewProject: () => {},
-        agents: [],
-        daemon: { phase: "running", instanceId: "i-1", drainId: null, readinessRevision: 0, blockedCount: 0, blockers: [], blockersTruncated: false },
-      })
-    );
-    expect(runningHtml).toContain("Begin daemon drain for maintenance");
-
-    const drainingHtml = ReactDOMServer.renderToString(
-      React.createElement(Sidebar, {
-        data: snapshot,
-        open: false,
-        onClose: () => {},
-        onSelect: () => {},
-        onNewProject: () => {},
-        agents: [],
-        daemon: {
-          phase: "draining",
-          instanceId: "i-1",
-          drainId: "d-1",
-          readinessRevision: 1,
-          blockedCount: 1,
-          blockers: [{ agentId: "agt_1", reason: "running" }],
-          blockersTruncated: false,
-        },
-      })
-    );
-    expect(drainingHtml).toContain("daemon-drain-status");
-    expect(drainingHtml).toContain("Draining\u2026");
-    expect(drainingHtml).toContain("(1)");
-    expect(drainingHtml).toContain("agt_1 (running)");
-
-    // Absent daemon state hides the control entirely rather than showing a
-    // misleading default phase.
-    const noDaemonHtml = ReactDOMServer.renderToString(
-      React.createElement(Sidebar, {
-        data: snapshot,
-        open: false,
-        onClose: () => {},
-        onSelect: () => {},
-        onNewProject: () => {},
-        agents: [],
-      })
-    );
-    expect(noDaemonHtml).not.toContain("daemon-drain-status");
-  });
-
   test("the WS health indicator reflects real transport status, defaulting to checking rather than a false Connected", () => {
     const base = { data: snapshot, open: false, onClose: () => {}, onSelect: () => {}, onNewProject: () => {}, agents: [] };
 

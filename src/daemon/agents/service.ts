@@ -4,7 +4,7 @@ import { agentCapabilitiesSchema, type AgentHistory, type AgentStatus, type Time
 import { AttachmentCache, safeAttachmentContentType, withFileRefs } from "./attachments.ts";
 import { getSlashCommands, piCommandsToSlashCommands } from "./slash-commands.ts";
 import { agentFileSchema, agentImageSchema, type AgentFile, type AgentImage } from "../../shared/protocol/agents.ts";
-import type { DaemonBlocker } from "../../shared/protocol/daemon.ts";
+
 import { pageHistory, readPiHistory, type HistoryPage } from "./history/index.ts";
 import { TranscriptState, truncateRowForWire } from "./transcript/index.ts";
 import {
@@ -16,7 +16,7 @@ import {
   type PiProcessHandle,
   type PiRpcOptions,
 } from "./rpc/index.ts";
-import { MetadataRepositories, type Agent } from "../metadata/repositories.ts";
+import { MetadataRepositories, type Agent, type AgentStopReason } from "../metadata/repositories.ts";
 import { AgentTitleSuggester } from "./title-suggester.ts";
 import { normalizeAvailableModels } from "../models/catalog.ts";
 import { parsePiExtensionUiDialog } from "./ui.ts";
@@ -24,7 +24,6 @@ import { AgentError, ID } from "./errors.ts";
 import { errorFields, logger } from "../logging.ts";
 import { AgentRuntime, MAX_RUNTIME_DIAGNOSTICS, type Cancellation } from "./runtime.ts";
 import { AgentViews } from "./agentViews.ts";
-import { AgentBlockers } from "./agentBlockers.ts";
 import { AgentTitles } from "./agentTitles.ts";
 import type { AgentServiceEvent } from "./runtime.ts";
 // Re-exported for existing importers; new code should import from ./runtime.ts directly.
@@ -46,6 +45,11 @@ const DEFAULT_ABORT_TIMEOUT_MS = 30_000;
 /** Summarizing a large session is a single LLM call that can run for
  *  minutes; the default 10s RPC admission timeout would false-fail it. */
 const COMPACT_TIMEOUT_MS = 300_000;
+/** Bound for the whole shutdown cancel phase (all agents concurrently):
+ *  cancel in-flight runs and confirm settlement, then SIGTERM whatever is
+ *  left. Fits comfortably inside systemd's TimeoutStopSec; overruns are
+ *  safe anyway (SIGKILL lands the crash path, which boot recovery owns). */
+const SHUTDOWN_GRACE_MS = 3_000;
 /** Matches Pi's "session too small" compact refusal. */
 /** Matches Pi's documented rejection of a bare `prompt` sent while it is
  *  already streaming (see rpc.md "During streaming"): benign and
@@ -129,7 +133,6 @@ export type AgentHistoryResult = HistoryPage | { unpersisted: true; history: nul
 export class AgentService {
   private readonly runtime = new AgentRuntime();
   private readonly views: AgentViews;
-  private readonly blockers: AgentBlockers;
   private readonly titles: AgentTitles;
   private readonly manager: PiRpcManager;
   private readonly listLimit: number;
@@ -216,7 +219,6 @@ export class AgentService {
       requireAgent: (agentId) => this.requireAgent(agentId),
       requireWorkspace: (workspaceId) => this.requireWorkspace(workspaceId),
     });
-    this.blockers = new AgentBlockers(this.runtime, this.manager);
     this.titles = new AgentTitles({
       repositories: this.repositories,
       runtime: this.runtime,
@@ -230,10 +232,11 @@ export class AgentService {
    *  stopped must not trigger auto-continue spawns on the way out. */
   private shuttingDown = false;
 
-  /** Refuses new agent work while the daemon is draining/ready/stopping.
-   *  Called synchronously at the top of every new-work entry point, before
-   *  any validation or async work, so admission closes exactly at the
-   *  boundary `DaemonLifecycle.beginDrain()` set. */
+  /** Refuses new agent work once shutdown has closed admission. Called
+   *  synchronously at the top of every new-work entry point, before any
+   *  validation or async work, so admission closes exactly when the first
+   *  shutdown request arrives; already-admitted work is never affected by
+   *  a later `false`. */
   private assertAdmissionOpen(): void {
     if (!this.admissionGate()) throw new AgentError("draining", "Passage is draining; new agent work is not accepted");
   }
@@ -262,20 +265,30 @@ export class AgentService {
 
   /** Boot-time warm + continue, called after reconcileAfterRestart(). Every
    *  agent the restart left non-idle gets a fresh Pi process (same session
-   *  dir + ID, so transcript history resumes); ones that were mid-run
-   *  (running/stopping/needs-attention) additionally get the canned
-   *  continuation follow-up, spending their one auto-continue budget.
-   *  Initializing agents warm without a message (no work to continue) and
-   *  idle/archived agents are untouched. Bounded concurrency, never throws:
-   *  failures stay `interrupted` for lazy manual retry. */
+   *  dir + ID, so transcript history resumes); ones recorded as stopped
+   *  mid-run -- still reading running/stopping/needs-attention, or carrying
+   *  a `shutdown`/`crash` stop reason whose status later reads normalized
+   *  away -- additionally get the canned continuation follow-up, spending
+   *  their auto-continue budget. `user_abort` rows are never resumed. Other
+   *  candidates warm without a message; idle/error/archived agents are
+   *  untouched. Bounded concurrency, never throws: failures keep their
+   *  recorded reason and stay available for lazy manual retry (and the
+   *  next boot). */
   async warmAfterRestart(options?: { concurrency?: number }): Promise<{ warmed: string[]; continued: string[]; failed: string[] }> {
     const warmed: string[] = [];
     const continued: string[] = [];
     const failed: string[] = [];
     if (this.shuttingDown || !this.admissionGate()) return { warmed, continued, failed };
-    let previous: Array<{ id: string; status: string }>;
+    let previous: Array<{ id: string; status: string; stopReason: AgentStopReason | null }>;
     try {
-      previous = this.repositories.agents.listActiveRuntime(10_000).map((agent) => ({ id: agent.id, status: agent.lastKnownStatus }));
+      const active = this.repositories.agents.listActiveRuntime(10_000);
+      const candidates = this.repositories.agents.listResumeCandidates(10_000);
+      const byId = new Map<string, { id: string; status: string; stopReason: AgentStopReason | null }>();
+      for (const agent of active) byId.set(agent.id, { id: agent.id, status: agent.lastKnownStatus, stopReason: agent.stopReason });
+      for (const agent of candidates) {
+        if (!byId.has(agent.id)) byId.set(agent.id, { id: agent.id, status: agent.lastKnownStatus, stopReason: agent.stopReason });
+      }
+      previous = [...byId.values()];
     } catch (error) {
       logger("agent").warn("Warm-after-restart lookup failed", { event: "agent.warm_lookup_failed", ...errorFields(error) });
       return { warmed, continued, failed };
@@ -303,14 +316,27 @@ export class AgentService {
           continue;
         }
         warmed.push(entry.id);
-        if (AUTO_CONTINUE_STATUSES.has(entry.status)) {
+        // Resume what the record says was cut off mid-run -- whether the
+        // status still shows it or only the stop reason does. An explicit
+        // user stop vetoes any resume, however the status reads. A failed
+        // follow-up restores the reason (followUp clears it at entry) so
+        // the next boot sees the same recorded fact; success clears it.
+        const resumable = entry.stopReason !== "user_abort" && (AUTO_CONTINUE_STATUSES.has(entry.status) || entry.stopReason !== null);
+        if (resumable) {
           try {
             await this.followUp(entry.id, CONTINUATION_MESSAGE);
+            try { this.repositories.agents.updateStopReason(entry.id, null); } catch {}
             this.spendAutoContinueBudget(entry.id);
             continued.push(entry.id);
           } catch (cause) {
             // Warm process is live and idle; only the resume message was
-            // lost (drain racing boot). Manual prompt still works.
+            // lost (drain racing boot). Restore the reason and leave the
+            // agent for manual prompt or the next boot.
+            try {
+              if (entry.stopReason !== null && this.repositories.agents.get(entry.id)?.stopReason === null) {
+                this.repositories.agents.updateStopReason(entry.id, entry.stopReason);
+              }
+            } catch {}
             logger("agent").warn("Agent warm continue failed", { event: "agent.warm_continue_failed", agentId: entry.id, ...errorFields(cause) });
           }
         }
@@ -321,14 +347,6 @@ export class AgentService {
       logger("agent").info("Agent processes warmed after restart", { event: "agent.warm_completed", warmed: warmed.length, continued: continued.length, failed: failed.length });
     }
     return { warmed, continued, failed };
-  }
-
-  listQuickBlockers(): DaemonBlocker[] {
-    return this.blockers.listQuickBlockers();
-  }
-
-  async listBlockers(): Promise<DaemonBlocker[]> {
-    return this.blockers.listBlockers();
   }
 
   async create(workspaceId: string, title = "Agent"): Promise<AgentSnapshot> {
@@ -342,6 +360,7 @@ export class AgentService {
       piSessionPath: null,
       title,
       titleOverridden: title !== "Agent",
+      stopReason: null,
       modelPreference: null,
       thinkingPreference: null,
       lastKnownStatus: "initializing",
@@ -433,8 +452,10 @@ export class AgentService {
     const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.attachmentCache.storeImage(image))) : undefined;
     const fileRefs = await this.storeUploads(agentId, files);
     // A manual prompt is new user intent: restore the auto-continue budget
-    // a previous crash may have spent.
+    // a previous crash may have spent, and clear any recorded stop reason
+    // (the user took over; no phantom continuation later).
     this.runtime.autoContinued.delete(agentId);
+    try { this.repositories.agents.updateStopReason(agentId, null); } catch {}
     const process = await this.ensureProcess(agentId);
     this.beginRun(agentId);
     // The transcript journals the original text plus file metadata; the
@@ -468,6 +489,7 @@ export class AgentService {
     const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.attachmentCache.storeImage(image))) : undefined;
     const fileRefs = await this.storeUploads(agentId, files);
     this.runtime.autoContinued.delete(agentId);
+    try { this.repositories.agents.updateStopReason(agentId, null); } catch {}
     const process = await this.ensureProcess(agentId);
     await this.appendUserRow(agentId, text, imageRefs, fileRefs);
     await process.request({ type: "steer", message: withFileRefs(text, fileRefs), ...(validatedImages?.length ? { images: validatedImages } : {}) });
@@ -481,6 +503,7 @@ export class AgentService {
     const imageRefs = validatedImages?.length ? await Promise.all(validatedImages.map((image) => this.attachmentCache.storeImage(image))) : undefined;
     const fileRefs = await this.storeUploads(agentId, files);
     this.runtime.autoContinued.delete(agentId);
+    try { this.repositories.agents.updateStopReason(agentId, null); } catch {}
     const process = await this.ensureProcess(agentId);
     await this.appendUserRow(agentId, text, imageRefs, fileRefs);
     await process.request({ type: "follow_up", message: withFileRefs(text, fileRefs), ...(validatedImages?.length ? { images: validatedImages } : {}) });
@@ -501,6 +524,12 @@ export class AgentService {
       return;
     }
     if (agent.lastKnownStatus === "stopping" && this.runtime.cancellations.has(agentId)) return;
+    // Record the user's explicit stop before anything awaits: whatever
+    // happens next (including a shutdown racing this cancel), the recorded
+    // fact is user_abort, which boot recovery never resumes.
+    if (AUTO_CONTINUE_STATUSES.has(agent.lastKnownStatus)) {
+      try { this.repositories.agents.updateStopReason(agentId, "user_abort"); } catch {}
+    }
     const cancellation = { process, generation: process.generation };
     this.runtime.cancellations.set(agentId, cancellation);
     this.updateStatus(agentId, "stopping", "status", process.generation);
@@ -782,7 +811,12 @@ export class AgentService {
   }
 
   async stop(agentId: string): Promise<void> {
-    this.requireAgent(agentId);
+    const agent = this.requireAgent(agentId);
+    // An explicit stop owns the run's end like a user abort does: record
+    // it so boot recovery never resumes work the user asked to stop.
+    if (AUTO_CONTINUE_STATUSES.has(agent.lastKnownStatus)) {
+      try { this.repositories.agents.updateStopReason(agentId, "user_abort"); } catch {}
+    }
     this.detach(agentId);
     this.runtime.runStartedAt.delete(agentId);
     await this.manager.stop(agentId);
@@ -822,36 +856,94 @@ export class AgentService {
     return stopped;
   }
 
-  /** `options.interrupted` distinguishes step 6's two shutdown paths:
-   *  - Safe (default): every agent here was already verified idle by the
-   *    drain that reached `ready` (see DaemonLifecycle.commit), so there
-   *    is nothing meaningful to reconcile from stopping it. Detach first,
-   *    same as before -- an intentional, already-idle stop must not get
-   *    flagged as an error by the ordinary crash-handling path.
-   *  - Interrupted (explicit force): active work may really be getting cut
-   *    off. Keep each process's lifecycle listener attached while it is
-   *    stopped, so a forced exit still runs the ordinary onLifecycle
-   *    handling (final diagnostics, status, transcript error row) instead
-   *    of being silently dropped by an early detach, and await any
-   *    in-flight event/lifecycle reconciliation that stop triggered --
-   *    all while SQLite is still open. */
-  async shutdown(options?: { interrupted?: boolean }): Promise<void> {
-    // From here on no auto-continue may spawn: the interrupted-shutdown
-    // path keeps lifecycle listeners attached while stopping processes,
-    // and those exits must stay terminal.
-    this.shuttingDown = true;
-    // Let create()'s background boots finish (they clean up their own map
-    // entries) so they never write to a closed database after this returns.
-    await Promise.allSettled([...this.runtime.pendingStarts.values()]);
-    this.runtime.pendingStarts.clear();
-    if (options?.interrupted) {
-      await this.manager.shutdown();
-      await Promise.allSettled([...this.runtime.eventChains.values()]);
-      for (const agentId of this.runtime.subscriptions.keys()) this.detach(agentId);
-    } else {
-      for (const agentId of this.runtime.subscriptions.keys()) this.detach(agentId);
-      await this.manager.shutdown();
+    /** Shutdown cancel for one agent: clear queued work (nothing new may
+   *  start), abort the current run plus any running bash tool, then confirm
+   *  settlement via reconcile. Best-effort and bounded by the shutdown
+   *  phase's overall deadline; never throws. Skipped for agents with
+   *  nothing in flight: the kill phase stops their processes directly, and
+   *  onLifecycle's shutdown branch preserves whatever status they held.
+   *
+   *  Passage itself is stopping the run here, so it owes the resume nudge
+   *  whether or not the cancel confirms below: the one-shot marker is set
+   *  up front and the next boot sends the continuation. The one exception
+   *  is a user-initiated cancel already in flight -- shutdown must not
+   *  override an explicit user stop with a resume. */
+  private async abortForShutdown(agentId: string): Promise<void> {
+    const process = this.manager.get(agentId);
+    if (!process) return;
+    let agent;
+    try {
+      agent = this.requireAgent(agentId);
+    } catch {
+      return;
     }
+    if (agent.lastKnownStatus !== "running" && agent.lastKnownStatus !== "stopping") return;
+    // An explicit user stop owns the run's end: never mark those for
+    // resume (the kill phase still stops their processes below). Otherwise
+    // record shutdown as the reason -- first writer wins, so a user_abort
+    // recorded before or after this still stands.
+    if (agent.stopReason === "user_abort") return;
+    if (agent.stopReason === null) {
+      try { this.repositories.agents.updateStopReason(agentId, "shutdown"); } catch {}
+    }
+    const cancellation: Cancellation = { process, generation: process.generation };
+    this.runtime.cancellations.set(agentId, cancellation);
+    this.updateStatus(agentId, "stopping", "status", process.generation);
+    try {
+      // Same trio as user-initiated abort: queued messages can never start
+      // a new run (clear_queue), the model run stops (abort), and a bash
+      // tool holding the turn is killed (abort_bash, best-effort -- it
+      // rejects when no bash command is running).
+      await Promise.all([
+        process.request({ type: "clear_queue" }, SHUTDOWN_GRACE_MS),
+        process.request({ type: "abort_bash" }, SHUTDOWN_GRACE_MS).catch(() => undefined),
+        process.request({ type: "abort" }, SHUTDOWN_GRACE_MS),
+      ]);
+      if (this.manager.get(agentId) !== process || process.generation !== cancellation.generation) return;
+      await this.enqueue(agentId, () => this.reconcile(agentId, true));
+      // An aborted run may still have mutated the worktree (same backstop
+      // as user-initiated abort: settlement events never arrive for it).
+      const workspaceId = this.repositories.agents.get(agentId)?.workspaceId;
+      if (workspaceId) this.notifyWorkspaceGitChanged(workspaceId);
+    } catch {
+      // Kill phase is next; onLifecycle's shutdown branch preserves the
+      // status and leaves the resume marker for boot recovery.
+    } finally {
+      if (this.runtime.cancellations.get(agentId) === cancellation) this.runtime.cancellations.delete(agentId);
+    }
+  }
+
+  /** Fast shutdown, the daemon's only teardown path: cancel in-flight runs
+   *  (bounded -- see SHUTDOWN_GRACE_MS), confirm settlement, then stop
+   *  every remaining process. There is no drain-wait: kills land the same
+   *  exit path as a crash (status preserved + resume marker), and boot
+   *  recovery resumes whatever never confirmed. Overruns are safe anyway
+   *  (SIGKILL == crash path). `force` skips straight to the kill. Never
+   *  throws. */
+  async shutdown(options?: { force?: boolean }): Promise<void> {
+    // From here on no auto-continue may spawn: kills below must stay
+    // terminal within this daemon's life; the next boot owns resuming.
+    this.shuttingDown = true;
+    if (!options?.force) {
+      const abortPhase = (async () => {
+        // Let create()'s background boots finish (they clean up their own
+        // map entries) so they never write to a closed database after this
+        // returns.
+        await Promise.allSettled([...this.runtime.pendingStarts.values()]);
+        this.runtime.pendingStarts.clear();
+        await Promise.allSettled([...this.runtime.subscriptions.keys()].map((agentId) => this.abortForShutdown(agentId)));
+      })();
+      await Promise.race([abortPhase, Bun.sleep(SHUTDOWN_GRACE_MS)]);
+    }
+    // Listeners stay attached through the kill so each exit runs the
+    // ordinary onLifecycle handling: with the gate closed it preserves the
+    // pre-kill status, journals the exit row, and leaves the resume marker
+    // instead of reporting an error for a kill the daemon itself ordered.
+    await this.manager.shutdown();
+    // Await the kill-triggered chains (above) so nothing writes past
+    // SQLite close below, then detach.
+    await Promise.allSettled([...this.runtime.eventChains.values()]);
+    for (const agentId of this.runtime.subscriptions.keys()) this.detach(agentId);
     this.runtime.listeners.clear();
     this.runtime.previousRevisions.clear();
     this.runtime.leaves.clear();
@@ -859,6 +951,7 @@ export class AgentService {
     this.runtime.compacting.clear();
     this.runtime.titleSuggestions.clear();
     this.runtime.runStartedAt.clear();
+    this.runtime.cancellations.clear();
     this.runtime.eventChains.clear();
     this.runtime.transcripts.clear();
     this.runtime.transcriptSeeds.clear();
@@ -1022,9 +1115,13 @@ export class AgentService {
 
   private async onLifecycle(agentId: string, event: PiLifecycleEvent): Promise<void> {
     if (this.runtime.subscriptions.get(agentId)?.generation !== event.generation) return;
-    // Captured before the error status below overwrites it: decides whether
-    // this exit deserves an automatic continuation.
-    const previousStatus = this.repositories.agents.get(agentId)?.lastKnownStatus;
+    // Captured before the status below overwrites it: decides whether this
+    // exit deserves an automatic continuation. An explicit user stop owns
+    // the run's end unconditionally -- its recorded reason is never
+    // overwritten here and it is never auto-continued.
+    const previous = this.repositories.agents.get(agentId);
+    const previousStatus = previous?.lastKnownStatus;
+    const userStopped = previous?.stopReason === "user_abort";
     this.runtime.diagnostics.set(agentId, {
       generation: event.generation,
       exitStatus: `${event.lifecycle} (${event.exitCode})`,
@@ -1037,11 +1134,33 @@ export class AgentService {
     const message = `Pi process exited (${event.exitCode})`;
     const state = await this.getTranscript(agentId);
     this.emitRowUpsert(agentId, state.appendError(message));
+    // An exit that lands while the daemon is draining/stopping was caused
+    // by our own shutdown (SIGTERM to the process group, forced stop): the
+    // admission gate is already closed, so an auto-continue here would only
+    // fail -- and persisting `error` would hide the run from boot recovery.
+    // Leave the pre-kill status untouched so warmAfterRestart() sees the
+    // true state (running stays running) and resumes it on next boot.
+    if (this.shuttingDown || !this.admissionGate()) {
+      // Record shutdown as the reason when the kill interrupted a run:
+      // later reads may normalize the preserved status to interrupted or
+      // error, but the reason survives them and the next boot sweep
+      // resumes the run. Idle deaths record nothing (nothing to continue).
+      if (!userStopped && previousStatus !== undefined && AUTO_CONTINUE_STATUSES.has(previousStatus)) {
+        try { this.repositories.agents.updateStopReason(agentId, "shutdown"); } catch {}
+      }
+      logger("agent").info("Agent Pi process ended during shutdown; left for boot recovery", { event: "agent.process_ended_at_shutdown", agentId, generation: event.generation, previousStatus });
+      return;
+    }
+    // Record unexpected mid-run exits as crashes (same survival rule as
+    // above); the auto-continue attempt below clears it on success.
+    if (!userStopped && previousStatus !== undefined && AUTO_CONTINUE_STATUSES.has(previousStatus)) {
+      try { this.repositories.agents.updateStopReason(agentId, "crash"); } catch {}
+    }
     this.updateStatus(agentId, "error", "attention", event.generation, message);
     // A run that never went idle but lost its process gets one automatic
     // continuation (same session dir + ID, canned follow-up). Idle deaths
-    // stay a plain error for the user to retry manually.
-    if (previousStatus !== undefined && AUTO_CONTINUE_STATUSES.has(previousStatus)) {
+    // -- and explicit user stops -- stay terminal for manual retry.
+    if (!userStopped && previousStatus !== undefined && AUTO_CONTINUE_STATUSES.has(previousStatus)) {
       await this.autoContinueAfterDisconnect(agentId, previousStatus);
     }
   }
@@ -1072,18 +1191,32 @@ export class AgentService {
    *  Skipped while shutting down or draining so stops stay terminal. */
   private async autoContinueAfterDisconnect(agentId: string, previousStatus: string): Promise<void> {
     if (this.shuttingDown || this.isAutoContinueBudgetSpent(agentId)) return;
+    let resumeReason: AgentStopReason | null;
     try {
-      this.requireAgent(agentId);
+      const agent = this.requireAgent(agentId);
+      resumeReason = agent.stopReason;
+      if (resumeReason === "user_abort") return;
     } catch {
       return;
     }
     try {
       await this.followUp(agentId, CONTINUATION_MESSAGE);
+      // followUp() clears the recorded reason at entry; re-clear
+      // defensively so a failed clear above can never resurrect a phantom
+      // continuation on the next boot.
+      try { this.repositories.agents.updateStopReason(agentId, null); } catch {}
       this.spendAutoContinueBudget(agentId);
       logger("agent").info("Agent auto-continued after disconnect", { event: "agent.auto_continued", agentId, previousStatus });
     } catch (cause) {
-      // Follow-up enforces the admission gate itself: a drain/shutdown (or
-      // a respawn failure) just leaves the error status for manual retry.
+      // followUp() cleared the reason at entry but the resume never
+      // landed: restore it so the next boot still sees the recorded fact.
+      // (The gate enforcing itself here just leaves the error status for
+      // manual retry in the meantime.)
+      try {
+        if (resumeReason !== null && this.repositories.agents.get(agentId)?.stopReason === null) {
+          this.repositories.agents.updateStopReason(agentId, resumeReason);
+        }
+      } catch {}
       logger("agent").warn("Agent auto-continue failed", { event: "agent.auto_continue_failed", agentId, previousStatus, ...errorFields(cause) });
     }
   }
