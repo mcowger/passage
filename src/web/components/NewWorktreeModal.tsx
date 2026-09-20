@@ -25,6 +25,49 @@ import { Alert, AlertDescription } from "./ui/alert.tsx";
 import { GitBranch, RefreshCw, FolderDown, PlusCircle } from "lucide-react";
 import { ProjectIconBadge } from "./ProjectIcon.tsx";
 
+const FOLDER_SUFFIX_LENGTH = 4;
+const FOLDER_SUFFIX_ALPHABET = "abcdefghijklmnopqrstuvwxyz";
+
+export function randomFolderSuffix(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(FOLDER_SUFFIX_LENGTH));
+  return Array.from(bytes, (b) => FOLDER_SUFFIX_ALPHABET[b % FOLDER_SUFFIX_ALPHABET.length]).join("");
+}
+
+/** "add paste support" -> "add-paste-support" (lowercase, sanitized, no prefix). */
+export function slugifyGoal(goal: string): string {
+  return goal
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60)
+    .replace(/-+$/g, "");
+}
+
+/** "add paste support" -> "Add Paste Support" (title cased). */
+export function titleCaseGoal(goal: string): string {
+  const words = goal
+    .replace(/[-_]+/g, " ")
+    .replace(/[^a-zA-Z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+  return words.join(" ").slice(0, 70);
+}
+
+/** Non-LLM live pre-fill derived from the goal text. The folder suffix is
+ *  caller-provided so it stays stable while the user types. */
+export function prefillFromGoal(goal: string, folderSuffix: string): { label: string; branch: string; folder: string } {
+  const slug = slugifyGoal(goal);
+  if (!slug) return { label: "", branch: "", folder: "" };
+  return {
+    label: titleCaseGoal(goal),
+    branch: slug,
+    folder: `${slug}--wk_${folderSuffix}`,
+  };
+}
+
 type Props = {
   projects: Project[];
   locations: WorktreeLocation[];
@@ -88,6 +131,20 @@ export function NewWorktreeModal({
   const [suggesting, setSuggesting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  // Random folder suffix generated once per modal instance so the live
+  // pre-filled folder name stays stable while the user types.
+  const [folderSuffix] = useState(() => randomFolderSuffix());
+  // Fields the user has edited by hand are left alone by live pre-fill;
+  // AI Suggest overwrites everything and clears these flags.
+  const [touched, setTouched] = useState({ label: false, branch: false, folder: false });
+
+  const handlePurposeChange = (next: string) => {
+    setPurpose(next);
+    const prefill = prefillFromGoal(next, folderSuffix);
+    if (!touched.label) setLabel(prefill.label);
+    if (!touched.branch) setBranch(prefill.branch || "feature/worktree");
+    if (!touched.folder) setFolder(prefill.folder);
+  };
 
   // Discover Tab State
   const [discovered, setDiscovered] = useState<DiscoveredWorktree[]>([]);
@@ -125,6 +182,7 @@ export function NewWorktreeModal({
       setLabel(suggestion.label);
       setBranch(suggestion.branch);
       setFolder(suggestion.folder);
+      setTouched({ label: false, branch: false, folder: false });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to generate suggestions");
     } finally {
@@ -368,7 +426,7 @@ export function NewWorktreeModal({
                     className="h-8 text-xs flex-1 min-w-0 w-auto"
                     placeholder="e.g. Implement customer webhook retry backoff"
                     value={purpose}
-                    onChange={(e) => setPurpose(e.target.value)}
+                    onChange={(e) => handlePurposeChange(e.target.value)}
                   />
                   <Button
                     type="button"
@@ -383,7 +441,7 @@ export function NewWorktreeModal({
                   </Button>
                 </div>
               </label>
-              <p className="text-[11px] text-muted-foreground break-words min-w-0">Type your goal and click Suggest to auto-fill metadata.{suggestModel?.trim() ? ` Uses model ${suggestModel.trim()}${suggestThinkingLevel?.trim() ? ` (${suggestThinkingLevel.trim()})` : ""} (Settings).` : " Uses the default model (change in Settings)."}</p>
+              <p className="text-[11px] text-muted-foreground break-words min-w-0">Label, branch, and folder pre-fill as you type. Click Suggest to generate AI metadata instead (overwrites all fields).{suggestModel?.trim() ? ` Uses model ${suggestModel.trim()}${suggestThinkingLevel?.trim() ? ` (${suggestThinkingLevel.trim()})` : ""} (Settings).` : " Uses the default model (change in Settings)."}</p>
             </div>
 
             <label className="flex flex-col gap-1 text-xs font-medium">
@@ -393,7 +451,7 @@ export function NewWorktreeModal({
                 className="h-8 text-xs"
                 placeholder="e.g. Webhook retry logic"
                 value={label}
-                onChange={(e) => setLabel(e.target.value)}
+                onChange={(e) => { setLabel(e.target.value); setTouched((prev) => ({ ...prev, label: true })); }}
                 required
               />
             </label>
@@ -420,7 +478,7 @@ export function NewWorktreeModal({
                 className="h-8 text-xs font-mono"
                 placeholder={branchMode === "new" ? "e.g. feature/webhook-retries" : "e.g. main or a commit SHA"}
                 value={branch}
-                onChange={(e) => setBranch(e.target.value)}
+                onChange={(e) => { setBranch(e.target.value); setTouched((prev) => ({ ...prev, branch: true })); }}
                 required
                 aria-label={branchMode === "new" ? "New branch name" : "Existing branch or ref"}
               />
@@ -451,7 +509,7 @@ export function NewWorktreeModal({
                 className="h-8 text-xs font-mono"
                 placeholder="e.g. webhook-retries--wk_7d2a"
                 value={folder}
-                onChange={(e) => setFolder(e.target.value)}
+                onChange={(e) => { setFolder(e.target.value); setTouched((prev) => ({ ...prev, folder: true })); }}
               />
               <p className="text-[11px] text-muted-foreground font-normal">
                 The sanitized project name is prepended automatically (e.g. myproject-webhook-retries--wk_7d2a).
