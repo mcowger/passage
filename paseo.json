@@ -1,7 +1,11 @@
 {
   "worktree": {
-    "setup": ["./init_worktree.sh"],
-    "servicePorts": { "portScript": "./scripts/dev-port.ts" }
+    "setup": [
+      "./init_worktree.sh"
+    ],
+    "servicePorts": {
+      "portScript": "./scripts/dev-port.ts"
+    }
   },
   "scripts": {
     "dev": {

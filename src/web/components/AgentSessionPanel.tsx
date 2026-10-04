@@ -360,16 +360,23 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
           && envelopePayload.runStartedAt > 0
           ? envelopePayload.runStartedAt
           : undefined;
+        // Side effects (onAgentChangedRef) must never live inside a setState
+        // updater: React can replay updater functions during an unrelated
+        // component's render (e.g. bailout recomputation), which turned this
+        // into a real "Cannot update a component while rendering a different
+        // component" violation targeting the App tree. Compute the next agent
+        // from a plain local seeded by the ref (kept in sync every render) so
+        // each step below chains correctly, then set state and notify as two
+        // separate, ordinary (non-reducer) side effects.
+        let nextAgent = agentRef.current;
         if (state.status || runStartedAt !== undefined) {
-          setAgent((current) => {
-            const next = {
-              ...current,
-              ...(state.status ? { status: state.status } : {}),
-              ...(runStartedAt !== undefined ? { runStartedAt } : {}),
-            };
-            onAgentChangedRef.current?.(next);
-            return next;
-          });
+          nextAgent = {
+            ...nextAgent,
+            ...(state.status ? { status: state.status } : {}),
+            ...(runStartedAt !== undefined ? { runStartedAt } : {}),
+          };
+          setAgent(nextAgent);
+          onAgentChangedRef.current?.(nextAgent);
         }
         if (value && typeof value === "object" && "type" in value) {
           const type = (value as { type?: string }).type;
@@ -380,28 +387,23 @@ export function AgentSessionPanel({ agent: initialAgent, api, onAgentChanged, pr
             trackStreamFrame(streamActivityRef.current, measureEnvelopeBytes(value), null);
           }
           if (type === "attention" && payload?.id) {
-            setAgent((current) => {
-              const next = { ...current, pendingUiRequest: payload };
-              onAgentChangedRef.current?.(next);
-              return next;
-            });
+            nextAgent = { ...nextAgent, pendingUiRequest: payload };
+            setAgent(nextAgent);
+            onAgentChangedRef.current?.(nextAgent);
           } else if (type === "settled" || type === "agent_settled" || (state.status && state.status !== "needs-attention")) {
-            setAgent((current) => {
-              const next = { ...current, pendingUiRequest: undefined };
-              onAgentChangedRef.current?.(next);
-              return next;
-            });
+            nextAgent = { ...nextAgent, pendingUiRequest: undefined };
+            setAgent(nextAgent);
+            onAgentChangedRef.current?.(nextAgent);
           }
           if (type === "settled" || type === "agent_settled") void load();
           if (type === "transcript_reset") void load();
           if (type === "title" && payload && typeof payload.title === "string" && payload.title.trim()) {
             const title = payload.title.trim().slice(0, 256);
-            setAgent((current) => {
-              if (current.title === title) return current;
-              const next = { ...current, title };
-              onAgentChangedRef.current?.(next);
-              return next;
-            });
+            if (nextAgent.title !== title) {
+              nextAgent = { ...nextAgent, title };
+              setAgent(nextAgent);
+              onAgentChangedRef.current?.(nextAgent);
+            }
           }
           if (type === "row_upsert" && payload) {
             const parsed = timelineItemPayloadSchema.safeParse(payload.row);
